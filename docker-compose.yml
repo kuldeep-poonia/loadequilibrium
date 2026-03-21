@@ -1,0 +1,44 @@
+version: "3.9"
+services:
+  loadequilibrium:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      LISTEN_ADDR: ":8080"
+      TICK_INTERVAL: "2s"
+      TICK_DEADLINE: "1800ms"
+      RING_BUFFER_DEPTH: "300"
+      MAX_SERVICES: "200"
+      STALE_SERVICE_AGE: "5m"
+      SIM_BUDGET: "45ms"
+      SIM_HORIZON_MS: "60000"
+      SIM_SHOCK_FACTOR: "2.0"
+      UTILISATION_SETPOINT: "0.70"
+      COLLAPSE_THRESHOLD: "0.90"
+      WINDOW_FRACTION: "0.10"
+      EWMA_FAST_ALPHA: "0.30"
+      EWMA_SLOW_ALPHA: "0.10"
+      SPIKE_Z_SCORE: "3.0"
+      DATABASE_URL: "postgres://le:le@postgres:5432/le?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: le
+      POSTGRES_PASSWORD: le
+      POSTGRES_DB: le
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U le"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

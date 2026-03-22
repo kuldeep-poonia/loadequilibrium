@@ -12,7 +12,9 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/dashboard"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
+	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
+	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 )
@@ -46,7 +48,28 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	orch := runtime.New(cfg, store, hub, pw)
+	act := actuator.NewCoalescingActuator(1024)
+	
+	scenarios := scenario.NewEngine(
+		&scenario.ResettableBurst{
+			ScenarioID:    "burst-frontend",
+			TargetService: "frontend",
+			StartTick:     10,
+			DurationTicks: 60,
+			MaxFactor:     3.0,
+			RepeatEvery:   100,
+		},
+		&scenario.ResettableBurst{
+			ScenarioID:    "burst-payment",
+			TargetService: "payment",
+			StartTick:     50,
+			DurationTicks: 60,
+			MaxFactor:     2.5,
+			RepeatEvery:   100,
+		},
+	)
+
+	orch := runtime.New(cfg, store, hub, pw, act, scenarios)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,6 +89,7 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutCtx)
+	_ = act.Close(shutCtx)
 	pw.Close() // Writer.Close() is nil-safe
 
 	log.Println("[loadequilibrium] exit")

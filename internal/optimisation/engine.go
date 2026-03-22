@@ -1,20 +1,24 @@
 package optimisation
 
 import (
+	"log"
 	"math"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
+	"github.com/loadequilibrium/loadequilibrium/internal/simulation"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
 // Engine runs the optimisation and control loop across all services.
 type Engine struct {
 	cfg       *config.Config
-	pids      map[string]*PIDController
-	lastScale map[string]float64
-	mpc       *MPCHorizonEval
+	pids          map[string]*PIDController
+	lastScale     map[string]float64
+	stictionCount map[string]int
+	mpc           *MPCHorizonEval
+	observer      *AdaptiveStateObserver
 	// pressureLevel is set by the orchestrator each tick before RunControl is called.
 	// 0=nominal  1=elevated  2=high  3=critical
 	// Higher levels make PID more aggressive to defend against runtime overload.
@@ -40,10 +44,12 @@ func NewEngine(cfg *config.Config) *Engine {
 		horizonTicks = 5
 	}
 	return &Engine{
-		cfg:       cfg,
-		pids:      make(map[string]*PIDController),
-		lastScale: make(map[string]float64),
-		mpc:       NewMPCHorizonEval(horizonTicks, cfg.TickInterval.Seconds(), cfg.UtilisationSetpoint),
+		cfg:           cfg,
+		pids:          make(map[string]*PIDController),
+		lastScale:     make(map[string]float64),
+		stictionCount: make(map[string]int),
+		mpc:           NewMPCHorizonEval(horizonTicks, cfg.TickInterval.Seconds(), cfg.UtilisationSetpoint),
+		observer:      NewAdaptiveStateObserver(),
 	}
 }
 
@@ -53,8 +59,11 @@ func NewEngine(cfg *config.Config) *Engine {
 func (e *Engine) RunControl(
 	bundles map[string]*modelling.ServiceModelBundle,
 	costGradients map[string]ServiceCostContribution,
+	lastSimResult *simulation.SimulationResult,
+	topo topology.GraphSnapshot,
 	now time.Time,
 ) map[string]ControlDirective {
+	observerSignals := e.observer.Observe(bundles, lastSimResult, topo)
 	directives := make(map[string]ControlDirective, len(bundles))
 
 	horizonTicks := e.cfg.PredictiveHorizonTicks
@@ -100,9 +109,41 @@ func (e *Engine) RunControl(
 
 		output := pid.Update(rho, now)
 
-		// Scale factor: positive output (over setpoint) → scale up capacity.
-		// Bounded to [0.5, 3.0] to prevent extreme recommendations.
-		scaleFactor := math.Max(0.5, math.Min(1.0+output, 3.0))
+		// D. Soft Constraint Dynamics: replacing hard 0.5 saturation with a smooth exponential barrier
+		bareScale := 1.0 + output
+		var scaleFactor float64
+		if bareScale < 0.6 {
+			// Asymptote towards 0.45 smoothly instead of a hard panic clamp at 0.5
+			scaleFactor = 0.45 + 0.15*math.Exp((bareScale-0.6)/0.15)
+		} else {
+			scaleFactor = math.Min(bareScale, 3.0)
+		}
+
+		obs := observerSignals[id]
+
+		// B. Stability Margin Awareness: Modulate throttling aggressiveness
+		if scaleFactor < 1.0 && obs.StabilityEnvelope > 0.3 {
+			stabilityRelaxation := (obs.StabilityEnvelope - 0.3) * 0.25
+			scaleFactor = math.Min(scaleFactor+stabilityRelaxation, 1.0)
+		}
+
+		// A. Recovery Incentive Term: Reward gradual utilisation restoration when queue pressure decreases
+		recoveryIncentive := 0.0
+		if obs.RecoveryActivation > 0 && scaleFactor < 0.9 {
+			recoveryIncentive = math.Min(obs.RecoveryActivation*0.5, 0.20)
+			scaleFactor += recoveryIncentive
+		}
+
+		// C. Predictive Relief Estimation: Forecast decay
+		predictedReliefMs := 0.0
+		if lastSimResult != nil && lastSimResult.RecoveryConvergenceMs > 0 {
+			predictedReliefMs = lastSimResult.RecoveryConvergenceMs
+		}
+		predictedRelief := 0.0
+		if obs.DisturbanceDecay > 0 {
+			predictedRelief = math.Min(obs.DisturbanceDecay*0.1, 0.1)
+			scaleFactor += predictedRelief
+		}
 
 		// Actuation bound: limit per-tick scale factor change.
 		// Under runtime pressure, widen the bound so the controller can respond more
@@ -148,8 +189,25 @@ func (e *Engine) RunControl(
 			// Non-convex surface: rely more on planner which searched more broadly.
 			scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
 		}
-		scaleFactor = math.Max(0.5, math.Min(scaleFactor, 3.0))
+		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 3.0))
+		
+		// E. Anti-Stiction Mechanism: Detect stuck limits and inject exploratory bump
+		stictionVal := 0
+		if math.Abs(scaleFactor-e.lastScale[id]) < 0.02 && scaleFactor < 0.75 {
+			e.stictionCount[id]++
+			stictionVal = e.stictionCount[id]
+			if stictionVal > 4 { // 5th tick of being stuck
+				scaleFactor += 0.08 // explicit exploratory adjustment
+				e.stictionCount[id] = 0
+			}
+		} else {
+			e.stictionCount[id] = 0
+		}
 		e.lastScale[id] = scaleFactor
+
+		// F. Observability: Emitting structured logs
+		log.Printf("[control] svc=%s bare_out=%.3f recovery_incentive=%.3f stability_margin=%.3f predicted_relief_ms=%.0f adjusted_limit=%.3f stiction=%d",
+			id, bareScale, recoveryIncentive, b.Stability.StabilityMargin, predictedReliefMs, scaleFactor, stictionVal)
 
 		cgVal := 0.0
 		if cg, ok := costGradients[id]; ok {

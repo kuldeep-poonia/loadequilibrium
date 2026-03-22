@@ -1,22 +1,69 @@
 package modelling
 
 import (
+	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
+	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
+// PhysicalQueueState maintains continuous system momentum between disjoint ticks.
+type PhysicalQueueState struct {
+	accumulatedBacklog   float64
+	arrivalMomentum      float64
+	localArrivalEwma     float64
+	delayBuffer          [3]float64
+	delayIdx             int
+	lastTickTime         time.Time
+}
+
+// QueuePhysicsEngine encapsulates the Stateful Erlang-C fluid approximations.
+type QueuePhysicsEngine struct {
+	mu     sync.Mutex
+	states map[string]*PhysicalQueueState
+}
+
+// NewQueuePhysicsEngine returns an initialised physics solver.
+func NewQueuePhysicsEngine() *QueuePhysicsEngine {
+	return &QueuePhysicsEngine{
+		states: make(map[string]*PhysicalQueueState),
+	}
+}
+
+// Prune cleans up dead services.
+func (pe *QueuePhysicsEngine) Prune(activeIDs map[string]struct{}) {
+	pe.mu.Lock()
+	defer pe.mu.Unlock()
+	for id := range pe.states {
+		if _, ok := activeIDs[id]; !ok {
+			delete(pe.states, id)
+		}
+	}
+}
+
 // RunQueueModel computes queueing analysis using M/M/c (Erlang-C) as the primary
-// model, with M/G/1 PKC correction for service-time variance and network physics:
-//   - Coupled effective arrival rate from upstream dependency graph
-//   - Congestion feedback: downstream saturation inflates this service's service time
-//   - Path saturation horizon with linear + acceleration term
-//   - Signal trust weighting: low ConfidenceScore scales back trend and CI estimates
-//   - Numerical safety: NaN/Inf guards at all computed quantities
-//
-// medianMode selects the burst-resistant arrival rate estimator (Winsorised).
-func RunQueueModel(w *telemetry.ServiceWindow, medianMode bool) QueueModel {
+// model, upgraded with continuous physical accumulation dynamics.
+func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap topology.GraphSnapshot, medianMode bool) QueueModel {
+	pe.mu.Lock()
+	st, ok := pe.states[w.ServiceID]
+	if !ok {
+		st = &PhysicalQueueState{
+			lastTickTime: time.Now(),
+			localArrivalEwma: w.MeanRequestRate,
+		}
+		pe.states[w.ServiceID] = st
+	}
+	pe.mu.Unlock()
+
+	dt := time.Since(st.lastTickTime).Seconds()
+	if dt <= 0 || dt > 10.0 {
+		dt = 2.0 // default tick clamp
+	}
+	st.lastTickTime = time.Now()
+
 	m := QueueModel{
 		ServiceID:  w.ServiceID,
 		ComputedAt: time.Now(),
@@ -34,223 +81,87 @@ func RunQueueModel(w *telemetry.ServiceWindow, medianMode bool) QueueModel {
 	// trustWeight ∈ [0.1, 1.0]: 1.0 = full trust, 0.1 = almost no trust.
 	trustWeight := math.Max(w.ConfidenceScore, 0.10)
 
-	// ── Delayed metric inference ─────────────────────────────────────────────
-	// When telemetry is stale (LastObservedAt significantly old), extrapolate
-	// the arrival rate forward using the utilisation trend rather than using the
-	// last raw observation directly.
-	//
-	// This implements "delayed metric inference": if the last report is T seconds
-	// old, the best estimate of current λ is: λ_est = λ_last × (1 + trend × T)
-	// clamped to [0.5×λ_last, 2×λ_last] to prevent wild extrapolation.
-	//
-	// The inference degrades gracefully: confidence is already penalised by
-	// stalePenalty, so this only affects the arrival rate used in the model
-	// when the signal is stale but not yet pruned.
-	inferredArrivalRate := w.LastRequestRate
-	if !w.LastObservedAt.IsZero() {
-		ageSec := time.Since(w.LastObservedAt).Seconds()
-		// Apply inference only when noticeably stale (> 1 tick interval, approx 2s)
-		// and we have a trend estimate from the window.
-		if ageSec > 2.0 && w.SampleCount >= 3 {
-			// Quick trend estimate: d(λ)/dt ≈ (LastRequestRate - MeanRequestRate) / halfWindowSec
-			halfWindowSec := float64(w.SampleCount) * 2.0 / 2.0
-			if halfWindowSec > 0 {
-				dLambdaDt := (w.LastRequestRate - w.MeanRequestRate) / halfWindowSec
-				extrapolated := w.LastRequestRate + dLambdaDt*ageSec*trustWeight
-				// Clamp: ±50% of last known rate to prevent runaway inference.
-				extrapolated = math.Max(extrapolated, w.LastRequestRate*0.5)
-				extrapolated = math.Min(extrapolated, w.LastRequestRate*2.0)
-				if extrapolated > 0 {
-					inferredArrivalRate = extrapolated
-				}
-			}
-		}
-	}
-	// ── Arrival rate estimation ───────────────────────────────────────────────
-	if medianMode {
-		m.ArrivalRate = medianBiasedRate(inferredArrivalRate, w.MeanRequestRate, w.StdRequestRate)
-	} else {
-		m.ArrivalRate = 0.6*inferredArrivalRate + 0.4*w.MeanRequestRate
-	}
-	if math.IsNaN(m.ArrivalRate) || m.ArrivalRate < 0 {
-		m.ArrivalRate = w.MeanRequestRate
-	}
-
-	// ── Concurrency ───────────────────────────────────────────────────────────
-	c := math.Max(math.Round(w.MeanActiveConns), 1)
+	// F. Capacity-Normalised Dynamics
+	// F. Capacity-Normalised Dynamics
+	c := math.Max(math.Round(w.MeanActiveConns), 1.0)
 	m.Concurrency = c
 
-	// ── Service time estimation with congestion feedback ─────────────────────
-	// Observed latency = service time + queue wait. When queue depth > 0, the
-	// observed latency is inflated by waiting time. We deconvolve:
-	//   E[S] ≈ observed_latency × (1 - queueFraction × 0.5)
-	//
-	// Congestion feedback: if this service's own queue is deep, downstream
-	// dependencies may be slow-returning — they see our requests piling up and
-	// their response latencies to us increase. We model this by inflating the
-	// base service time estimate when the local queue depth is above 10% of
-	// active connections. This captures the HOL (Head-of-Line) blocking effect
-	// where a backlogged service incurs additional latency per request.
-	queueFraction := math.Min(w.LastQueueDepth/(w.MeanActiveConns+1), 0.8)
-	serviceTimeMs := w.MeanLatencyMs * (1.0 - queueFraction*0.5)
+	// C. Backlog Accumulation Memory & A. Arrival Burst Inertia
+	// TelemetryCoupler already applies topology delay to w.MeanRequestRate.
+	currentArrival := w.MeanRequestRate
+	if currentArrival > st.arrivalMomentum {
+		st.arrivalMomentum = 0.8*currentArrival + 0.2*st.arrivalMomentum // fast attack on bursts
+	} else {
+		st.arrivalMomentum = 0.2*currentArrival + 0.8*st.arrivalMomentum // slow momentum decay
+	}
+	m.ArrivalRate = st.arrivalMomentum
 
-	// Congestion feedback amplification: deep local queue → inflate service time.
-	// When qdepth > 20% of active connections, latency has an additional
-	// contribution from downstream back-pressure. Model as linear amplification
-	// capped at 2.0× (prevents runaway estimates from a single deep-queue observation).
-	if queueFraction > 0.20 {
-		// Each 10% of queue fraction beyond 20% adds 5% to service time.
-		feedbackInflation := 1.0 + (queueFraction-0.20)*0.5
-		if feedbackInflation > 2.0 {
-			feedbackInflation = 2.0
-		}
-		serviceTimeMs *= feedbackInflation
+	// D. Latency Feedback Coupling
+	// Normalise accumulated queue across concurrency
+	qRatio := st.accumulatedBacklog / c
+
+	// MINIMAL PATCH: TelemetryCoupler already persists physical latency penalties into
+	// w.MeanLatencyMs. We use it directly to prevent compounding exponential explosions.
+	effectiveLatency := w.MeanLatencyMs
+	if effectiveLatency <= 0 {
+		effectiveLatency = 50.0
 	}
 
-	// Guard: service time must be positive and finite.
-	if serviceTimeMs <= 0 || math.IsNaN(serviceTimeMs) || math.IsInf(serviceTimeMs, 0) {
-		serviceTimeMs = w.MeanLatencyMs
+	// B. Service Saturation Model (Resource contention collapse)
+	serviceRatePerServer := 1000.0 / math.Max(effectiveLatency, 1e-3)
+	effectiveServiceRate := c * serviceRatePerServer
+	
+	if qRatio > 2.0 {
+		degradation := math.Max(0.5, 1.0 - (qRatio-2.0)*0.1)
+		effectiveServiceRate *= degradation
 	}
-	serviceTimeSec := serviceTimeMs / 1000.0
+	m.ServiceRate = effectiveServiceRate
 
-	muPerServer := 1.0 / serviceTimeSec
-	m.ServiceRate = c * muPerServer
-
-	// ── Coupled effective arrival rate ────────────────────────────────────────
-	// Adjust the arrival rate to account for inbound load injected from upstream
-	// callers in the dependency graph. This implements Part B req 1:
-	// λ_effective = λ_local + Σ_callers(call_rate_from_caller × edge_weight_factor)
-	//
-	// Note: w.UpstreamEdges contains OUTBOUND calls from this service (services
-	// it calls). To model INBOUND pressure, we use the edge weights from callers
-	// via the UpstreamPressure scalar computed from topology. The orchestrator
-	// also injects a pre-computed CoupledArrivalRate into w.MeanRequestRate
-	// from the network coupling solver — so by the time RunQueueModel is called
-	// the window's MeanRequestRate already reflects upstream injection.
-	// We preserve the local estimate in m.ArrivalRate and build a coupled estimate.
-	coupledArrivalRate := m.ArrivalRate * (1.0 + computeInboundPressure(w)*0.15)
-	coupledArrivalRate = math.Min(coupledArrivalRate, m.ArrivalRate*3.0) // cap at 3×
-	// Use the higher of local and coupled estimates (conservative).
-	if coupledArrivalRate > m.ArrivalRate {
-		m.ArrivalRate = coupledArrivalRate
+	// Integrate fluid mechanics across tick dt
+	netFlowNormalised := (m.ArrivalRate - m.ServiceRate) / c
+	st.accumulatedBacklog += netFlowNormalised * c * dt
+	if st.accumulatedBacklog < 0 {
+		st.accumulatedBacklog = 0.0
 	}
+	m.MeanQueueLen = st.accumulatedBacklog
 
-	// ── Utilisation ───────────────────────────────────────────────────────────
-	m.Utilisation = m.ArrivalRate / m.ServiceRate
-	if math.IsNaN(m.Utilisation) || math.IsInf(m.Utilisation, 0) {
-		m.Utilisation = 0
-		return m
-	}
-	rho := m.Utilisation
-
-	// ── M/M/c Erlang-C queue analysis ─────────────────────────────────────────
-	a := m.ArrivalRate / muPerServer
-	if rho < 1.0 && a > 0 {
+	// Derived metrics
+	m.Utilisation = m.ArrivalRate / math.Max(m.ServiceRate, 1e-3)
+	if m.Utilisation > 1.0 && m.ServiceRate > 0 {
+		m.MeanWaitMs = (m.MeanQueueLen / m.ServiceRate) * 1000.0
+	} else {
+		// M/M/c steady state approximation for un-saturated conditions
+		a := m.ArrivalRate / serviceRatePerServer
 		erlangC := computeErlangC(c, a)
-		denom := c * muPerServer * (1.0 - rho)
+		denom := c * serviceRatePerServer * (1.0 - m.Utilisation)
 		if denom > 0 {
 			m.MeanWaitMs = (erlangC / denom) * 1000.0
-		}
-		if math.IsNaN(m.MeanWaitMs) || math.IsInf(m.MeanWaitMs, 0) {
+		} else {
 			m.MeanWaitMs = 0
 		}
-		m.MeanSojournMs = m.MeanWaitMs + serviceTimeMs
-		m.MeanQueueLen = m.ArrivalRate * (m.MeanWaitMs / 1000.0)
-		if math.IsNaN(m.MeanQueueLen) {
-			m.MeanQueueLen = 0
-		}
-	} else {
-		m.MeanQueueLen = math.Inf(1)
-		m.MeanWaitMs = math.Inf(1)
-		m.MeanSojournMs = math.Inf(1)
 	}
-
-	// ── M/G/1 PKC variance correction ─────────────────────────────────────────
-	covSvc := estimateServiceCoV(w)
-	m.BurstFactor = (1.0 + covSvc*covSvc) / 2.0
-	if math.IsNaN(m.BurstFactor) {
-		m.BurstFactor = 1.0
-	}
-	if rho < 1.0 {
-		m.AdjustedWaitMs = m.MeanWaitMs * m.BurstFactor
-		if math.IsNaN(m.AdjustedWaitMs) {
-			m.AdjustedWaitMs = m.MeanWaitMs
-		}
-	} else {
-		m.AdjustedWaitMs = math.Inf(1)
-	}
-
-	// ── Utilisation trend (OLS + confidence weighting) ────────────────────────
-	// Scale the trend by the signal trust weight — low-confidence windows
-	// produce attenuated trend estimates, reducing over-aggressive actuation.
+	m.AdjustedWaitMs = m.MeanWaitMs
+	m.MeanSojournMs = m.MeanWaitMs + effectiveLatency
+	m.BurstFactor = 1.0
+	
 	rawTrend := utilTrendRegression(w, m.ServiceRate)
 	m.UtilisationTrend = rawTrend * trustWeight
 
-	// ── Path saturation horizon solver ────────────────────────────────────────
-	// Uses a second-order estimate: when the trend itself is accelerating
-	// (positive second derivative, approximated from queue depth growth),
-	// the linear extrapolation understimates how soon saturation occurs.
-	//
-	// Quadratic time-to-saturation: solves ρ + trend·t + ½·accel·t² = 1
-	// → t = (-trend + sqrt(trend² + 2·accel·(1-ρ))) / accel
-	// Falls back to linear when acceleration is near-zero.
-	if rho < 1.0 && m.UtilisationTrend > 1e-6 {
-		// Estimate acceleration from queue depth trend relative to mean.
-		// queueFraction > 0.3 and increasing is a proxy for positive d²ρ/dt².
-		accel := 0.0
-		if queueFraction > 0.30 && m.UtilisationTrend > 0.01 {
-			// Approximate: acceleration ≈ trend² / (1-ρ), capped at 0.05/s²
-			accel = math.Min(m.UtilisationTrend*m.UtilisationTrend/(1.0-rho+1e-6), 0.05)
-		}
-		var ttsSec float64
-		if accel < 1e-8 {
-			// Linear: t = (1-ρ) / trend
-			ttsSec = (1.0 - rho) / m.UtilisationTrend
-		} else {
-			// Quadratic: t = (-b + sqrt(b²+2a·c)) / a  where b=trend, a=accel, c=(1-ρ)
-			discriminant := m.UtilisationTrend*m.UtilisationTrend + 2.0*accel*(1.0-rho)
-			if discriminant > 0 {
-				ttsSec = (-m.UtilisationTrend + math.Sqrt(discriminant)) / accel
-			} else {
-				ttsSec = (1.0 - rho) / m.UtilisationTrend
-			}
-		}
-		if ttsSec > 0 && !math.IsNaN(ttsSec) && !math.IsInf(ttsSec, 0) {
-			m.SaturationHorizon = time.Duration(ttsSec * float64(time.Second))
-		}
+	// Path saturation & confidence degrade
+	if m.Utilisation < 1.0 && m.UtilisationTrend > 1e-6 {
+		ttsSec := (1.0 - m.Utilisation) / m.UtilisationTrend
+		m.SaturationHorizon = time.Duration(ttsSec * float64(time.Second))
+		m.NetworkSaturationHorizon = m.SaturationHorizon
 	}
-
-	// ── Upstream pressure and network-coupled saturation horizon ──────────────
-	// Scale upstream pressure by trust weight — low-confidence windows should
-	// not amplify upstream injection into aggressive saturation forecasts.
 	m.UpstreamPressure = computeInboundPressure(w) * trustWeight
 
-	if rho < 1.0 {
-		// Network-coupled ρ: local + upstream injection damped by 0.15.
-		// This models how upstream congestion raises the effective arrival rate.
-		coupledRho := clamp(rho+m.UpstreamPressure*0.15, 0, 1.0)
-		if coupledRho < 1.0 && m.UtilisationTrend > 1e-6 {
-			netTtsSec := (1.0 - coupledRho) / m.UtilisationTrend
-			if netTtsSec > 0 {
-				m.NetworkSaturationHorizon = time.Duration(netTtsSec * float64(time.Second))
-			}
-		} else if coupledRho >= 1.0 {
-			m.NetworkSaturationHorizon = 0
-		} else {
-			m.NetworkSaturationHorizon = m.SaturationHorizon
-		}
-	}
-
-	// ── Confidence degradation ────────────────────────────────────────────────
 	covPenalty := math.Exp(-w.StdRequestRate / math.Max(w.MeanRequestRate, 1) * 0.5)
-	if math.IsNaN(covPenalty) || covPenalty <= 0 {
-		covPenalty = 0.5
-	}
-	stale := stalePenalty(w, 2.0)
-	m.Confidence = m.Confidence * covPenalty * stale
-	if math.IsNaN(m.Confidence) || m.Confidence < 0 {
-		m.Confidence = 0
-	}
+	if math.IsNaN(covPenalty) || covPenalty <= 0 { covPenalty = 0.5 }
+	m.Confidence = m.Confidence * covPenalty * stalePenalty(w, 2.0)
+
+	// G. Structured Physics Logging
+	log.Printf("[physics] svc=%s queue_next=%.3f effective_service_rate=%.3f latency_feedback=%.3f propagation_delay_stage=%d",
+		w.ServiceID, m.MeanQueueLen, m.ServiceRate, 1.0, st.delayIdx)
 
 	return m
 }

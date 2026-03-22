@@ -14,7 +14,9 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/reasoning"
 	"github.com/loadequilibrium/loadequilibrium/internal/simulation"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
+	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
+	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
@@ -42,15 +44,19 @@ const (
 //   - Async simulation with drop-oldest semantics
 //   - Signal state pruning
 type Orchestrator struct {
-	cfg       *config.Config
-	store     *telemetry.Store
-	graph     *topology.Graph
-	signal    *modelling.SignalProcessor
-	optEngine *optimisation.Engine
-	reasoning *reasoning.Engine
-	simRunner *simulation.Runner
-	hub       *streaming.Hub
-	pw        *persistence.Writer
+	cfg            *config.Config
+	store          *telemetry.Store
+	graph          *topology.Graph
+	signal         *modelling.SignalProcessor
+	queuePhysics   *modelling.QueuePhysicsEngine
+	telemetryCpl   *modelling.TelemetryCoupler
+	optEngine      *optimisation.Engine
+	reasoning      *reasoning.Engine
+	simRunner      *simulation.Runner
+	hub            *streaming.Hub
+	actuator       actuator.Actuator
+	scenarioEngine *scenario.SuperpositionEngine
+	pw             *persistence.Writer
 
 	tickCount     uint64
 	lastSimResult *simulation.SimulationResult
@@ -100,6 +106,8 @@ func New(
 	store *telemetry.Store,
 	hub *streaming.Hub,
 	pw *persistence.Writer,
+	act actuator.Actuator,
+	scen *scenario.SuperpositionEngine,
 ) *Orchestrator {
 	windowN := int(float64(cfg.RingBufferDepth) * cfg.WindowFraction)
 	if windowN < 5 {
@@ -122,10 +130,14 @@ func New(
 		store:           store,
 		graph:           topology.New(),
 		signal:          modelling.NewSignalProcessor(cfg.EWMAFastAlpha, cfg.EWMASlowAlpha, cfg.SpikeZScore),
+		queuePhysics:    modelling.NewQueuePhysicsEngine(),
+		telemetryCpl:    modelling.NewTelemetryCoupler(),
 		optEngine:       optimisation.NewEngine(cfg),
 		reasoning:       reasoningEngine,
 		simRunner:       simRunner,
 		hub:             hub,
+		actuator:        act,
+		scenarioEngine:  scen,
 		pw:              pw,
 		windowN:         windowN,
 		currentInterval: cfg.TickInterval,
@@ -254,6 +266,20 @@ func (o *Orchestrator) tick(now time.Time) {
 	tickStart := time.Now()
 	o.tickCount++
 
+	// ── Pre-Stage: Actuator Feedback ─────────────────────────────────────────
+	if o.actuator != nil {
+		for i := 0; i < 50; i++ {
+			select {
+			case res := <-o.actuator.Feedback():
+				if !res.Success {
+					log.Printf("[engine] actuator failed tick=%d svc=%s err=%v", res.TickIndex, res.ServiceID, res.Error)
+				}
+			default:
+				i = 50 
+			}
+		}
+	}
+
 	// ── Hard tick deadline ───────────────────────────────────────────────────
 	// tickDeadline is the absolute wall-clock boundary for this tick.
 	// Each optional stage checks this before executing. Once the deadline is
@@ -339,6 +365,11 @@ func (o *Orchestrator) tick(now time.Time) {
 	s2 := time.Now()
 	freshCutoff := o.cfg.TickInterval * 3
 	windows := o.store.AllWindows(o.windowN, freshCutoff)
+	
+	if o.scenarioEngine != nil {
+		windows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
+	}
+
 	if len(windows) == 0 {
 		recordStage(stageIdxWindows, "windows", s2)
 		return
@@ -503,6 +534,9 @@ func (o *Orchestrator) tick(now time.Time) {
 	topoSensitivity := modelling.ComputeTopologySensitivity(topoSnap)
 	recordStage(stageIdxTopology, "topology", s3)
 
+	// ── Telemetry State Coupling Physics ──────────────────────────────────────
+	o.telemetryCpl.ApplyCoupling(windows, topoSnap)
+
 	// ── CRITICAL Stage 3b: Network coupling ───────────────────────────────────
 	s3b := time.Now()
 	netCoupling := modelling.ComputeNetworkCoupling(windows, topoSnap)
@@ -548,7 +582,7 @@ func (o *Orchestrator) tick(now time.Time) {
 				wCopy.MeanRequestRate = nc.CoupledArrivalRate
 				w = &wCopy
 			}
-			q := modelling.RunQueueModel(w, medianMode)
+			q := o.queuePhysics.RunQueueModel(w, topoSnap, medianMode)
 			// Stochastic model is expensive and confidence-sensitive.
 			// Bypass when data is severely stale; use zero-value stochastic model.
 			sm := modelling.StochasticModel{ServiceID: id, Confidence: 1.0 - systemStaleness}
@@ -565,13 +599,19 @@ func (o *Orchestrator) tick(now time.Time) {
 	}
 	wg.Wait()
 	o.signal.Prune(activeIDs)
+	o.queuePhysics.Prune(activeIDs)
 	recordStage(stageIdxModelling, "modelling", s4)
 
 	// ── CRITICAL Stage 5: Optimisation / control ──────────────────────────────
 	s5 := time.Now()
 	costGradients := optimisation.ComputeCostGradients(bundles, topoSnap, 500.0)
-	directives := o.optEngine.RunControl(bundles, costGradients, now)
+	directives := o.optEngine.RunControl(bundles, costGradients, o.lastSimResult, topoSnap, now)
 	objective := optimisation.ComputeObjective(bundles, topoSnap, now)
+
+	if o.actuator != nil {
+		o.actuator.Dispatch(o.tickCount, directives)
+	}
+
 	recordStage(stageIdxOptimise, "optimise", s5)
 
 	// ── Hard deadline gate for optional stages ────────────────────────────────

@@ -67,6 +67,9 @@ type Config struct {
 	// The simulation uses this to compute P(SLA violation) per service.
 	// Default 500ms. Set to 0 to disable SLA tracking.
 	SLALatencyThresholdMs float64
+
+	// ScenarioMode: "on" (default) or "off"
+	ScenarioMode string
 }
 
 func Load() *Config {
@@ -106,6 +109,7 @@ func Load() *Config {
 		TickAdaptStep:          envFloat("TICK_ADAPT_STEP", 1.25),
 		StalenessBypassThreshold: envFloat("STALENESS_BYPASS_THRESHOLD", 0.70),
 		SLALatencyThresholdMs:    envFloat("SLA_LATENCY_THRESHOLD_MS", 500.0),
+		ScenarioMode:             envStr("SCENARIO_MODE", "on"),
 	}
 }
 

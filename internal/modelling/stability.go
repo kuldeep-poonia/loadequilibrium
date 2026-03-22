@@ -21,24 +21,28 @@ func RunStabilityAssessment(
 	}
 
 	rho := q.Utilisation
+	// Physics engine coupling: Hazard and Reservoir increase risk
+	// Hazard (Z) represents structural degradation
+	// Reservoir (R) represents hidden metabolic debt
+	effectiveRho := rho + q.Hazard*0.2 + q.Reservoir*0.1
 
 	// Stability margin: distance to saturation boundary.
-	sa.StabilityMargin = 1.0 - rho
+	sa.StabilityMargin = 1.0 - effectiveRho
 
 	// CollapseZone classification derived from collapseThreshold config.
 	// Warning zone starts at 83% of threshold; collapse zone at threshold.
 	warningBoundary := collapseThreshold * 0.83
 	switch {
-	case rho >= collapseThreshold:
+	case effectiveRho >= collapseThreshold:
 		sa.CollapseZone = "collapse"
-	case rho >= warningBoundary:
+	case effectiveRho >= warningBoundary:
 		sa.CollapseZone = "warning"
 	default:
 		sa.CollapseZone = "safe"
 	}
 
 	// Collapse risk: steep sigmoid centred on collapseThreshold.
-	sa.CollapseRisk = sigmoid((rho - collapseThreshold*0.95) / 0.04)
+	sa.CollapseRisk = sigmoid((effectiveRho - collapseThreshold*0.95) / 0.04)
 
 	// Trend-adjusted stability margin: pessimistic estimate over the MPC horizon.
 	// Uses a 10-tick prediction horizon at 2s per tick = 20 seconds.

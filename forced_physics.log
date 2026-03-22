@@ -1,0 +1,18 @@
+07:03:40.784820 [loadequilibrium] starting - VER_2.2_SYNC_CHECK
+07:03:43.791412 [persistence] disabled (no DATABASE_URL)
+07:03:43.809923 [engine] started  tick=2s  window=30  maxSvc=200  workers=8  stochastic=exponential  min=1s  max=10s
+07:03:43.810077 [engine] SCENARIO_MODE detected [VER_2.1]: "off" (os.Getenv: "off")
+07:03:43.809343 [http] listening on :8080
+07:04:43.857785 [engine] stage=prune        elapsed=3µs ewma=0.00ms trend=+0.000ms/tick tick=30
+07:04:43.859382 [engine] stage=windows      elapsed=4µs ewma=0.00ms trend=+0.000ms/tick tick=30
+07:05:43.899931 [engine] stage=prune        elapsed=2µs ewma=0.00ms trend=-0.000ms/tick tick=60
+07:05:43.899990 [engine] stage=windows      elapsed=2µs ewma=0.00ms trend=-0.000ms/tick tick=60
+07:06:29.664696 [ws] connect [::1]:55418
+07:06:43.932100 [engine] stage=prune        elapsed=3µs ewma=0.00ms trend=+0.000ms/tick tick=90
+07:06:43.932875 [engine] stage=windows      elapsed=6µs ewma=0.00ms trend=-0.000ms/tick tick=90
+07:07:43.976859 [engine] stage=prune        elapsed=1µs ewma=0.00ms trend=-0.000ms/tick tick=120
+07:07:43.976963 [engine] stage=windows      elapsed=2µs ewma=0.00ms trend=-0.000ms/tick tick=120
+07:08:44.007131 [engine] stage=prune        elapsed=4µs ewma=0.00ms trend=+0.000ms/tick tick=150
+07:08:44.007658 [engine] stage=windows      elapsed=4µs ewma=0.00ms trend=+0.000ms/tick tick=150
+07:09:44.040748 [engine] stage=prune        elapsed=1µs ewma=0.00ms trend=-0.000ms/tick tick=180
+07:09:44.040855 [engine] stage=windows      elapsed=1µs ewma=0.00ms trend=-0.000ms/tick tick=180

@@ -3,13 +3,21 @@ package scenario
 import (
 	"log"
 	"math"
+	"os"
+	"strings"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
+func isScenarioDisabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SCENARIO_MODE")))
+	return v == "off" || v == "false" || v == "0"
+}
+
 type SuperpositionEngine struct {
-	scenarios []Scenario
+	scenarios    []Scenario
+	ScenarioMode string
 }
 
 func NewEngine(scenarios ...Scenario) *SuperpositionEngine {
@@ -22,6 +30,10 @@ func (e *SuperpositionEngine) ApplySuperposition(
 	topo topology.GraphSnapshot,
 ) map[string]*telemetry.ServiceWindow {
 	
+	if isScenarioDisabled() || e.ScenarioMode == "off" {
+		return windows
+	}
+
 	if len(e.scenarios) == 0 {
 		return windows
 	}

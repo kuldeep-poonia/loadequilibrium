@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"math"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,7 +127,7 @@ func New(
 		simRunner.SetSLAThreshold(cfg.SLALatencyThresholdMs)
 	}
 
-	return &Orchestrator{
+	o := &Orchestrator{
 		cfg:             cfg,
 		store:           store,
 		graph:           topology.New(),
@@ -142,6 +144,17 @@ func New(
 		windowN:         windowN,
 		currentInterval: cfg.TickInterval,
 	}
+
+	if scen != nil {
+		scen.ScenarioMode = cfg.ScenarioMode
+	}
+	
+	mode := strings.ToLower(strings.TrimSpace(cfg.ScenarioMode))
+	if mode == "off" || mode == "false" || mode == "0" {
+		o.scenarioEngine = nil
+	}
+
+	return o
 }
 
 func (o *Orchestrator) Run(ctx context.Context) {
@@ -154,6 +167,7 @@ func (o *Orchestrator) Run(ctx context.Context) {
 		o.cfg.TickInterval, o.windowN, o.cfg.MaxServices,
 		o.cfg.WorkerPoolSize, o.cfg.SimStochasticMode,
 		o.cfg.MinTickInterval, o.cfg.MaxTickInterval)
+	log.Printf("[engine] SCENARIO_MODE detected [VER_2.1]: %q (os.Getenv: %q)", o.cfg.ScenarioMode, os.Getenv("SCENARIO_MODE"))
 
 	for {
 		select {
@@ -370,11 +384,22 @@ func (o *Orchestrator) tick(now time.Time) {
 		windows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
 	}
 
+	// Inject persistent physics states from the last simulation run (observer coupling)
+	if o.lastSimResult != nil {
+		for id, w := range windows {
+			if outcome, ok := o.lastSimResult.Services[id]; ok {
+				w.Hazard = outcome.FinalHazard
+				w.Reservoir = outcome.FinalReservoir
+			}
+		}
+	}
+
 	if len(windows) == 0 {
 		recordStage(stageIdxWindows, "windows", s2)
-		return
+		// No early return here anymore — ensure Stage 6 Simulation executes synthetic bootstrap
+	} else {
+		recordStage(stageIdxWindows, "windows", s2)
 	}
-	recordStage(stageIdxWindows, "windows", s2)
 
 	// ── Telemetry freshness gate ──────────────────────────────────────────────
 	// Compute a system-wide staleness score = mean(1 - ConfidenceScore) across windows.
@@ -384,12 +409,11 @@ func (o *Orchestrator) tick(now time.Time) {
 	for _, w := range windows {
 		sumConf += w.ConfidenceScore
 	}
-	systemStaleness := 1.0 - sumConf/float64(len(windows))
-	bypassDeepStages := systemStaleness > o.cfg.StalenessBypassThreshold
-	if bypassDeepStages && o.tickCount%5 == 0 {
-		log.Printf("[engine] staleness gate: score=%.2f > threshold=%.2f — bypassing deep modelling",
-			systemStaleness, o.cfg.StalenessBypassThreshold)
+	systemStaleness := 0.0
+	if len(windows) > 0 {
+		systemStaleness = 1.0 - sumConf/float64(len(windows))
 	}
+	bypassDeepStages := false // Unconditional research mode
 
 	// Degraded-intelligence assessment.
 	degradedCount := 0
@@ -398,7 +422,10 @@ func (o *Orchestrator) tick(now time.Time) {
 			degradedCount++
 		}
 	}
-	degradedFraction := float64(degradedCount) / float64(len(windows))
+	degradedFraction := 0.0
+	if len(windows) > 0 {
+		degradedFraction = float64(degradedCount) / float64(len(windows))
+	}
 	var degradedServices []string
 	if degradedCount > 0 {
 		degradedServices = make([]string, 0, degradedCount)
@@ -615,30 +642,17 @@ func (o *Orchestrator) tick(now time.Time) {
 	recordStage(stageIdxOptimise, "optimise", s5)
 
 	// ── Hard deadline gate for optional stages ────────────────────────────────
-	// After all CRITICAL stages are complete, check whether the hard deadline
-	// has passed. Any optional stage that starts after tickDeadline is skipped.
-	// This is the actual enforcement boundary — not just detection after the fact.
 	pastDeadline := time.Now().After(tickDeadline)
-	// Graduated skip policy — each safety level removes more optional work.
-	skipSim := pastDeadline || bypassDeepStages
-	skipPredDiff := pastDeadline || o.safetyLevel >= 3 || time.Now().After(tickDeadline.Add(-stageSoftLimit*2))
-	skipPersist := pastDeadline || o.safetyLevel >= 2
-
-	simFreq := uint64(5)
-	switch {
-	case o.safetyLevel >= 3:
-		simFreq = 15
-	case o.safetyLevel == 2:
-		simFreq = 10
-	case o.safetyLevel == 1:
-		simFreq = 7
-	}
+	// Graduated skip policy — research mode: skip none
+	skipSim := false
+	skipPredDiff := false
+	skipPersist := false
 
 	// ── OPTIONAL Stage 6: Async simulation ───────────────────────────────────
 	s6 := time.Now()
-	if o.tickCount%simFreq == 0 && !skipSim {
-		o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
-	}
+	// Unconditional research-mode execution
+	o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
+
 	if res := o.simRunner.Latest(); res != nil {
 		o.lastSimResult = res
 		o.simOverlayAge = 0

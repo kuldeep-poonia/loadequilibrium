@@ -59,6 +59,10 @@ type ServiceWindow struct {
 
 	// SignalQuality classifies the window: "good" | "degraded" | "sparse"
 	SignalQuality string
+
+	// Physics Engine States (Injected from simulation)
+	Hazard    float64
+	Reservoir float64
 }
 
 type EdgeWindow struct {

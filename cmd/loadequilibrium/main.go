@@ -21,7 +21,8 @@ import (
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
-	log.Println("[loadequilibrium] starting")
+	log.Println("[loadequilibrium] starting - VER_2.2_SYNC_CHECK")
+	time.Sleep(3 * time.Second)
 
 	cfg := config.Load()
 

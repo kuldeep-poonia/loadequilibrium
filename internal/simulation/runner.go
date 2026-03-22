@@ -2,14 +2,22 @@ package simulation
 
 import (
 	"container/heap"
+	"log"
 	"math"
 	"math/rand"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
+
+func isScenarioDisabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SCENARIO_MODE")))
+	return v == "off" || v == "false" || v == "0"
+}
 
 const (
 	maxQueueDepth = 10000
@@ -447,8 +455,48 @@ func mergeScenarios(runs []SimulationResult) SimulationResult {
 			}
 		}
 	}
-
 	return merged
+}
+
+func handleTick(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, rng *rand.Rand) {
+	if st.Plant == nil {
+		return
+	}
+
+	// accumulate virtual time
+	st.PhysicsClock += st.Plant.Dt
+
+	const physicsStep = 0.05
+
+	if st.PhysicsClock >= physicsStep {
+
+		st.PhysicsClock = 0
+
+		dBH := modelling.ComputeDBH(rng, physicsStep)
+
+		control := 1.0
+
+		q, a, _ := st.Plant.Step(control, dBH)
+
+		if os.Getenv("LOG_LEVEL") == "debug" {
+			log.Printf("[fluid] svc=%s q=%.4f a=%.4f z=%.4f r=%.4f",
+				e.ServiceID, st.Plant.Q, st.Plant.A, st.Plant.Z, st.Plant.R)
+		}
+
+		st.QueueLen = int(math.Max(0, q-float64(st.InService)))
+		if st.QueueLen > st.MaxQueueLen {
+			st.MaxQueueLen = st.QueueLen
+		}
+
+		st.ArrivalRate = a
+	}
+
+	// 5. Schedule next tick
+	sched.Schedule(Event{
+		Time:      e.Time + st.Plant.Dt,
+		Kind:      EventTick,
+		ServiceID: e.ServiceID,
+	})
 }
 
 // Latest returns the most recent simulation result without blocking.
@@ -501,6 +549,14 @@ func run(
 	sched := newSchedulerFromPool()
 	defer sched.returnToPool()
 
+	if len(snaps) == 0 && (os.Getenv("FORCE_SIMULATION") == "on" || isScenarioDisabled()) {
+		snaps = []bundleSnap{
+			{id: "frontend", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
+			{id: "payment", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
+			{id: "database", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
+		}
+	}
+
 	states := make(map[string]*ServiceSimState, len(snaps))
 	cascadeEdges, edgeWeights := buildCascadeEdges(topo)
 
@@ -513,7 +569,35 @@ func run(
 			Concurrency:    s.concurrency,
 			Utilisation:    s.utilisation,
 			SLAThresholdMs: s.slaThresholdMs,
+			Plant: &modelling.FinalFluidPlant{
+				Mu:     s.serviceRate,
+				Rho:    s.utilisation,
+				KappaA: 0.8,
+				Nu:     0.2,
+				ChiA:   0.001,
+				Psi0:   0.5,
+				Qsat:   50.0,
+				Amax:   s.serviceRate * 10.0,
+				Alpha:  0.002,
+				Beta:   1.1,
+				Eta:    0.05,
+				Zeta:   0.01,
+				Theta:  0.02,
+				Pexp:   0.6,
+				Eps:    0.005,
+				Gamma:  1.0,
+				Omega:  0.05,
+				LambdaR: 0.1,
+				KL:     0.5,
+				Delta:  2.0,
+				Dt:     1.0, // 1ms tick
+				A:      s.arrivalRate,
+				Q:      0,
+				Z:      0,
+				R:      0,
+			},
 		}
+		// Schedule base arrival and first physics tick
 		if s.arrivalRate > 0 {
 			sched.Schedule(Event{
 				Time:      interarrival(rng, 1.0/s.arrivalRate, stochasticMode),
@@ -521,12 +605,19 @@ func run(
 				ServiceID: s.id,
 			})
 		}
+		sched.Schedule(Event{
+			Time:      0,
+			Kind:      EventTick,
+			ServiceID: s.id,
+		})
 	}
 
 	// Schedule load shock at 35% of horizon on the highest-utilisation service.
-	shockTarget := highestUtilService(snaps)
-	if shockTarget != "" {
-		sched.Schedule(Event{Time: horizonMs * 0.35, Kind: EventShock, ServiceID: shockTarget})
+	if !isScenarioDisabled() {
+		shockTarget := highestUtilService(snaps)
+		if shockTarget != "" {
+			sched.Schedule(Event{Time: horizonMs * 0.35, Kind: EventShock, ServiceID: shockTarget})
+		}
 	}
 
 	collapseDetected := false
@@ -565,6 +656,9 @@ func run(
 
 		case EventRecovery:
 			handleRecovery(e, st, sched, stochasticMode, rng, horizonMs)
+
+		case EventTick:
+			handleTick(e, st, sched, rng)
 		}
 
 		if st.QueueLen >= maxQueueDepth {
@@ -661,6 +755,14 @@ func run(
 			RecoveryTimeMs:   recoveryMs,
 			QueueLenMean:     qlMean,
 			QueueLenVariance: qlVar,
+			FinalHazard:      0,
+			FinalReservoir:   0,
+		}
+		if st.Plant != nil {
+			so := result.Services[id]
+			so.FinalHazard = st.Plant.Z
+			so.FinalReservoir = st.Plant.R
+			result.Services[id] = so
 		}
 
 		// CascadeFailureProbability: empirical drop rate from this simulation run.
@@ -707,7 +809,7 @@ func handleArrival(e Event, st *ServiceSimState, sched interface{ Schedule(Event
 		st.CollapseCount++ // accumulate collapse frequency for failure probability
 	} else if st.InService < st.Concurrency {
 		st.InService++
-		svcDur := interarrival(rng, 1.0/math.Max(st.ServiceRate, 1e-12), "exponential") // service always exponential
+		svcDur := interarrival(rng, 1.0/math.Max(st.ServiceRate, 1e-12), "exponential")
 		sched.Schedule(Event{
 			Time:              arrivalTime + svcDur,
 			Kind:              EventDeparture,
@@ -715,12 +817,9 @@ func handleArrival(e Event, st *ServiceSimState, sched interface{ Schedule(Event
 			ServiceDurationMs: svcDur,
 			ArrivalTime:       arrivalTime,
 		})
-	} else {
-		st.QueueLen++
-		if st.QueueLen > st.MaxQueueLen {
-			st.MaxQueueLen = st.QueueLen
-		}
 	}
+	// Note: QueueLen is now evolved via EventTick / plant.Step
+	// instead of manual increment here.
 
 	if st.ArrivalRate > 0 {
 		sched.Schedule(Event{
@@ -762,8 +861,9 @@ func handleDeparture(e Event, st *ServiceSimState, sched interface{ Schedule(Eve
 		}
 	}
 
+	// Note: QueueLen is evolved via plant.Step.
+	// If the plant says the queue is non-empty, pull into service.
 	if st.QueueLen > 0 {
-		st.QueueLen--
 		st.InService++
 		svcDur := interarrival(rng, 1.0/math.Max(st.ServiceRate, 1e-12), "exponential")
 		sched.Schedule(Event{
@@ -793,6 +893,13 @@ func applyShock(
 	shockFactor, horizonMs float64,
 	mode string, rng *rand.Rand,
 ) {
+	if isScenarioDisabled() {
+		return
+	}
+
+	if st.Plant != nil {
+		st.Plant.Rho = st.Utilisation * shockFactor
+	}
 	st.ArrivalRate = st.BaseRate * shockFactor
 	st.ShockPeakRate = st.ArrivalRate
 	st.Shocked = true
@@ -832,6 +939,9 @@ func applyShock(
 
 			visited[tgt] = true
 			if tgtSt, ok := states[tgt]; ok && !tgtSt.Shocked {
+				if tgtSt.Plant != nil {
+					tgtSt.Plant.Rho = tgtSt.Utilisation * childAmp
+				}
 				tgtSt.ArrivalRate = tgtSt.BaseRate * childAmp
 				tgtSt.ShockPeakRate = tgtSt.ArrivalRate
 				tgtSt.Shocked = true
@@ -864,6 +974,10 @@ func applyShock(
 // Recovery time constant τ = 15% of horizon — approximately exponential convergence
 // to within 5% of base rate after ~3τ.
 func handleRecovery(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, mode string, rng *rand.Rand, horizonMs float64) {
+	if isScenarioDisabled() {
+		return
+	}
+
 	tau := horizonMs * 0.15
 	if tau <= 0 {
 		tau = 1000
@@ -871,7 +985,11 @@ func handleRecovery(e Event, st *ServiceSimState, sched interface{ Schedule(Even
 	excess := st.ArrivalRate - st.BaseRate
 	if excess > 0.0 {
 		// Exponential step: reduce excess by factor e^(-1) = 0.368 per tau.
-		st.ArrivalRate = st.BaseRate + excess*math.Exp(-1.0)
+		newArrival := st.BaseRate + excess*math.Exp(-1.0)
+		st.ArrivalRate = newArrival
+		if st.Plant != nil {
+			st.Plant.Rho = (newArrival / st.BaseRate) * st.Utilisation
+		}
 		// Schedule next recovery step unless within 2% of base.
 		if math.Abs(st.ArrivalRate-st.BaseRate) > st.BaseRate*0.02 {
 			sched.Schedule(Event{
@@ -881,6 +999,9 @@ func handleRecovery(e Event, st *ServiceSimState, sched interface{ Schedule(Even
 			})
 		} else {
 			st.ArrivalRate = st.BaseRate
+			if st.Plant != nil {
+				st.Plant.Rho = st.Utilisation
+			}
 			st.Shocked = false
 			if st.RecoveryConvergedAt == 0 {
 				st.RecoveryConvergedAt = e.Time + tau

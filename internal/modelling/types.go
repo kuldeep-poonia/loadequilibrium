@@ -20,6 +20,9 @@ type QueueModel struct {
 	// Network-coupled metrics
 	UpstreamPressure        float64       // normalised upstream load pressure [0..1]
 	NetworkSaturationHorizon time.Duration // saturation horizon accounting for upstream pressure
+	// Physics Engine States
+	Hazard    float64
+	Reservoir float64
 }
 
 type StochasticModel struct {

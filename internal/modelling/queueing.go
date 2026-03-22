@@ -72,6 +72,8 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	if w.MeanRequestRate <= 0 || w.MeanLatencyMs <= 0 {
 		return m
 	}
+	m.Hazard = w.Hazard
+	m.Reservoir = w.Reservoir
 
 	// ── Signal trust weight ───────────────────────────────────────────────────
 	// Use the telemetry window's ConfidenceScore as a trust multiplier on all
@@ -98,7 +100,6 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 
 	// D. Latency Feedback Coupling
 	// Normalise accumulated queue across concurrency
-	qRatio := st.accumulatedBacklog / c
 
 	// MINIMAL PATCH: TelemetryCoupler already persists physical latency penalties into
 	// w.MeanLatencyMs. We use it directly to prevent compounding exponential explosions.
@@ -108,15 +109,12 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	}
 
 	// B. Service Saturation Model (Resource contention collapse)
-	serviceRatePerServer := 1000.0 / math.Max(effectiveLatency, 1e-3)
-	effectiveServiceRate := c * serviceRatePerServer
+	// Apply hazard-based degradation to service rate
+	hazardFactor := math.Exp(-w.Hazard * 0.1)
+	serviceRatePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
+	m.ServiceRate = serviceRatePerServer * c
 	
-	if qRatio > 2.0 {
-		degradation := math.Max(0.5, 1.0 - (qRatio-2.0)*0.1)
-		effectiveServiceRate *= degradation
-	}
-	m.ServiceRate = effectiveServiceRate
-
+	// C. Backlog Accumulation Memory & A. Arrival Burst Inertia
 	// Integrate fluid mechanics across tick dt
 	netFlowNormalised := (m.ArrivalRate - m.ServiceRate) / c
 	st.accumulatedBacklog += netFlowNormalised * c * dt

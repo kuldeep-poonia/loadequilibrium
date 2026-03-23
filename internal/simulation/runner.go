@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
+	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
@@ -45,6 +46,10 @@ type Runner struct {
 	scenarioCount     int
 	// slaThresholdMs: per-request latency SLA threshold. Passed into each run.
 	slaThresholdMs float64
+
+	nf     *modelling.NetworkField
+	nfOnce sync.Once
+	nfMu   sync.Mutex
 }
 
 // SetSLAThreshold configures the latency SLA threshold for simulation tracking.
@@ -79,7 +84,15 @@ func (r *Runner) SetHorizonMultiplier(multiplier float64) {
 }
 
 func NewRunner(horizonMs, shockFactor float64, asyncBuffer int) *Runner {
-	return &Runner{
+	if os.Getenv("STABILITY_SWEEP") == "on" {
+		RunStabilitySweep()
+		os.Exit(0)
+	}
+	if os.Getenv("STABILITY_SWEEP2D") == "on" {
+		RunStabilitySweep2D()
+		os.Exit(0)
+	}
+	r := &Runner{
 		horizonMs:         horizonMs,
 		shockFactor:       shockFactor,
 		stochasticMode:    "exponential",
@@ -88,7 +101,30 @@ func NewRunner(horizonMs, shockFactor float64, asyncBuffer int) *Runner {
 		horizonMultiplier: 1.0,
 		scenarioCount:     1,
 		slaThresholdMs:    500.0,
+		nf:                modelling.NewNetworkField(),
 	}
+	log.Printf("[NF_DEBUG] networkField CREATED")
+
+	r.nf.Edges = make(map[string]*modelling.EdgeField)
+	edge := &modelling.EdgeField{
+		Dx:          1.0,
+		ServiceRate: 0.3,
+		NoiseAmp:    0.0,
+		SourceGain:  0.05,
+	}
+	edge.Cells = make([]modelling.Cell, 16)
+	for i := range edge.Cells {
+		if i < 3 {
+			edge.Cells[i].Rho = 0.9
+		} else {
+			edge.Cells[i].Rho = 0.2
+		}
+	}
+	edge.OutFlux = 0.25
+	r.nf.Edges["exp_edge"] = edge
+	log.Printf("[NF_DEBUG_GRID] experimental grid created")
+
+	return r
 }
 
 // SetStochasticMode switches the inter-arrival distribution.
@@ -110,13 +146,21 @@ func (r *Runner) Submit(
 	topo topology.GraphSnapshot,
 	budget time.Duration,
 ) {
+	if len(r.nf.Edges) == 0 && len(topo.Edges) > 0 {
+		r.nfMu.Lock()
+		if len(r.nf.Edges) == 0 {
+			populateNetworkField(r.nf, topo, r.rng)
+			log.Printf("[network_field_lifecycle] populated")
+		}
+		r.nfMu.Unlock()
+	}
+
 	select {
 	case <-r.results:
 	default:
 	}
 
 	snap := snapshotBundles(bundles, r.slaThresholdMs)
-	mode := r.stochasticMode
 	effectiveHorizonMs := r.horizonMs * r.horizonMultiplier
 	nScenarios := r.scenarioCount
 	if nScenarios < 1 {
@@ -137,7 +181,7 @@ func (r *Runner) Submit(
 	go func() {
 		if nScenarios == 1 {
 			rng := rand.New(rand.NewSource(seeds[0]))
-			res := run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, mode, rng)
+			res := r.run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, rng, 0)
 			select {
 			case r.results <- res:
 			default:
@@ -152,10 +196,10 @@ func (r *Runner) Submit(
 			i := i
 			rng := rand.New(rand.NewSource(seeds[i]))
 			wg.Add(1)
-			go func() {
+			go func(scenarioIdx int) {
 				defer wg.Done()
-				runs[i] = run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, mode, rng)
-			}()
+				runs[scenarioIdx] = r.run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, rng, scenarioIdx)
+			}(i)
 		}
 		wg.Wait()
 
@@ -203,7 +247,6 @@ func (r *Runner) LatestMultiScenario(
 	}
 	effectiveHorizonMs := r.horizonMs * r.horizonMultiplier
 	snap := snapshotBundles(bundles, r.slaThresholdMs)
-	mode := r.stochasticMode
 
 	runs := make([]SimulationResult, nScenarios)
 	var wg sync.WaitGroup
@@ -213,7 +256,7 @@ func (r *Runner) LatestMultiScenario(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runs[i] = run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, mode, rng)
+			runs[i] = r.run(snap, topo, scenarioBudget, effectiveHorizonMs, r.shockFactor, rng, i)
 		}()
 	}
 	wg.Wait()
@@ -458,42 +501,56 @@ func mergeScenarios(runs []SimulationResult) SimulationResult {
 	return merged
 }
 
-func handleTick(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, rng *rand.Rand) {
+func (r *Runner) handleTick(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, rng *rand.Rand) {
 	if st.Plant == nil {
 		return
 	}
 
-	// accumulate virtual time
-	st.PhysicsClock += st.Plant.Dt
+	// accumulate virtual time using event time delta
+	dtMs := e.Time - st.LastPhysicsTime
+	st.PhysicsClock += dtMs
+	st.LastPhysicsTime = e.Time
 
-	const physicsStep = 0.05
+	const physicsStepMs = 50.0
 
-	if st.PhysicsClock >= physicsStep {
-
+	if st.PhysicsClock >= physicsStepMs {
+		// Pass REAL accumulated delta in seconds
+		dtSec := st.PhysicsClock / 1000.0
+		st.Plant.Step(dtSec)
 		st.PhysicsClock = 0
+		st.PhysicsUpdateCount++
 
-		dBH := modelling.ComputeDBH(rng, physicsStep)
-
-		control := 1.0
-
-		q, a, _ := st.Plant.Step(control, dBH)
-
-		if os.Getenv("LOG_LEVEL") == "debug" {
-			log.Printf("[fluid] svc=%s q=%.4f a=%.4f z=%.4f r=%.4f",
-				e.ServiceID, st.Plant.Q, st.Plant.A, st.Plant.Z, st.Plant.R)
+		// Throttle fluid debug logging (every 20th update = ~1s virtual time)
+		if os.Getenv("LOG_LEVEL") == "debug" && st.PhysicsUpdateCount%20 == 0 {
+			log.Printf("[fluid] svc=%s q=%.4f a=%.4f s=%.4f z=%.4f r=%.4f sigma=%.4f",
+				e.ServiceID, st.Plant.Q, st.Plant.A, st.Plant.S, st.Plant.Z, st.Plant.R, st.Plant.Sigma)
 		}
 
-		st.QueueLen = int(math.Max(0, q-float64(st.InService)))
+		// Map physics state back
+		st.QueueMass = st.Plant.Q
+		st.QueueLen = int(math.Round(st.Plant.Q))
+		st.ArrivalRate = st.Plant.A
+		st.ServiceRate = st.Plant.S
+		st.Hazard = st.Plant.Z
+		st.Reservoir = st.Plant.R
+
 		if st.QueueLen > st.MaxQueueLen {
 			st.MaxQueueLen = st.QueueLen
 		}
 
-		st.ArrivalRate = a
+		// Cyber-physical coupling to NetworkField
+		if r.nf != nil && e.ServiceID == "frontend" {
+			const capacity = 1.6
+			if expEdge, ok := r.nf.Edges["exp_edge"]; ok {
+				expEdge.QueueLoadRatio = math.Max(0.0, math.Min(st.ArrivalRate/capacity, 1.0))
+				expEdge.ServiceRate = math.Max(0.05, math.Min(st.Plant.S/capacity, 0.5))
+			}
+		}
 	}
 
-	// 5. Schedule next tick
+	// 5. Schedule next tick (1ms resolution)
 	sched.Schedule(Event{
-		Time:      e.Time + st.Plant.Dt,
+		Time:      e.Time + 1.0,
 		Kind:      EventTick,
 		ServiceID: e.ServiceID,
 	})
@@ -511,12 +568,13 @@ func (r *Runner) Latest() *SimulationResult {
 
 // bundleSnap is a minimal snapshot of bundle data used by the simulator.
 type bundleSnap struct {
-	id              string
-	arrivalRate     float64 // req/ms
-	serviceRate     float64 // req/ms
-	concurrency     int
-	utilisation     float64
-	slaThresholdMs  float64 // 0 = SLA tracking disabled
+	id             string
+	arrivalRate    float64 // req/ms
+	serviceRate    float64 // req/ms
+	concurrency    int
+	utilisation    float64
+	slaThresholdMs float64 // 0 = SLA tracking disabled
+	queueLen       int
 }
 
 func snapshotBundles(bundles map[string]*modelling.ServiceModelBundle, slaMs float64) []bundleSnap {
@@ -530,26 +588,28 @@ func snapshotBundles(bundles map[string]*modelling.ServiceModelBundle, slaMs flo
 			concurrency:    c,
 			utilisation:    b.Queue.Utilisation,
 			slaThresholdMs: slaMs,
+			queueLen:       int(b.Queue.MeanQueueLen),
 		})
 	}
 	return out
 }
 
 // run is a pure function: runs the DES and returns results.
-func run(
+func (r *Runner) run(
 	snaps []bundleSnap,
 	topo topology.GraphSnapshot,
 	budget time.Duration,
 	horizonMs, shockFactor float64,
-	stochasticMode string,
 	rng *rand.Rand,
+	scenarioIdx int,
 ) SimulationResult {
+	stochasticMode := r.stochasticMode
 	wallStart := time.Now()
 	deadline := wallStart.Add(budget)
 	sched := newSchedulerFromPool()
 	defer sched.returnToPool()
 
-	if len(snaps) == 0 && (os.Getenv("FORCE_SIMULATION") == "on" || isScenarioDisabled()) {
+	if len(snaps) == 0 && os.Getenv("FORCE_SIMULATION") == "on" {
 		snaps = []bundleSnap{
 			{id: "frontend", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
 			{id: "payment", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
@@ -560,47 +620,36 @@ func run(
 	states := make(map[string]*ServiceSimState, len(snaps))
 	cascadeEdges, edgeWeights := buildCascadeEdges(topo)
 
-	for _, s := range snaps {
+	for i, s := range snaps {
+		seed := rng.Int63() + int64(i)
+		plant := physics.NewFluidPlant(seed)
+
+		if os.Getenv("CRITICAL_LOAD_MODE") == "on" {
+			plant.P.InflowMeanHigh = 1.45
+			plant.A = 1.45
+			plant.Q = 3.0
+			plant.Z = 0.3
+			plant.R = 1.0
+		} else {
+			plant.Q = float64(s.queueLen)
+			plant.A = s.arrivalRate
+		}
+
 		states[s.id] = &ServiceSimState{
 			ServiceID:      s.id,
-			ArrivalRate:    s.arrivalRate,
-			BaseRate:       s.arrivalRate,
+			ArrivalRate:    plant.A,
+			BaseRate:       plant.A,
 			ServiceRate:    s.serviceRate,
 			Concurrency:    s.concurrency,
 			Utilisation:    s.utilisation,
 			SLAThresholdMs: s.slaThresholdMs,
-			Plant: &modelling.FinalFluidPlant{
-				Mu:     s.serviceRate,
-				Rho:    s.utilisation,
-				KappaA: 0.8,
-				Nu:     0.2,
-				ChiA:   0.001,
-				Psi0:   0.5,
-				Qsat:   50.0,
-				Amax:   s.serviceRate * 10.0,
-				Alpha:  0.002,
-				Beta:   1.1,
-				Eta:    0.05,
-				Zeta:   0.01,
-				Theta:  0.02,
-				Pexp:   0.6,
-				Eps:    0.005,
-				Gamma:  1.0,
-				Omega:  0.05,
-				LambdaR: 0.1,
-				KL:     0.5,
-				Delta:  2.0,
-				Dt:     1.0, // 1ms tick
-				A:      s.arrivalRate,
-				Q:      0,
-				Z:      0,
-				R:      0,
-			},
+			Plant:          plant,
+			LastPhysicsTime: 0,
 		}
 		// Schedule base arrival and first physics tick
-		if s.arrivalRate > 0 {
+		if plant.A > 0 {
 			sched.Schedule(Event{
-				Time:      interarrival(rng, 1.0/s.arrivalRate, stochasticMode),
+				Time:      interarrival(rng, 1.0/plant.A, stochasticMode),
 				Kind:      EventArrival,
 				ServiceID: s.id,
 			})
@@ -625,6 +674,7 @@ func run(
 	eventCount := 0
 
 	for {
+		log.Printf("[NF_DEBUG] tick loop entered")
 		if time.Now().After(deadline) {
 			break
 		}
@@ -658,7 +708,17 @@ func run(
 			handleRecovery(e, st, sched, stochasticMode, rng, horizonMs)
 
 		case EventTick:
-			handleTick(e, st, sched, rng)
+			r.handleTick(e, st, sched, rng)
+
+			if r.nf != nil {
+				r.nf.Step()
+				log.Printf(
+					"[network_field] time=%d mass=%f tv=%f",
+					int(e.Time),
+					r.nf.TotalMass(),
+					r.nf.TotalVariation(),
+				)
+			}
 		}
 
 		if st.QueueLen >= maxQueueDepth {
@@ -898,7 +958,7 @@ func applyShock(
 	}
 
 	if st.Plant != nil {
-		st.Plant.Rho = st.Utilisation * shockFactor
+		st.Plant.A = st.BaseRate * shockFactor
 	}
 	st.ArrivalRate = st.BaseRate * shockFactor
 	st.ShockPeakRate = st.ArrivalRate
@@ -940,7 +1000,7 @@ func applyShock(
 			visited[tgt] = true
 			if tgtSt, ok := states[tgt]; ok && !tgtSt.Shocked {
 				if tgtSt.Plant != nil {
-					tgtSt.Plant.Rho = tgtSt.Utilisation * childAmp
+					tgtSt.Plant.A = tgtSt.BaseRate * childAmp
 				}
 				tgtSt.ArrivalRate = tgtSt.BaseRate * childAmp
 				tgtSt.ShockPeakRate = tgtSt.ArrivalRate
@@ -988,7 +1048,7 @@ func handleRecovery(e Event, st *ServiceSimState, sched interface{ Schedule(Even
 		newArrival := st.BaseRate + excess*math.Exp(-1.0)
 		st.ArrivalRate = newArrival
 		if st.Plant != nil {
-			st.Plant.Rho = (newArrival / st.BaseRate) * st.Utilisation
+			st.Plant.A = newArrival
 		}
 		// Schedule next recovery step unless within 2% of base.
 		if math.Abs(st.ArrivalRate-st.BaseRate) > st.BaseRate*0.02 {
@@ -1000,7 +1060,7 @@ func handleRecovery(e Event, st *ServiceSimState, sched interface{ Schedule(Even
 		} else {
 			st.ArrivalRate = st.BaseRate
 			if st.Plant != nil {
-				st.Plant.Rho = st.Utilisation
+				st.Plant.A = st.BaseRate
 			}
 			st.Shocked = false
 			if st.RecoveryConvergedAt == 0 {
@@ -1091,4 +1151,78 @@ func newSchedulerFromPool() *pooledScheduler {
 func (ps *pooledScheduler) returnToPool() {
 	*ps.rawHeap = ps.h
 	heapPool.Put(ps.rawHeap)
+}
+
+func populateNetworkField(nf *modelling.NetworkField, topo topology.GraphSnapshot, rng *rand.Rand) {
+	edgeMap := make(map[string]topology.Edge)
+	for _, e := range topo.Edges {
+		id := e.Source + "->" + e.Target
+		edgeMap[id] = e
+
+		dx := e.LatencyMs
+		if dx <= 0 {
+			dx = 1.0
+		}
+
+		ef := &modelling.EdgeField{
+			Cells:       make([]modelling.Cell, 16),
+			Dx:          dx,
+			InFlux:      0.2, // Activate constant inflow forcing
+			ServiceRate: 0.3, // Create temporary bottleneck near outlet
+		}
+		// Initialise density profile
+		for i := range ef.Cells {
+			if i < 5 {
+				ef.Cells[i].Rho = 0.7
+			} else {
+				ef.Cells[i].Rho = 0.1
+			}
+		}
+		if len(ef.Cells) > 0 {
+			log.Printf("[NF_DEBUG_INIT] edge=%s first_rho=%f cells=%d",
+				id, ef.Cells[0].Rho, len(ef.Cells))
+		}
+		nf.Edges[id] = ef
+		log.Printf("[network_field_init] edge=%s cells=%d first_rho=%f", id, len(ef.Cells), ef.Cells[0].Rho)
+	}
+
+	for _, n := range topo.Nodes {
+		nodeID := n.ServiceID
+		var inEdges []string
+		var outEdges []string
+
+		for id, e := range edgeMap {
+			if e.Target == nodeID {
+				inEdges = append(inEdges, id)
+			}
+			if e.Source == nodeID {
+				outEdges = append(outEdges, id)
+			}
+		}
+
+		if len(inEdges) > 0 && len(outEdges) > 0 {
+			r := make([][]float64, len(inEdges))
+			sumOut := 0.0
+			for _, id := range outEdges {
+				sumOut += edgeMap[id].Weight
+			}
+
+			for i := range inEdges {
+				r[i] = make([]float64, len(outEdges))
+				for k, id := range outEdges {
+					if sumOut > 0 {
+						r[i][k] = edgeMap[id].Weight / sumOut
+					} else {
+						r[i][k] = 1.0 / float64(len(outEdges))
+					}
+				}
+			}
+
+			nf.Junctions = append(nf.Junctions, &modelling.Junction{
+				In:  inEdges,
+				Out: outEdges,
+				R:   r,
+			})
+		}
+	}
 }

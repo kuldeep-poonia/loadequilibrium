@@ -1,8 +1,11 @@
 package simulation
 
-import "github.com/loadequilibrium/loadequilibrium/internal/modelling"
+import (
+	"github.com/loadequilibrium/loadequilibrium/internal/physics"
+)
 
 // EventKind classifies discrete simulation events.
+// ... (rest of file)
 type EventKind int
 
 const (
@@ -64,7 +67,12 @@ type ServiceSimState struct {
 	// Physics Engine (Fluid Plant)
 	// =============================
 
-	Plant *modelling.FinalFluidPlant
+	Plant *physics.FluidPlant
+
+	// Physics States for Mapping
+	QueueMass float64
+	Hazard    float64
+	Reservoir float64
 
 	// PhysicsClock accumulates virtual time between physics updates.
 	// Used to decimate stiff fluid integration from DES tick frequency.
@@ -73,6 +81,9 @@ type ServiceSimState struct {
 	// LastPhysicsTime is optional future extension:
 	// allows exact Δt computation if we later move to adaptive stepping.
 	LastPhysicsTime float64
+
+	// PhysicsUpdateCount tracks the number of Step() calls for log throttling.
+	PhysicsUpdateCount int64
 }
 
 // ServiceOutcome is a per-service simulation result.

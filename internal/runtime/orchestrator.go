@@ -413,7 +413,10 @@ func (o *Orchestrator) tick(now time.Time) {
 	if len(windows) > 0 {
 		systemStaleness = 1.0 - sumConf/float64(len(windows))
 	}
-	bypassDeepStages := false // Unconditional research mode
+	bypassDeepStages := systemStaleness > 0.5
+	if os.Getenv("FORCE_SIMULATION") == "on" {
+		bypassDeepStages = false
+	}
 
 	// Degraded-intelligence assessment.
 	degradedCount := 0
@@ -643,15 +646,21 @@ func (o *Orchestrator) tick(now time.Time) {
 
 	// ── Hard deadline gate for optional stages ────────────────────────────────
 	pastDeadline := time.Now().After(tickDeadline)
-	// Graduated skip policy — research mode: skip none
-	skipSim := false
-	skipPredDiff := false
-	skipPersist := false
+	// Graduated skip policy based on system pressure and staleness
+	skipSim := pastDeadline || o.pressureLevel >= 2 || systemStaleness > 0.4
+	skipPredDiff := pastDeadline || o.pressureLevel >= 1
+	skipPersist := pastDeadline && o.consecutiveOverruns > 0
 
-	// ── OPTIONAL Stage 6: Async simulation ───────────────────────────────────
+	if os.Getenv("FORCE_SIMULATION") == "on" {
+		skipSim = false
+		skipPredDiff = false
+	}
+
+	// OPTIONAL Stage 6: Async simulation
 	s6 := time.Now()
-	// Unconditional research-mode execution
-	o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
+	if !skipSim && o.tickCount%1 == 0 { // Frequency control
+		o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
+	}
 
 	if res := o.simRunner.Latest(); res != nil {
 		o.lastSimResult = res

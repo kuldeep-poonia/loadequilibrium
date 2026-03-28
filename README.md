@@ -1,5 +1,7 @@
 # LoadEquilibrium
 
+status :- in progress not completed yet 
+
 LoadEquilibrium is a simulation-driven decision engine for backend systems. It ingests live service telemetry, reconstructs operational state, projects system behavior forward, estimates risk, and produces control recommendations or actuator outputs before overload becomes visible in standard dashboards.
 
 This repository should be understood as a deterministic predictive control system packaged as a Dockerized sidecar service.

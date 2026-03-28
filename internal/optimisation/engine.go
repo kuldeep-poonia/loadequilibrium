@@ -163,6 +163,12 @@ func (e *Engine) RunControl(
 		}
 		e.lastScale[id] = scaleFactor
 
+		// P4: Capture the PID-bounded scale BEFORE MPC and trajectory adjustments.
+		// The anti-stiction check must compare against this snapshot, not against
+		// e.lastScale[id] which gets overwritten three times in the lines below.
+		// Previously, the stiction counter fired every tick (delta was always 0).
+		prevScaleForStiction := scaleFactor
+
 		// MPC short-horizon evaluation: adjust scale factor to avoid overshoot/undershoot.
 		mpcRes := e.mpc.Evaluate(b, output, scaleFactor)
 		scaleFactor = mpcRes.AdjustedScaleFactor
@@ -190,10 +196,13 @@ func (e *Engine) RunControl(
 			scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
 		}
 		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 3.0))
-		
-		// E. Anti-Stiction Mechanism: Detect stuck limits and inject exploratory bump
+
+		// E. Anti-Stiction Mechanism: Detect stuck limits and inject exploratory bump.
+		// Compares final scale against prevScaleForStiction (the PID-bounded value
+		// before MPC and planner) to detect when the whole optimizer chain has left
+		// the scale genuinely unchanged — not just within the same assignment.
 		stictionVal := 0
-		if math.Abs(scaleFactor-e.lastScale[id]) < 0.02 && scaleFactor < 0.75 {
+		if math.Abs(scaleFactor-prevScaleForStiction) < 0.02 && scaleFactor < 0.75 {
 			e.stictionCount[id]++
 			stictionVal = e.stictionCount[id]
 			if stictionVal > 4 { // 5th tick of being stuck

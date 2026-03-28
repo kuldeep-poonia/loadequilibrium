@@ -3,6 +3,7 @@ package streaming
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -12,15 +13,13 @@ import (
 )
 
 const (
-	writeTimeout   = 5 * time.Second
-	pingInterval   = 15 * time.Second
-	sendBufferSize = 16
-	pongWait       = 60 * time.Second
+	writeTimeout      = 5 * time.Second
+	pingInterval      = 15 * time.Second
+	sendBufferSize    = 16
+	pongWait          = 60 * time.Second
 	defaultMaxClients = 50
 )
 
-// Hub manages connected WebSocket clients and broadcasts tick payloads.
-// Client count is capped to prevent cardinality explosion.
 type Hub struct {
 	mu         sync.RWMutex
 	clients    map[*client]struct{}
@@ -28,7 +27,6 @@ type Hub struct {
 	maxClients int
 }
 
-// NewHub creates an empty Hub with the default client cap.
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*client]struct{}),
@@ -36,23 +34,45 @@ func NewHub() *Hub {
 	}
 }
 
-// SetMaxClients configures the maximum number of concurrent WebSocket clients.
 func (h *Hub) SetMaxClients(n int) {
 	if n > 0 {
 		h.maxClients = n
 	}
 }
 
-// Broadcast serialises the TickPayload and sends it to all connected clients.
-// Slow clients whose send buffer is full are dropped immediately.
+/* ================= SAFE FLOAT ================= */
+
+func safeFloat(x float64) float64 {
+	if math.IsNaN(x) || math.IsInf(x, 0) {
+		return 0
+	}
+	return x
+}
+
+/* ================ PAYLOAD SANITISER ================= */
+
+func sanitizePayload(p *TickPayload) {
+
+	// ⚠ adjust fields according to your TickPayload struct
+	p.TickHealthMs = safeFloat(p.TickHealthMs)
+	p.DegradedFraction = safeFloat(p.DegradedFraction)
+	p.JitterMs = safeFloat(p.JitterMs)
+
+}
+
+/* ================= BROADCAST ================= */
+
 func (h *Hub) Broadcast(p *TickPayload) {
+
+	sanitizePayload(p)
+
 	p.SequenceNo = h.seqNo.Add(1)
 	p.Timestamp = time.Now()
 	p.Schema = SchemaVersion
 
 	data, err := json.Marshal(p)
 	if err != nil {
-		log.Printf("[hub] marshal error: %v", err)
+		log.Printf("[hub] marshal error (sanitised payload): %v", err)
 		return
 	}
 
@@ -73,9 +93,10 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	}
 }
 
-// HandleUpgrade upgrades an HTTP connection to WebSocket and registers the client.
-// Returns HTTP 503 when the hub is at capacity.
+/* ================= UPGRADE ================= */
+
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
+
 	h.mu.RLock()
 	count := len(h.clients)
 	h.mu.RUnlock()
@@ -112,7 +133,6 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	go c.readPump()
 }
 
-// ClientCount returns the number of currently connected clients.
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -128,15 +148,16 @@ func (h *Hub) remove(c *client) {
 	h.mu.Unlock()
 }
 
-// client represents one connected WebSocket session.
+/* ================= CLIENT ================= */
+
 type client struct {
 	hub  *Hub
 	conn *ws.Conn
 	send chan []byte
 }
 
-// writePump pumps messages from the send channel to the WebSocket connection.
 func (c *client) writePump() {
+
 	ticker := time.NewTicker(pingInterval)
 	defer func() {
 		ticker.Stop()
@@ -164,9 +185,9 @@ func (c *client) writePump() {
 	}
 }
 
-// readPump detects client disconnection via read errors; handles pong frames.
 func (c *client) readPump() {
 	defer c.hub.remove(c)
+
 	c.conn.SetReadLimit(512)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 

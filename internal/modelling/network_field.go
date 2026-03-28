@@ -41,11 +41,10 @@ type EdgeField struct {
 	InFlux  float64
 	OutFlux float64
 
-	ServiceRate float64
-	NoiseAmp    float64
-
-	SourceGain     float64 // distributed coupling gain
-	QueueLoadRatio float64 // coupled plant state
+	ServiceRate    float64
+	NoiseAmp       float64
+	SourceGain     float64
+	QueueLoadRatio float64
 }
 
 type Junction struct {
@@ -224,11 +223,8 @@ func fluxStep(e *EdgeField, dt float64, rng *RNG) {
 	}
 
 	for i := 0; i < n; i++ {
-		// Conservative flux update
-		e.Cells[i].Rho -= dt / e.Dx * (flux[i+1] - flux[i])
 
-		// Distributed source coupling (Phase-2)
-		e.Cells[i].Rho += dt * e.SourceGain * (e.QueueLoadRatio - e.Cells[i].Rho)
+		e.Cells[i].Rho -= dt / e.Dx * (flux[i+1] - flux[i])
 
 		if e.Cells[i].Rho < 0 {
 			e.Cells[i].Rho = 0

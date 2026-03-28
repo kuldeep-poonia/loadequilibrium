@@ -3,8 +3,8 @@ package modelling
 import "math"
 
 // ============================================================
-// Research-grade numerically stable stochastic fluid queue plant
-// Designed for long-horizon nonlinear congestion experiments
+// Research-grade numerically stable stochastic fluid congestion plant
+// Always-bounded nonlinear regime (controller-usable)
 // ============================================================
 
 type FinalFluidPlant struct {
@@ -53,6 +53,8 @@ type FinalFluidPlant struct {
 	R float64
 }
 
+// ================= utilities =================
+
 // ================= helpers =================
 
 func (p *FinalFluidPlant) rhoEff() float64 {
@@ -65,17 +67,16 @@ func (p *FinalFluidPlant) psi(q float64) float64 {
 
 func (p *FinalFluidPlant) sigma() float64 {
 
-	base := 0.3 * (1 + p.Theta*p.Q/(1+p.Q))
+	base := 0.25 * (1 + p.Theta*p.Q/(1+p.Q))
 	hazard := math.Pow(1+p.Zeta*p.Z/(1+p.Z), p.Pexp)
 
 	s := base * hazard
 
-	return clamp(s, 0, 5)
+	return clamp(s, 0, 3)
 }
 
 func (p *FinalFluidPlant) service(u float64) float64 {
 
-	// softened degradation (no exponential underflow)
 	congestion := 1.0 / (1 + p.Alpha*math.Pow(p.Q, p.Beta))
 	hazard := 1.0 / (1 + p.Eta*p.Z)
 
@@ -109,50 +110,53 @@ func (p *FinalFluidPlant) Step(control float64, dBH float64) (float64, float64, 
 	// -------- effective intensity -----
 	rhoEff := p.rhoEff()
 
-	// -------- arrival dynamics --------
-	driftA := p.KappaA*(rhoEff*p.Mu-p.A) +
-		p.psi(p.Q) -
-		p.ChiA*p.A*p.A
+	// -------- arrival drift (TAMED) ----
+	driftA :=
+		p.KappaA*(rhoEff*p.Mu - p.A) +
+			p.psi(p.Q) -
+			p.ChiA*p.A*p.A
 
-	p.A += driftA*dt + p.Nu*dBH
+	driftA = driftA / (1 + math.Abs(driftA)*dt)
 
-	// background load floor
-	minLoad := 0.05 * p.Mu
-	if p.A < minLoad {
-		p.A = minLoad
-	}
+	p.A += driftA*dt + 0.4*p.Nu*math.Sqrt(dt)*dBH
 
-	p.A = clamp(p.A, 0, p.Amax)
+	p.A = clamp(p.A, 0.02*p.Mu, p.Amax)
 
-	// -------- service -----------------
+	// -------- service ------------------
 	S := p.service(control)
 
-	// -------- stochastic forcing -------
+	// -------- diffusion (RENORMALISED) --
 	sig := p.sigma()
-	noise := sig * dBH
+	noise := sig * math.Sqrt(dt) * dBH
 
-	// -------- queue drift --------------
-	driftQ := (p.A - S)
+	// -------- congestion potential ------
+	cong := (p.A - S)
 
-	// nonlinear congestion pressure
-	driftQ -= 0.002 * p.Q * p.Q
+	cong = cong / (1 + 0.001*p.Q*p.Q)
 
-	// soft reflection near zero
+	// -------- reflection ----------------
 	barrier := p.reflectionForce(p.Q)
 
-	p.Q += (driftQ+barrier)*dt + noise
+	// -------- queue update (TAMED) ------
+	dQ := (cong + barrier)
+	dQ = dQ / (1 + math.Abs(dQ)*dt)
 
-	p.Q = clamp(p.Q, 0, 5000)
+	p.Q += dQ*dt + noise
+	p.Q = clamp(p.Q, 0, 3000)
 
-	// -------- slow hazard physics ------
-	hz := p.Eps * math.Pow(p.Q/(1+p.Q), p.Gamma)
-	p.Z += hz * dt
+	// -------- hazard with RELAXATION ----
+	hzGrow := p.Eps * math.Pow(p.Q/(1+p.Q), p.Gamma)
+	hzRelax := 0.02 * p.Z
 
-	p.Z = clamp(p.Z, 0, 1000)
+	p.Z += (hzGrow - hzRelax) * dt
+	p.Z = clamp(p.Z, 0, 500)
 
-	// -------- reservoir manifold -------
-	p.R += ((p.A - S) - p.LambdaR*p.R) * dt
-	p.R = clamp(p.R, -20, 20)
+	// -------- reservoir slow manifold ---
+	dR := (p.A - S) - p.LambdaR*p.R
+	dR = dR / (1 + math.Abs(dR))
+
+	p.R += dR * dt
+	p.R = clamp(p.R, -10, 10)
 
 	return p.Q, p.A, p.Z
 }

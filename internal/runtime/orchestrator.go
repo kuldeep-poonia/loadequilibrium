@@ -35,6 +35,12 @@ const (
 	stageIdxReasoning = 7
 	stageIdxBroadcast = 8
 	numStageMetrics   = 9
+
+	// simInterval controls how often simulation is submitted to the async runner.
+	// A value of 2 means submit every other tick, amortising the async cost while
+	// keeping results fresh enough for control decisions.
+	// P6: Replaces the previous tickCount%1==0 no-op which ran every tick.
+	simInterval = 2
 )
 
 // Orchestrator is the deterministic tick-based engine with:
@@ -59,6 +65,7 @@ type Orchestrator struct {
 	actuator       actuator.Actuator
 	scenarioEngine *scenario.SuperpositionEngine
 	pw             *persistence.Writer
+	phaseRuntime   *phaseRuntime
 
 	tickCount     uint64
 	lastSimResult *simulation.SimulationResult
@@ -101,6 +108,13 @@ type Orchestrator struct {
 	// Incremented each tick; reset to 0 when a new result arrives.
 	// Used to mark the sim overlay as stale on the dashboard.
 	simOverlayAge int
+
+	// simStateOverlay carries physics state forwarded from the most recent
+	// simulation result. It is passed explicitly to the modelling stage
+	// rather than being injected into observed telemetry windows.
+	// Key: serviceID. This preserves the separation between observed state
+	// and predicted state throughout the tick pipeline.
+	simStateOverlay map[string]simulation.ServiceOutcome
 }
 
 func New(
@@ -141,6 +155,7 @@ func New(
 		actuator:        act,
 		scenarioEngine:  scen,
 		pw:              pw,
+		phaseRuntime:    newPhaseRuntime(cfg),
 		windowN:         windowN,
 		currentInterval: cfg.TickInterval,
 	}
@@ -384,13 +399,15 @@ func (o *Orchestrator) tick(now time.Time) {
 		windows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
 	}
 
-	// Inject persistent physics states from the last simulation run (observer coupling)
-	if o.lastSimResult != nil {
-		for id, w := range windows {
-			if outcome, ok := o.lastSimResult.Services[id]; ok {
-				w.Hazard = outcome.FinalHazard
-				w.Reservoir = outcome.FinalReservoir
-			}
+	// Update the sim overlay side-channel when a new result arrives.
+	// This is NOT injected into observed windows — it is passed explicitly
+	// to stages that need forward-projected physics state.
+	if o.lastSimResult != nil && o.simOverlayAge == 0 {
+		if o.simStateOverlay == nil {
+			o.simStateOverlay = make(map[string]simulation.ServiceOutcome, len(o.lastSimResult.Services))
+		}
+		for id, outcome := range o.lastSimResult.Services {
+			o.simStateOverlay[id] = outcome
 		}
 	}
 
@@ -637,6 +654,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	costGradients := optimisation.ComputeCostGradients(bundles, topoSnap, 500.0)
 	directives := o.optEngine.RunControl(bundles, costGradients, o.lastSimResult, topoSnap, now)
 	objective := optimisation.ComputeObjective(bundles, topoSnap, now)
+	directives = o.phaseRuntime.apply(o.tickCount, now, bundles, objective, directives)
 
 	if o.actuator != nil {
 		o.actuator.Dispatch(o.tickCount, directives)
@@ -646,8 +664,11 @@ func (o *Orchestrator) tick(now time.Time) {
 
 	// ── Hard deadline gate for optional stages ────────────────────────────────
 	pastDeadline := time.Now().After(tickDeadline)
-	// Graduated skip policy based on system pressure and staleness
-	skipSim := pastDeadline || o.pressureLevel >= 2 || systemStaleness > 0.4
+	// P5: Aligned sim staleness threshold with bypassDeepStages (both now 0.5).
+	// Previously skipSim used 0.4 while bypassDeepStages used 0.5, causing
+	// simulation (cheaper) to be skipped before the stochastic model (more expensive),
+	// an inverted priority that left the control loop without sim data unnecessarily.
+	skipSim := pastDeadline || o.pressureLevel >= 2 || systemStaleness > 0.5
 	skipPredDiff := pastDeadline || o.pressureLevel >= 1
 	skipPersist := pastDeadline && o.consecutiveOverruns > 0
 
@@ -658,7 +679,8 @@ func (o *Orchestrator) tick(now time.Time) {
 
 	// OPTIONAL Stage 6: Async simulation
 	s6 := time.Now()
-	if !skipSim && o.tickCount%1 == 0 { // Frequency control
+	// P6: Use named constant simInterval instead of the previous %1 no-op.
+	if !skipSim && o.tickCount%simInterval == 0 {
 		o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
 	}
 

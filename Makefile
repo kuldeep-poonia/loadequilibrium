@@ -1,10 +1,15 @@
 .PHONY: build run clean
 
-build:
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/loadequilibrium ./cmd/loadequilibrium/
+GO ?= go
+BIN_DIR ?= bin
+BINARY ?= loadequilibrium
 
-run: build
-	./bin/loadequilibrium
+build:
+	mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY) ./cmd/loadequilibrium/
+
+run:
+	$(GO) run ./cmd/loadequilibrium/
 
 clean:
-	rm -rf bin/
+	rm -rf $(BIN_DIR)/

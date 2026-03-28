@@ -10,12 +10,12 @@ import (
 // It maintains one ring buffer per service, enforces a cardinality cap,
 // and prunes services that have not reported within the stale age.
 type Store struct {
-	mu         sync.RWMutex
-	buffers    map[string]*RingBuffer
-	lastSeen   map[string]time.Time
-	bufCap     int
-	maxSvc     int
-	staleAge   time.Duration
+	mu       sync.RWMutex
+	buffers  map[string]*RingBuffer
+	lastSeen map[string]time.Time
+	bufCap   int
+	maxSvc   int
+	staleAge time.Duration
 }
 
 func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
@@ -28,9 +28,52 @@ func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
 	}
 }
 
+func sanitizePoint(p *MetricPoint) bool {
+	if p.ServiceID == "" {
+		return false
+	}
+	// Clamp to physically meaningful ranges.
+	if p.RequestRate < 0 {
+		p.RequestRate = 0
+	}
+	if p.ErrorRate < 0 {
+		p.ErrorRate = 0
+	}
+	if p.ErrorRate > 1 {
+		p.ErrorRate = 1 // error rate is a fraction [0,1]
+	}
+	// Latency values of 0 cause division-by-zero in service rate formula.
+	// Floor at 0.1ms — if a service truly responds in <0.1ms, physics is fine.
+	const minLatencyMs = 0.1
+	if p.Latency.Mean < 0 {
+		p.Latency.Mean = 0
+	}
+	if p.Latency.P50 < 0 {
+		p.Latency.P50 = 0
+	}
+	if p.Latency.P95 < 0 {
+		p.Latency.P95 = 0
+	}
+	if p.Latency.P99 < 0 {
+		p.Latency.P99 = 0
+	}
+	// A mean of 0 with any other latency percentile set is suspicious but legal.
+	// We only floor when ALL are zero to avoid masking real ultra-fast services.
+	if p.Latency.Mean == 0 && p.Latency.P50 == 0 && p.Latency.P95 == 0 {
+		p.Latency.Mean = minLatencyMs
+	}
+	if p.ActiveConns < 0 {
+		p.ActiveConns = 0
+	}
+	if p.QueueDepth < 0 {
+		p.QueueDepth = 0
+	}
+	return true
+}
+
 // Ingest appends a MetricPoint. New services are admitted up to maxSvc.
 func (s *Store) Ingest(p *MetricPoint) {
-	if p.ServiceID == "" {
+	if !sanitizePoint(p) {
 		return
 	}
 	if p.Timestamp.IsZero() {

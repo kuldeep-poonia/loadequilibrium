@@ -20,9 +20,13 @@ type CoalescingActuator struct {
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
+	backend  Backend
 }
 
-func NewCoalescingActuator(feedbackBuf int) *CoalescingActuator {
+func NewCoalescingActuator(feedbackBuf int, backend Backend) *CoalescingActuator {
+	if backend == nil {
+		backend = &LogOnlyBackend{}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &CoalescingActuator{
 		pending:  make(map[string]DirectiveSnapshot),
@@ -31,6 +35,7 @@ func NewCoalescingActuator(feedbackBuf int) *CoalescingActuator {
 		done:     make(chan struct{}),
 		ctx:      ctx,
 		cancel:   cancel,
+		backend:  backend,
 	}
 	a.wg.Add(1)
 	go a.loop()
@@ -85,8 +90,6 @@ func (a *CoalescingActuator) processPending() {
 		a.mu.Unlock()
 		return
 	}
-	
-	// Fast O(N) extraction to bound lock hold time strictly to memory copies.
 	batch := make([]DirectiveSnapshot, 0, len(a.pending))
 	for id, snap := range a.pending {
 		batch = append(batch, snap)
@@ -94,25 +97,26 @@ func (a *CoalescingActuator) processPending() {
 	}
 	a.mu.Unlock()
 
-	// External execution boundaries
 	for _, snap := range batch {
 		start := time.Now()
-		
-		// [SYSTEM SIMULATION BASE] Real actuation I/O occurs here.
-		time.Sleep(1 * time.Millisecond) // Simulated latency
-		
+		execCtx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+		err := a.backend.Execute(execCtx, snap)
+		cancel()
 		latency := time.Since(start)
-		log.Printf("[actuator] EXECUTED id=%s svc=%s limit=%.2f latency=%s tick=%d", snap.DirectiveID, snap.ServiceID, snap.ScaleFactor, latency, snap.TickIndex)
+		success := err == nil
+		if !success {
+			log.Printf("[actuator] FAILED id=%s svc=%s err=%v tick=%d",
+				snap.DirectiveID, snap.ServiceID, err, snap.TickIndex)
+		}
 
 		res := ActuationResult{
 			TickIndex:   snap.TickIndex,
 			ServiceID:   snap.ServiceID,
 			DirectiveID: snap.DirectiveID,
-			Success:     true,
+			Success:     success,
 			Latency:     latency,
+			Error:       err,
 		}
-		
-		// Non-blocking feedback emission
 		select {
 		case a.feedback <- res:
 		default:

@@ -31,11 +31,11 @@ type InfraState struct {
 	PerfScore float64
 }
 
-type ControlBundle struct {
-	ScaleDelta float64
-	CacheDelta float64
-	ShardDelta float64
-	RetryTune  float64
+type MPCWeighting struct {
+	RiskWeight float64
+	SmoothCost float64
+
+
 }
 
 type AutonomyControlAdapter struct {
@@ -75,7 +75,7 @@ func (a *AutonomyControlAdapter) BindPolicy(policy func([]float64) []float64) {
 
 func (a *AutonomyControlAdapter) Step(
 	s InfraState,
-) ControlBundle {
+) MPCWeighting {
 
 	norm :=
 		a.normalize(
@@ -159,11 +159,11 @@ func (a *AutonomyControlAdapter) Step(
 
 	a.lastAct = act
 
-	return ControlBundle{
-		ScaleDelta: act[0],
-		CacheDelta: act[1],
-		ShardDelta: act[2],
-		RetryTune:  act[3],
+	return MPCWeighting{
+		RiskWeight: 0.20 * clamp(act[0], -0.2, 0.4),
+		SmoothCost: 0.10 * clamp(act[1], -0.1, 0.2),
+
+
 	}
 }
 

@@ -1,290 +1,650 @@
 # LoadEquilibrium
 
-**LoadEquilibrium is an autonomous backend intelligence and control system for distributed services.**
+LoadEquilibrium is a simulation-driven decision engine for backend systems. It ingests live service telemetry, reconstructs operational state, projects system behavior forward, estimates risk, and produces control recommendations or actuator outputs before overload becomes visible in standard dashboards.
 
-It takes live service telemetry, reconstructs hidden queueing and dependency pressure, predicts instability before it becomes visible in standard dashboards, and turns that into runtime control directives through a five-phase intelligence pipeline.
+This repository should be understood as a deterministic predictive control system packaged as a Dockerized sidecar service.
 
-If you want the short version:
+It is not:
 
-- In simple words: this project is an autopilot for backend systems.
-- In technical words: this is a deterministic, tick-driven control plane that combines telemetry inference, queueing theory, topology analysis, predictive optimisation, simulation, and autonomous decision fusion.
+- machine learning
+- anomaly detection by pattern matching
+- a general-purpose AI platform
 
-## Why This Project Exists
+It is:
 
-Modern production systems usually react too late.
+- model-based
+- control-oriented
+- simulation-driven
+- built around queue physics, topology coupling, and MPC-style optimization
 
-Most platforms scale or shed traffic after CPU, error rate, or tail latency has already moved into the danger zone. By that point, queue growth, retry storms, downstream pressure, and collapse cascades may already be underway.
+## Contents
 
-LoadEquilibrium is built around a different assumption:
+1. [Project Overview](#project-overview)
+2. [Core Concept](#core-concept)
+3. [System Architecture](#system-architecture)
+4. [Key Features](#key-features)
+5. [How It Works (Deep Dive)](#how-it-works-deep-dive)
+6. [Real-World Use Cases](#real-world-use-cases)
+7. [Installation (Docker)](#installation-docker)
+8. [Configuration](#configuration)
+9. [API Reference](#api-reference)
+10. [Dashboard](#dashboard)
+11. [Example Workflow](#example-workflow)
+12. [Limitations](#limitations)
+13. [Roadmap](#roadmap)
+14. [Contributing](#contributing)
+15. [License](#license)
 
-**the safest time to intervene is before saturation is obvious.**
+## Project Overview
 
-That means the system focuses on:
+### What LoadEquilibrium Is
 
-- hidden queue pressure instead of only resource counters
-- topology-aware risk instead of isolated service metrics
-- predictive intervention instead of reactive dashboards
-- safe autonomous control instead of pure recommendation-only analytics
+LoadEquilibrium is a runtime control companion for distributed backend systems. It runs beside an application or platform stack, consumes operational telemetry, models service pressure and dependency effects, and decides whether the system is moving toward a stable or unstable operating region.
 
-## What It Does
+The system is designed for environments where raw CPU, error rate, and tail latency are not enough to answer the operational question that matters:
 
-### In Simple Language
+"What is likely to happen next, and what action should be taken before the system degrades further?"
 
-Imagine a smart control room for your backend:
+### Why It Exists
 
-- it watches services talk to each other
-- it notices which services are quietly getting overloaded
-- it predicts which one will break next
-- it tests safer responses in a sandbox
-- it picks a control action and sends it to an actuator
+Conventional monitoring is mostly retrospective. A typical monitoring stack shows:
 
-The goal is to stop a backend incident before it turns into a visible outage.
+- what the current metrics are
+- whether thresholds have been crossed
+- which services are already unhealthy
 
-### In Technical Language
+That approach is necessary, but it is often too late for systems dominated by:
 
-LoadEquilibrium runs a continuous closed loop:
+- queue growth
+- retry amplification
+- topology-driven backpressure
+- nonlinear saturation
+- delayed actuation effects
 
-1. ingest telemetry for services and upstream edges
-2. build confidence-scored service windows
-3. reconstruct queue state, utilisation, latency pressure, and topology coupling
-4. estimate stability, cascade risk, and saturation horizons
-5. compute control directives with optimisation logic
-6. pass those directives through a five-phase intelligence chain
-7. dispatch runtime-safe directives to the actuator
-8. stream full state to a live WebSocket dashboard
+LoadEquilibrium exists to work one step earlier in the chain. Instead of waiting for visible failure, it estimates pressure build-up, simulates likely trajectories, evaluates stability, and derives bounded control actions.
 
-## End-to-End Pipeline
+### Problem It Solves
 
-```text
-Telemetry / Infra State
-  -> Service Windows + Freshness Scoring
-  -> Topology + Coupling + Queue Modelling
-  -> Objective / Control Optimisation
-  -> Phase 1: Policy Intelligence
-  -> Phase 2: Recommendation Engine
-  -> Phase 3: Closed-Loop Autopilot
-  -> Phase 4: Sandbox Simulation (when risk warrants)
-  -> Phase 5: Advanced Intelligence / Autonomy Layer
-  -> Actuator Dispatch
-  -> Dashboard + Persistence + Reasoning Events
-```
+The project is aimed at the class of problems where backend systems fail gradually before they fail obviously:
 
-This flow is implemented in the runtime orchestrator and the phase runtime bridge, with the phase chain executed before final actuation.
+- request queues grow before CPU reaches its absolute ceiling
+- one dependency under stress destabilizes several neighbors
+- retry policy changes can worsen overload instead of helping
+- a scale decision helps only after warmup lag, so late action is expensive
 
-## The Five Intelligence Phases
+LoadEquilibrium addresses those problems by treating a backend as a control system rather than as a collection of unrelated service metrics.
 
-| Phase | Name | Purpose | Runtime Role |
-| --- | --- | --- | --- |
-| 1 | Policy Intelligence | Evaluates scaling, retry, queue, and cache policy signals | Produces coarse defensive policy decisions and global policy risk |
-| 2 | Recommendation Engine | Converts policy and system stress into intervention recommendations | Refines capacity, damping, retry pressure, and brownout guidance |
-| 3 | Closed-Loop Autopilot | Uses predictor, identification, MPC, rollout, and safety logic | Produces runtime telemetry-backed autopilot actions and bounded control behavior |
-| 4 | Sandbox Simulation | Runs deterministic experiment comparisons under candidate actions | Tests potential interventions under disturbance before trusting them more deeply |
-| 5 | Advanced Intelligence | Uses autonomy telemetry, hazard estimation, rollout certification, safety projection, and decision fusion | Certifies or degrades actions, switches autonomy modes, and keeps the final action safe |
+## Core Concept
 
-### Phase 1: Policy Intelligence
+### Simulation-Driven Decision Making
 
-Policy intelligence lives in `internal/policy` and evaluates:
+The central idea is simple:
 
-- scaling pressure
-- retry policy pressure
-- queue policy pressure
-- cache policy pressure
-- fused policy-level risk and cost
+1. Observe the system as it is now.
+2. Infer the hidden state that matters operationally.
+3. Project forward under current conditions and candidate interventions.
+4. Compare the likely outcomes.
+5. Select a bounded action or recommendation.
 
-This is the first intelligence layer that turns raw system stress into control meaning.
+The project does not search for patterns in historical labels. It does not train a model to classify incidents. It uses explicit models and deterministic calculations with bounded stochastic simulation where uncertainty needs to be explored.
 
-### Phase 2: Recommendation Engine
+### Predictive Control
 
-The recommendation layer lives in `internal/sandbox/policy_recommendation.go` and related comparison logic.
+LoadEquilibrium uses predictive control ideas rather than threshold-only automation. In practice that means:
 
-It translates model output into more actionable recommendations such as:
+- the system keeps a short-horizon view of future load and backlog
+- control actions are evaluated as trajectories, not one-off toggles
+- the cost of action is balanced against risk, latency, backlog, and stability
+- safety constraints remain in the loop
 
-- capacity increase or reduction
-- damping suggestions
-- retry pressure shifts
-- efficiency and brownout signals
+The result is closer to operational steering than to static alerting.
 
-It is the bridge between "the system is under stress" and "here is the style of intervention that makes sense."
+### Difference From Traditional Monitoring
 
-### Phase 3: Closed-Loop Autopilot
+| Traditional Monitoring | LoadEquilibrium |
+| --- | --- |
+| Reports current metric values | Projects future system trajectories |
+| Primarily threshold-based | Primarily model-based |
+| Often service-local | Explicitly topology-aware |
+| Alerts after symptoms emerge | Seeks intervention before visible degradation |
+| Optimized for human inspection | Designed for inspection plus decision support and actuation |
 
-The autopilot layer in `internal/autopilot` gives the project its control-theory character.
+### Difference From AI/ML Systems
 
-It includes:
+The repository contains packages with names such as `intelligence` and `autopilot`, but the system should still be understood as deterministic engineering software. The control path is not based on trained ML models.
 
-- predictor
-- MPC optimiser
-- identification engine
-- rollout controller
-- safety engine
-- runtime orchestrator
-
-This phase is responsible for turning recommendations into controlled behavior rather than one-shot heuristics.
-
-### Phase 4: Sandbox Simulation
-
-The sandbox in `internal/sandbox` acts like a digital twin harness.
-
-When risk is elevated, the runtime can:
-
-- generate disturbance scenarios
-- run baseline vs candidate experiments
-- compare temporal robustness and collapse energy
-- produce recommendation metadata from simulated outcomes
-
-This is how the system reduces the danger of blindly trusting an intervention under uncertain conditions.
-
-### Phase 5: Advanced Intelligence / Autonomy Layer
-
-The autonomy stack in `internal/intelligence` is the highest-level reasoning and certification layer.
-
-It adds:
-
-- autonomy telemetry modelling
-- predictive rollout
-- hazard value estimation
-- safety projection
-- adaptive learning hooks
-- mode switching between advisory, supervised, autonomous, and safety-only
-
-This phase makes the system more than a controller. It makes it an autonomy framework with explicit safety behavior.
-
-## Core Runtime Design
-
-LoadEquilibrium is built as a deterministic tick engine.
-
-On every tick, the runtime:
-
-1. prunes stale services
-2. computes service windows with freshness and confidence
-3. applies scenario superposition if enabled
-4. computes topology state and network coupling
-5. runs queue and stochastic modelling
-6. computes optimisation objectives and directives
-7. executes the five-phase intelligence chain
-8. dispatches directives asynchronously to the actuator
-9. broadcasts full runtime state to the dashboard
-10. persists snapshots when a database is configured
-
-The runtime also includes:
-
-- adaptive tick cadence
-- hard tick deadlines
-- pressure-aware stage skipping
-- safety escalation levels
-- simulation budget control
-- degraded-intelligence handling for stale or sparse telemetry
-
-## Research Character
-
-This project sits in an interesting middle ground:
-
-- too operational to be only a toy simulation
-- too intelligence-heavy to be only a dashboard
-- too control-oriented to be only an autoscaler
-
-It mixes ideas from:
+The core logic comes from:
 
 - queueing theory
-- distributed systems reliability
-- model predictive control
-- online optimisation
-- topology sensitivity analysis
-- Monte Carlo scenario analysis
-- safe autonomy and runtime decision certification
+- control logic
+- bounded predictive search
+- explicit risk and safety heuristics
+- topology analysis
+- Monte Carlo style simulation for uncertainty exploration
 
-That makes it suitable both as a practical engineering platform and as a research-grade experimentation base.
+This distinction matters for operations, compliance, and expectations. You tune this system like an engineered controller, not like a black-box model.
 
-## Main Building Blocks
+## System Architecture
 
-### Telemetry
+### Runtime Pipeline
 
-`internal/telemetry`
+The runtime is a tick-driven engine. Each tick processes new telemetry, updates models, evaluates risk, and emits outputs.
 
-- ingests service metric points
-- stores bounded ring buffers
-- computes service windows
-- infers missing signals when possible
-- assigns confidence and signal quality
+```text
+POST /api/v1/ingest
+    -> telemetry.Store
+        -> windowing and confidence scoring
+        -> topology reconstruction
+        -> queue and stability modelling
+        -> optimization and control fusion
+        -> simulation and reasoning
+        -> dashboard streaming
+        -> optional persistence
+        -> actuator execution
+```
 
-### Modelling
+The orchestration flow in the codebase is implemented as a staged pipeline:
 
-`internal/modelling`
+```text
+Ingest
+  -> Telemetry Store
+  -> Stage 1: Prune stale services
+  -> Stage 2: Build service windows and confidence
+  -> Stage 3: Build topology and coupled equilibrium state
+  -> Stage 4: Run queue, stochastic, signal, and stability models
+  -> Stage 5: Compute optimization directives
+  -> Stage 5b: Apply phase runtime control fusion
+  -> Stage 6: Run asynchronous simulation
+  -> Stage 7: Generate reasoning events
+  -> Stage 8: Broadcast state to dashboard
+  -> Stage 9: Persist snapshots when enabled
+  -> Actuator: dispatch directives to configured backend
+```
 
-- queue physics
-- signal processing
-- stochastic modelling
+### Stage-by-Stage Explanation
+
+| Stage | Purpose | Main Output |
+| --- | --- | --- |
+| Ingest | Accept telemetry points from services or collectors | `MetricPoint` records |
+| Telemetry Store | Maintain bounded per-service history, freshness, and confidence | `ServiceWindow` maps |
+| Topology | Build dependency graph and sensitivity context | graph snapshot and coupling inputs |
+| Modelling | Estimate queue pressure, stochastic burst characteristics, and stability state | service model bundles |
+| Optimization | Compute direct control directives from current modeled state | scale and utilization directives |
+| Phase Runtime | Fuse policy, sandbox, autopilot, and safety layers into final control output | merged directives |
+| Simulation | Explore future trajectories under the current modeled system | collapse and SLA risk overlays |
+| Reasoning | Convert raw model states into operator-facing events | reasoning event stream |
+| Streaming | Publish full tick state to WebSocket clients and dashboard | `TickPayload` |
+| Persistence | Store snapshots when a database is configured | durable runtime history |
+| Actuation | Route directives to queue, HTTP, or fallback backends | external or simulated action result |
+
+### Main Subsystems
+
+| Subsystem | Directory | Responsibility |
+| --- | --- | --- |
+| Runtime engine | `internal/runtime` | orchestrates the tick loop |
+| Telemetry ingestion | `internal/telemetry` | stores metric history and computes windows |
+| Modelling | `internal/modelling` | queue physics, coupling, equilibrium, and stability analysis |
+| Optimization | `internal/optimisation` | computes directive candidates and objective scores |
+| Autopilot | `internal/autopilot` | MPC-style horizon control, rollout, and safety logic |
+| Scenario engine | `internal/scenario` | optional synthetic disturbances for testing |
+| Simulation | `internal/simulation` | budget-bounded predictive simulation |
+| Reasoning | `internal/reasoning` | operator-facing event generation |
+| Streaming | `internal/streaming` | live state transport schema and hub |
+| Dashboard | `internal/dashboard` | HTTP UI, ingest endpoint, WebSocket wiring |
+| Actuator | `internal/actuator` | directive coalescing and backend execution |
+| Persistence | `internal/persistence` | optional PostgreSQL snapshot writer |
+
+### Deployment Model
+
+LoadEquilibrium is intended to run as a sidecar-style service or colocated control service. A common deployment model is:
+
+```text
+application / telemetry collector
+    -> LoadEquilibrium sidecar
+        -> local dashboard on :8080
+        -> websocket stream
+        -> optional persistence
+        -> actuator backend or external control endpoint
+```
+
+This arrangement keeps observation, prediction, and response close to the workload being supervised.
+
+### Repository Layout
+
+```text
+cmd/loadequilibrium              main executable
+internal/runtime                 tick engine and phase runtime
+internal/telemetry               metric ingestion and windowing
+internal/modelling               queue, stability, topology, coupling
+internal/optimisation            control objective and directives
+internal/autopilot               MPC-style runtime control logic
+internal/intelligence            deterministic high-level decision modules
+internal/scenario                optional disturbance injection
+internal/simulation              predictive simulation runner
+internal/reasoning               operator-facing event generation
+internal/dashboard               HTTP API, dashboard, WebSocket endpoint
+internal/streaming               live payload schema and hub
+internal/actuator                coalescer, router, backend interface
+internal/actuator/backends       queue and HTTP actuator backends
+internal/persistence             snapshot persistence
+docker-compose.yml               local stack definition
+Dockerfile                       runtime container build
+```
+
+## Key Features
+
+LoadEquilibrium provides the following core capabilities:
+
+- Predictive simulation of service behavior under current load and candidate actions.
+- Queue modelling based on service rate, concurrency, backlog, and utilization.
+- Topology-aware coupling and equilibrium analysis across service dependencies.
+- Stability and collapse risk estimation rather than threshold-only alerting.
+- MPC-style short horizon optimization for capacity and control decisions.
+- Real-time dashboard streaming over WebSocket.
+- Optional snapshot persistence to PostgreSQL.
+- Built-in actuator framework with queue, HTTP, and routed backend support.
+- Authenticated ingest path for production use.
+- Scenario injection support for controlled testing, disabled by default for production safety.
+
+### Actuation Features
+
+The current actuator layer has three concrete pieces:
+
+- `QueueBackend`
+  - Maintains an in-memory worker count per service.
+  - Applies `round(current_workers * scale_factor)`.
+  - Enforces a minimum of one worker.
+  - Useful for safe local validation and deterministic backend simulation.
+- `HTTPBackend`
+  - Sends synchronous `POST` requests to an external control endpoint.
+  - Uses the runtime execution context and timeout provided by the coalescing actuator.
+  - Emits `service_id` and `scale_factor` in JSON.
+- `RouterBackend`
+  - Routes service-specific directives to different backends.
+  - Uses a default backend when no explicit route exists.
+  - Falls back to `LogOnlyBackend` if no concrete backend is available.
+
+## How It Works (Deep Dive)
+
+### Telemetry Windowing and Confidence
+
+LoadEquilibrium ingests `MetricPoint` records and stores them in bounded ring buffers keyed by service ID. From those buffers it builds `ServiceWindow` views that contain:
+
+- mean and last request rate
+- latency summaries
+- queue and connection estimates
+- upstream call aggregation
+- confidence score
+- signal quality class
+
+The confidence score matters because the runtime does not assume all telemetry is equally trustworthy. Confidence is reduced when:
+
+- the sample count is low
+- rate variance is high
+- the most recent data is old
+
+This lets the system degrade predictions rather than pretending uncertain inputs are precise.
+
+### Queue Modelling
+
+The queue modelling layer treats services as queueing systems rather than simple CPU meters. The important quantities are:
+
+- arrival rate `lambda`
+- service rate `mu`
+- effective concurrency `c`
+- utilization `rho`
+
+Conceptually, the model works in the same family as M/M/c queue analysis:
+
+- arrival pressure increases waiting time nonlinearly near saturation
+- concurrency changes service capacity
+- backlog and latency reflect queue state, not just host utilization
+
+This gives the controller more useful information than a pure threshold on CPU or latency percentiles.
+
+### Topology Coupling and Equilibrium
+
+Services do not fail independently. A pressure spike in one service can amplify another service's load or delay. LoadEquilibrium therefore builds a dependency graph from upstream call data and computes:
+
 - network coupling
-- fixed-point equilibrium analysis
+- path saturation risk
+- equilibrium utilization
 - topology sensitivity
-- stability assessment
+- keystone services
 
-### Optimisation and Control
+This makes it possible to distinguish:
 
-`internal/optimisation`
-`internal/control`
-`internal/autopilot`
+- a locally overloaded service
+- a service that appears healthy but is structurally exposed
+- a graph region that is converging toward instability
 
-- objective scoring
-- trajectory planning
-- controller output
-- actuator dynamics
-- autopilot rollout and safety
+### Predictive Simulation
 
-### Sandbox and Simulation
+The simulation layer runs budget-bounded predictive experiments. It is not a generic physics engine; it is a constrained operational simulator used to answer questions such as:
 
-`internal/sandbox`
-`internal/simulation`
-`internal/scenario`
+- If the current trend continues, which services are likely to saturate?
+- What is the likely queue distribution at the horizon?
+- What is the estimated SLA violation probability?
+- How fragile is recovery under the current topology?
 
-- digital twin experiments
-- Monte Carlo risk estimation
-- synthetic disturbance injection
-- scenario comparison
+The simulation results are exposed in the dashboard and also contribute to the broader risk picture used by the decision engine.
 
-### Intelligence and Reasoning
+### MPC-Style Optimization
 
-`internal/intelligence`
-`internal/reasoning`
+The control layer uses short-horizon optimization rather than a one-shot heuristic. In broad terms:
 
-- autonomy orchestration
-- hazard and rollout intelligence
-- safety-constrained action projection
-- operator-facing reasoning events
+1. A control sequence is warm-started from the prior state.
+2. Candidate control trajectories are evaluated over a prediction horizon.
+3. Cost includes backlog, latency, variance, scaling effort, smoothness, and safety barrier terms.
+4. Safety logic can override or tighten actions when risk is too high.
 
-### Runtime and Interfaces
+The implementation is "MPC-style" rather than a textbook industrial MPC package. The important property is that the system evaluates future action paths under explicit cost and constraint logic.
 
-`internal/runtime`
-`internal/dashboard`
-`internal/streaming`
-`internal/actuator`
-`internal/persistence`
+### Control Fusion
 
-- orchestrates the tick engine
-- exposes HTTP and WebSocket interfaces
-- streams live control-room state
-- dispatches runtime directives
-- optionally persists snapshots
+The final directive is not produced by a single scalar heuristic. It is the result of model-based fusion across:
 
-## API Surface
+- optimization engine output
+- policy layer output
+- autopilot / MPC runtime
+- sandbox recommendation metadata
+- safety constraints
 
-The application exposes a simple operator-friendly runtime surface:
+This allows the system to stay interpretable while still combining multiple model-derived signals.
 
-- `POST /api/v1/ingest`
-  Push telemetry into the engine.
-- `GET /ws`
-  Subscribe to the live state stream.
-- `GET /healthz`
-  Health status and connected client count.
-- `GET /`
-  Built-in live dashboard.
+### Control Loop Timing
 
-### Telemetry Payload Example
+By default, the system runs on a 2 second tick interval with an 1800 ms deadline. The engine tracks:
+
+- per-stage latency
+- predicted stage cost
+- jitter
+- safety escalation level
+- adaptive interval stretching under stress
+
+This is important operationally because the controller itself must remain stable under pressure. A control system that misses its own cadence is not trustworthy.
+
+### Actuation Path
+
+Directive execution happens through the coalescing actuator:
+
+1. Directives are coalesced per service so stale duplicates are not executed.
+2. Each execution is wrapped in a context timeout.
+3. Success or failure is returned as feedback into the runtime.
+4. Errors do not crash the engine.
+
+The current main program wires:
+
+- `QueueBackend` as the default backend
+- `HTTPBackend` for explicitly routed services when configured through environment variables
+- `RouterBackend` to decide which backend handles which service
+
+This keeps the runtime generic and lets platform-specific actuation be added without changing the orchestrator.
+
+## Real-World Use Cases
+
+### Backend Load Systems
+
+A service platform can use LoadEquilibrium to track arrival pressure, queue growth, and dependency-induced overload before SLO breach becomes obvious.
+
+### Queue Management
+
+Systems with explicit worker pools, consumers, or internal processing queues can use the queue model and worker-scaling actuator to reason about backlog growth and workforce sizing.
+
+### Infrastructure Optimization
+
+The project can be used as a decision support layer for scaling, brownout, retry, or rate-limiting decisions where naive autoscaling rules are too slow or too coarse.
+
+### Planning Systems
+
+Because the runtime can simulate future behavior, it is also useful for:
+
+- change planning
+- stress exercises
+- capacity reviews
+- controlled fault rehearsal
+
+### Sidecar Control for Platform Teams
+
+A platform team can deploy LoadEquilibrium beside a service or gateway component and use it as:
+
+- a local predictive control service
+- a risk-aware recommendation engine
+- a safe pre-actuation validation layer
+
+## Installation (Docker)
+
+### Prerequisites
+
+- Docker
+- Docker Compose plugin
+
+The repository targets Go 1.22, but Docker is the recommended starting point because it reproduces the intended runtime shape with the dashboard and persistence dependencies.
+
+### Quick Start With Docker Compose
+
+From the project root:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+
+- `loadequilibrium` on port `8080`
+- `postgres` for local snapshot persistence
+
+Open:
+
+- dashboard: `http://localhost:8080/`
+- health endpoint: `http://localhost:8080/healthz`
+
+### What the Compose Stack Configures
+
+The supplied `docker-compose.yml` sets:
+
+- tick interval and deadline
+- simulation budget
+- local PostgreSQL connection
+- ingest authentication token
+
+The bundled PostgreSQL service is configured for local compatibility with the current persistence driver by forcing MD5 authentication settings.
+
+### Build the Image Directly
+
+```bash
+docker build -t loadequilibrium .
+docker run --rm -p 8080:8080 loadequilibrium
+```
+
+### Run With Optional HTTP Actuation
+
+If you want selected services to be actuated through an HTTP endpoint instead of the default in-memory queue backend:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e INGEST_TOKEN=changeme \
+  -e ACTUATOR_HTTP_ENDPOINT=http://controller:9000/scale \
+  -e ACTUATOR_HTTP_SERVICES=checkout,payment \
+  loadequilibrium
+```
+
+Behavior:
+
+- services listed in `ACTUATOR_HTTP_SERVICES` are routed to `HTTPBackend`
+- all other services use `QueueBackend`
+- if no backend is available, the router falls back to `LogOnlyBackend`
+
+### Local Development Without Docker
+
+Docker is the primary installation path, but local development is straightforward:
+
+```bash
+make build
+make run
+```
+
+or
+
+```bash
+go run ./cmd/loadequilibrium/
+```
+
+## Configuration
+
+LoadEquilibrium is configured mainly through environment variables. The defaults are defined in `internal/config/config.go`, and a small number of actuator routing variables are read directly in `cmd/loadequilibrium/main.go`.
+
+### Recommended Production Baseline
+
+At minimum:
+
+- set `INGEST_TOKEN` to a non-empty value
+- keep `SCENARIO_MODE=off`
+- point `DATABASE_URL` at a reachable PostgreSQL instance if persistence is required
+- configure `ACTUATOR_HTTP_ENDPOINT` and `ACTUATOR_HTTP_SERVICES` if you want external actuation
+
+### Interface and Security
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LISTEN_ADDR` | `:8080` | HTTP bind address for dashboard, ingest, health, and WebSocket endpoints |
+| `INGEST_TOKEN` | empty | shared token for `/api/v1/ingest`; empty disables auth and should be used only for development |
+| `MAX_STREAM_CLIENTS` | `50` | maximum concurrent WebSocket clients |
+
+### Runtime Loop and Capacity
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TICK_INTERVAL` | `2s` | nominal engine cadence |
+| `TICK_DEADLINE` | `1800ms` | per-tick execution budget |
+| `WORKER_POOL_SIZE` | `8` | bounded concurrency for modelling work |
+| `RING_BUFFER_DEPTH` | `300` | telemetry history depth per service |
+| `MAX_SERVICES` | `200` | maximum number of tracked services |
+| `STALE_SERVICE_AGE` | `5m` | eviction threshold for inactive services |
+| `MIN_TICK_INTERVAL` | `1s` | minimum adaptive interval |
+| `MAX_TICK_INTERVAL` | `10s` | maximum adaptive interval |
+| `TICK_ADAPT_STEP` | `1.25` | stretch factor when the runtime is under sustained pressure |
+| `SAFETY_MODE_THRESHOLD` | `3` | consecutive overruns required before safety escalation |
+
+### Control and Optimization
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `UTILISATION_SETPOINT` | `0.70` | target utilization for the controller |
+| `COLLAPSE_THRESHOLD` | `0.90` | risk threshold used in stability logic |
+| `WINDOW_FRACTION` | `0.10` | fraction of ring buffer used for the active analysis window |
+| `ARRIVAL_ESTIMATOR_MODE` | `ewma` | arrival estimator mode; `median` is more burst-resistant |
+| `PREDICTIVE_HORIZON_TICKS` | `5` | forward horizon used by prediction logic |
+| `PID_KP` | `1.5` | proportional gain for directive generation |
+| `PID_KI` | `0.3` | integral gain |
+| `PID_KD` | `0.1` | derivative gain |
+| `PID_DEADBAND` | `0.02` | deadband for controller stability |
+| `PID_INTEGRAL_MAX` | `2.0` | integral clamp |
+
+### Simulation and Scenario Controls
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SIM_BUDGET` | `45ms` | per-tick simulation time budget |
+| `SIM_HORIZON_MS` | `60000` | simulation horizon in milliseconds |
+| `SIM_SHOCK_FACTOR` | `2.0` | disturbance multiplier used by simulation shock logic |
+| `SIM_ASYNC_BUFFER` | `4` | async result channel depth for simulation |
+| `SIM_STOCHASTIC_MODE` | `exponential` | inter-arrival distribution; `pareto` is also supported |
+| `SLA_LATENCY_THRESHOLD_MS` | `500.0` | latency threshold for SLA violation probability |
+| `SCENARIO_MODE` | `off` | enables or disables scenario disturbance logic; keep `off` in production |
+
+### Signal Quality and Safety
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `EWMA_FAST_ALPHA` | `0.30` | fast smoothing parameter for signal processing |
+| `EWMA_SLOW_ALPHA` | `0.10` | slow smoothing parameter |
+| `SPIKE_Z_SCORE` | `3.0` | threshold for spike classification |
+| `STALENESS_BYPASS_THRESHOLD` | `0.70` | staleness level beyond which deeper modelling is reduced |
+| `MAX_REASONING_COOLDOWNS` | `500` | cap for reasoning cooldown state |
+
+### Persistence
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | empty | PostgreSQL connection string; when empty, persistence is disabled |
+| `PERSIST_INTERVAL` | `30s` | persistence cadence setting reserved in the config surface |
+
+### Actuation Routing
+
+These are read directly by the main process:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTUATOR_HTTP_ENDPOINT` | empty | external endpoint used by `HTTPBackend` |
+| `ACTUATOR_HTTP_SERVICES` | empty | comma-separated list of services routed to `HTTPBackend` |
+
+### Tuning Guidance
+
+- Lower `UTILISATION_SETPOINT` for more conservative behavior.
+- Lower `COLLAPSE_THRESHOLD` to intervene earlier.
+- Increase `SIM_BUDGET` if you want richer predictive simulation and have runtime headroom.
+- Increase `WORKER_POOL_SIZE` only if the host can support more concurrent modelling work.
+- Keep `SCENARIO_MODE=off` for production telemetry.
+- Treat low-level controller gains as advanced tuning parameters, not day-one defaults.
+
+## API Reference
+
+### `POST /api/v1/ingest`
+
+Ingest one or more telemetry points into the runtime.
+
+#### Authentication
+
+If `INGEST_TOKEN` is non-empty, clients must provide it in one of two ways:
+
+- `X-Ingest-Token` header
+- `token` query parameter
+
+The header form is the preferred production option.
+
+#### Request Body
+
+The endpoint accepts either:
+
+- a single `MetricPoint`
+- an array of `MetricPoint`
+
+The request body is limited to 2 MB.
+
+#### MetricPoint Fields
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `service_id` | string | logical service name |
+| `timestamp` | RFC3339 time | observation timestamp; if omitted, server time is used |
+| `request_rate` | float | observed incoming request rate |
+| `error_rate` | float | fraction in `[0,1]` |
+| `latency.p50` | float | 50th percentile latency in ms |
+| `latency.p95` | float | 95th percentile latency in ms |
+| `latency.p99` | float | 99th percentile latency in ms |
+| `latency.mean` | float | mean latency in ms |
+| `cpu_usage` | float | CPU usage proxy |
+| `mem_usage` | float | memory usage proxy |
+| `active_conns` | integer | active connections |
+| `queue_depth` | integer | queued work depth |
+| `upstream_calls[]` | object array | upstream dependency observations |
+
+#### Upstream Call Fields
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `target_service_id` | string | downstream dependency name |
+| `call_rate` | float | observed call rate to that dependency |
+| `error_rate` | float | dependency error fraction |
+| `latency_mean` | float | mean call latency in ms |
+
+#### Example: Single Point
 
 ```json
 {
   "service_id": "checkout",
-  "timestamp": "2026-03-27T12:00:00Z",
+  "timestamp": "2026-03-28T12:00:00Z",
   "request_rate": 180.5,
   "error_rate": 0.02,
   "latency": {
@@ -308,193 +668,314 @@ The application exposes a simple operator-friendly runtime surface:
 }
 ```
 
-You can submit either a single metric point or an array of metric points.
+#### Example: Batch
+
+```json
+[
+  {
+    "service_id": "frontend",
+    "request_rate": 220,
+    "error_rate": 0.01,
+    "latency": { "p50": 22, "p95": 60, "p99": 90, "mean": 31 },
+    "cpu_usage": 0.55,
+    "mem_usage": 0.48,
+    "active_conns": 80,
+    "queue_depth": 4
+  },
+  {
+    "service_id": "payment",
+    "request_rate": 75,
+    "error_rate": 0.03,
+    "latency": { "p50": 40, "p95": 140, "p99": 240, "mean": 70 },
+    "cpu_usage": 0.63,
+    "mem_usage": 0.57,
+    "active_conns": 42,
+    "queue_depth": 10
+  }
+]
+```
+
+#### Responses
+
+| Status | Meaning |
+| --- | --- |
+| `202 Accepted` | telemetry accepted; response body contains ingested count |
+| `400 Bad Request` | invalid JSON or read error |
+| `401 Unauthorized` | missing or incorrect ingest token when auth is enabled |
+| `405 Method Not Allowed` | non-POST request |
+
+#### Example Response
+
+```json
+{
+  "ingested": 2
+}
+```
+
+### `GET /ws`
+
+Returns a live WebSocket stream of runtime state. The payload is the streaming `TickPayload`, which includes:
+
+- modeled service bundles
+- directives
+- objective score
+- topology snapshot
+- reasoning events
+- simulation overlay
+- prediction timeline
+- risk timeline
+- runtime health metrics
+- safety level
+
+This is the primary feed used by the built-in dashboard.
+
+### `GET /healthz`
+
+Returns a small JSON document with:
+
+- status
+- UTC time
+- connected WebSocket client count
+
+### `GET /`
+
+Serves the built-in dashboard UI.
 
 ## Dashboard
 
-The built-in dashboard is not an afterthought. It is a control-room view over the runtime.
+The dashboard is intended as an operator control room, not as a decorative status page. It is backed by the WebSocket tick stream and exposes the runtime state directly.
 
-It exposes views for:
+### What the Operator Sees
 
-- overview
-- topology
-- stability envelope
-- prediction runway
-- optimisation output
-- simulation comparison
-- telemetry freshness
-- reasoning/event log
-- runtime health and safety state
+The dashboard can render and summarize:
 
-This is useful for both incident response and research observation.
+- current service model bundles
+- queue pressure and backlog indicators
+- control directives
+- topology structure
+- prediction trajectories
+- reasoning events
+- simulation overlay state
+- runtime latency and safety metrics
 
-## Actuation Model
+### Important Dashboard Signals
 
-The runtime does not hardcode a cloud vendor or a single orchestrator.
+Based on the current streaming schema, the dashboard surface can include:
 
-Instead, it uses an actuator interface:
+- `Bundles`
+  - queue metrics
+  - stochastic metrics
+  - signal metrics
+  - stability metrics
+- `Directives`
+  - service-specific control outputs
+- `PredictionTimeline`
+  - forward utilization curves
+- `RiskTimeline`
+  - forward collapse risk runway
+- `PriorityRiskQueue`
+  - urgency-ranked services
+- `PressureHeatmap`
+  - normalized service pressure
+- `NetworkEquilibrium`
+  - system-level coupled state
+- `TopologySensitivity`
+  - keystone and structurally fragile services
+- `SimOverlay`
+  - predicted queue and SLA risk at horizon
+- `ScenarioComparison`
+  - best/worst/median outcomes across simulation scenarios
+- `RuntimeMetrics`
+  - per-stage latency, predicted overrun, total overruns, safety level
 
-- dispatch directives asynchronously
-- collect feedback safely
-- allow coalescing and non-blocking actuation
+### Why the Dashboard Matters
 
-That design makes it easier to map the output into:
+The dashboard is part of the control loop, not just a presentation layer. It lets operators verify:
 
-- a custom control plane
-- a gateway policy engine
-- a Kubernetes-style scaler
-- a traffic shaping or brownout layer
+- whether the controller is acting on good telemetry
+- whether predicted risk is structural or local
+- whether the runtime itself is under timing pressure
+- whether simulation results support or contradict the current intervention
 
-## Scenarios and Disturbances
+## Example Workflow
 
-The runtime can superimpose synthetic disturbances on observed telemetry.
-
-This is useful for:
-
-- testing the control loop under bursts
-- studying propagation through dependencies
-- evaluating recovery behavior
-- stress-testing the dashboard and reasoning pipeline
-
-The default main program wires example burst scenarios for `frontend` and `payment`.
-
-## Running The Project
-
-### Local Development
-
-```bash
-go run ./cmd/loadequilibrium/
-```
-
-### With Make
-
-```bash
-make build
-make run
-```
-
-### With Docker
-
-```bash
-docker build -t loadequilibrium .
-docker run -p 8080:8080 loadequilibrium
-```
-
-### With Docker Compose
+### 1. Start the Stack
 
 ```bash
 docker compose up --build
 ```
 
-The compose stack starts:
+### 2. Open the Dashboard
 
-- the LoadEquilibrium runtime
-- PostgreSQL for snapshot persistence
-
-## Important Configuration
-
-Key environment variables include:
-
-| Variable | Meaning | Default |
-| --- | --- | --- |
-| `LISTEN_ADDR` | HTTP listen address | `:8080` |
-| `TICK_INTERVAL` | Main engine cadence | `2s` |
-| `TICK_DEADLINE` | Hard budget per tick | `1800ms` |
-| `RING_BUFFER_DEPTH` | Per-service telemetry history | `300` |
-| `MAX_SERVICES` | Maximum tracked services | `200` |
-| `STALE_SERVICE_AGE` | Service eviction threshold | `5m` |
-| `SIM_BUDGET` | Per-tick simulation time budget | `45ms` |
-| `SIM_HORIZON_MS` | Monte Carlo horizon | `60000` |
-| `SIM_SHOCK_FACTOR` | Shock intensity multiplier | `2.0` |
-| `UTILISATION_SETPOINT` | Controller target utilisation | `0.70` |
-| `COLLAPSE_THRESHOLD` | Collapse risk threshold | `0.90` |
-| `SCENARIO_MODE` | Enable or disable disturbances | `on` |
-| `DATABASE_URL` | Snapshot persistence target | empty |
-
-## What Makes It Different
-
-Many observability systems tell you what happened.
-
-LoadEquilibrium tries to answer what happens next and what should be done now.
-
-That difference matters.
-
-This project is intentionally built around:
-
-- predictive rather than reactive control
-- topology-aware rather than service-isolated reasoning
-- runtime-safe actuation rather than alert-only analysis
-- autonomy with explicit safety fallback rather than naive automation
-
-## Current Strengths
-
-- strong runtime visibility through the dashboard and stream payloads
-- explicit five-phase intelligence flow
-- deterministic tick engine with pressure-aware degradation
-- topology and stability modelling beyond basic autoscaling heuristics
-- built-in sandboxing for candidate intervention comparison
-- autonomy layer with safety-only fallback modes
-
-## Current Limitations
-
-This project is ambitious, and it is honest about that.
-
-- It is still a bespoke control system, not a turnkey managed platform.
-- Real-world actuator integrations can be expanded further.
-- Large, dense topologies will eventually require deeper horizontal scaling strategy.
-- Model quality depends on telemetry quality, especially for tail and burst behavior.
-- Some advanced intelligence modules are still better described as runtime-capable research primitives than mature ML products.
-
-## Who This Is For
-
-LoadEquilibrium is a good fit for:
-
-- platform engineers
-- reliability engineers
-- control-systems-minded backend builders
-- applied researchers working on autonomous infrastructure
-- teams that want to experiment with predictive incident prevention
-
-## Project Structure
+Open:
 
 ```text
-cmd/loadequilibrium      application entrypoint
-internal/runtime         main orchestration loop and phase bridge
-internal/telemetry       ingestion, windows, ring buffers
-internal/modelling       queue, signal, topology, stability, coupling
-internal/optimisation    objective and directive generation
-internal/policy          policy intelligence
-internal/autopilot       closed-loop control runtime
-internal/sandbox         experiment and recommendation sandbox
-internal/intelligence    autonomy and advanced intelligence layer
-internal/simulation      Monte Carlo simulation runtime
-internal/reasoning       operator-facing event reasoning
-internal/dashboard       built-in browser UI
-internal/streaming       live payload schema and hub
-internal/actuator        dispatch interface and implementations
-internal/persistence     snapshot writer
+http://localhost:8080/
 ```
 
-## Vision
+Check health:
 
-The long-term vision is straightforward:
+```bash
+curl http://localhost:8080/healthz
+```
 
-**turn backend operations from reactive firefighting into safe, explainable, predictive autonomy.**
+### 3. Send Telemetry
 
-That means a system that can:
+Use the configured ingest token:
 
-- understand service stress structurally
-- predict unstable futures before they happen
-- test possible responses
-- act conservatively and safely
-- explain why it acted
+```bash
+curl -X POST http://localhost:8080/api/v1/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-Ingest-Token: changeme-set-in-production" \
+  -d '[
+    {
+      "service_id": "frontend",
+      "request_rate": 200,
+      "error_rate": 0.01,
+      "latency": { "p50": 20, "p95": 55, "p99": 85, "mean": 30 },
+      "cpu_usage": 0.52,
+      "mem_usage": 0.47,
+      "active_conns": 70,
+      "queue_depth": 6
+    },
+    {
+      "service_id": "checkout",
+      "request_rate": 120,
+      "error_rate": 0.03,
+      "latency": { "p50": 45, "p95": 140, "p99": 230, "mean": 72 },
+      "cpu_usage": 0.64,
+      "mem_usage": 0.59,
+      "active_conns": 58,
+      "queue_depth": 14,
+      "upstream_calls": [
+        {
+          "target_service_id": "payment",
+          "call_rate": 120,
+          "error_rate": 0.02,
+          "latency_mean": 50
+        }
+      ]
+    }
+  ]'
+```
 
-## Closing Summary
+### 4. Observe the Runtime
 
-LoadEquilibrium is not just a simulator, not just a dashboard, and not just a controller.
+After a few ticks, inspect:
 
-It is an integrated backend intelligence runtime that combines modelling, optimisation, simulation, and autonomy into one operational loop.
+- queue pressure and stability state in the dashboard
+- directives produced for each service
+- reasoning events
+- prediction and risk timeline panels
 
-If you want a one-line description for GitHub:
+### 5. Observe Actuation
 
-> **An autonomous control plane for backend systems that predicts saturation, simulates interventions, and safely turns telemetry into action.**
+By default:
+
+- the queue backend will log worker scaling changes per service
+
+Example log shape:
+
+```text
+[actuator:queue] svc=checkout workers=1->2 scale=1.800 tick=42
+```
+
+### 6. Route a Service to an External HTTP Actuator
+
+Restart with:
+
+```bash
+ACTUATOR_HTTP_ENDPOINT=http://controller:9000/scale \
+ACTUATOR_HTTP_SERVICES=checkout,payment \
+docker compose up --build
+```
+
+For those routed services, the HTTP backend sends:
+
+```json
+{
+  "service_id": "checkout",
+  "scale_factor": 1.8
+}
+```
+
+### 7. Iterate on Tuning
+
+Adjust:
+
+- `UTILISATION_SETPOINT`
+- `COLLAPSE_THRESHOLD`
+- `SIM_BUDGET`
+- `PREDICTIVE_HORIZON_TICKS`
+- `WORKER_POOL_SIZE`
+
+Then repeat the telemetry feed and observe how predictions and directives change.
+
+## Limitations
+
+LoadEquilibrium is an engineering control system, which means it has real strengths and real boundaries.
+
+- It depends on correct telemetry. Bad service rate, latency, or dependency signals will degrade model quality.
+- It is not plug-and-play. Operators still need to understand the target system and tune thresholds and horizons.
+- Queue models are approximations. They are extremely useful, but they are not a perfect replica of every production path.
+- Topology quality depends on upstream call visibility. Missing edge data reduces coupling fidelity.
+- The default `QueueBackend` is a deterministic in-memory backend, not a platform-native scaler.
+- The `HTTPBackend` is generic. Production-grade infrastructure usually needs platform-specific authentication, retries, and idempotency semantics around it.
+- Persistence compatibility depends on the database environment. The bundled Compose setup handles local compatibility, but managed PostgreSQL deployments require explicit operator configuration.
+- The system helps with decision support and controlled intervention. It does not replace good capacity planning, SLO design, or incident process.
+
+## Roadmap
+
+The current codebase is functional, but several engineering improvements are still natural next steps.
+
+- Add a Prometheus `/metrics` endpoint for runtime and model health export.
+- Add more platform-specific actuator backends such as Kubernetes or gateway integrations.
+- Externalize scenario definitions instead of relying only on code or environment-driven wiring.
+- Expand operator APIs beyond ingest, health, and WebSocket streaming.
+- Add structured logging options for better production observability.
+- Improve persistence and operational compatibility for broader PostgreSQL environments.
+- Add more deployment profiles for larger service graphs with different tick and budget defaults.
+- Strengthen controller calibration workflows and operator tuning guidance.
+
+## Contributing
+
+Contributions should preserve the identity of the project as a deterministic predictive control system.
+
+### General Guidelines
+
+- Keep changes model-based and explicit.
+- Do not reframe the project as AI, ML, or black-box automation.
+- Prefer clear engineering tradeoffs over feature inflation.
+- Keep actuation, safety, and observability changes easy to audit.
+
+### Recommended Workflow
+
+1. Open an issue or design note for non-trivial changes.
+2. Keep patches scoped to one subsystem where possible.
+3. Add or update tests when behavior changes.
+4. Run formatting and build checks before submission.
+5. Update the README or config documentation if the runtime surface changes.
+
+### Useful Commands
+
+```bash
+gofmt -w ./...
+go build ./cmd/loadequilibrium/
+docker compose config
+docker compose up --build
+```
+
+### Areas Where Contributions Are Especially Useful
+
+- actuator integrations
+- metrics export
+- dashboard clarity
+- scenario management
+- persistence hardening
+- operational docs and examples
+
+## License
+
+License selection is currently a placeholder.
+
+Before external distribution or commercial use, add an organization-approved `LICENSE` file at the repository root. Until then, treat the project as unlicensed proprietary source unless your organization states otherwise.

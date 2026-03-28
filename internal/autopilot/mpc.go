@@ -31,7 +31,7 @@ type MPCState struct {
 	TopologyPressure float64
 	TopologyState    float64 // future graph extension
 
-	ServiceRate float64
+	ServiceRate    float64
 	CapacityActive float64
 }
 
@@ -42,7 +42,6 @@ type MPCControl struct {
 }
 
 type MPCOptimiser struct {
-
 	Horizon int
 	Dt      float64
 
@@ -52,11 +51,11 @@ type MPCOptimiser struct {
 	// adaptive regime hook
 	BurstProb float64
 
-	BacklogCost float64
-	LatencyCost float64
+	BacklogCost  float64
+	LatencyCost  float64
 	VarianceBase float64
-	ScalingCost float64
-	SmoothCost  float64
+	ScalingCost  float64
+	SmoothCost   float64
 	TerminalCost float64
 	UtilCost     float64
 
@@ -253,8 +252,8 @@ func (m *MPCOptimiser) terminal(
 			x.ServiceRate*x.CapacityActive
 
 	return m.TerminalCost*
-		(x.Backlog*x.Backlog +
-			x.Latency*x.Latency +
+		(x.Backlog*x.Backlog+
+			x.Latency*x.Latency+
 			util*util) +
 		m.SafetyBarrier*
 			math.Max(0, x.Backlog-5) // soft-hard hybrid
@@ -377,48 +376,44 @@ func (m *MPCOptimiser) Optimise(
 	prevSeq []MPCControl,
 ) ([]MPCControl, float64) {
 
-	seq :=
-		make([]MPCControl, m.Horizon)
+	seq := make([]MPCControl, m.Horizon)
 
 	copy(seq, prevSeq)
 
-	// STEP 1: Wire PID as Autopilot Bias Prior
-	// Inject the PID output (passed securely via initial.CapacityTarget) into the
-	// MPC sequence generation locus. If warm-started, pull strongly toward the PID prior.
+	// PID warm-start bias (unchanged from original)
 	for i := 0; i < m.Horizon; i++ {
 		if i >= len(prevSeq) {
-			seq[i].CapacityTarget = initial.CapacityTarget
+			seq[i].CapacityTarget = initial.CapacityActive
 		} else {
-			seq[i].CapacityTarget = 0.5*seq[i].CapacityTarget + 0.5*initial.CapacityTarget
+			seq[i].CapacityTarget = 0.5*seq[i].CapacityTarget + 0.5*initial.CapacityActive
 		}
 	}
 
-	best, tail :=
-		m.evaluate(initial, seq)
-
+	best, tail := m.evaluate(initial, seq)
 	temp := m.InitTemp
 
+	// candidate holds the proposed mutation; seq holds the committed (accepted) state.
+	candidate := make([]MPCControl, m.Horizon)
+	copy(candidate, seq)
+
 	for iter := 0; iter < m.effectiveIters(); iter++ {
+		m.mutate(candidate)
 
-		m.mutate(seq)
+		c, t := m.evaluate(initial, candidate)
 
-		c, t :=
-			m.evaluate(initial, seq)
-
-		if c < best ||
-			rand.Float64() <
-				math.Exp((best-c)/temp) {
-
+		if c < best || rand.Float64() < math.Exp((best-c)/temp) {
+			// Accept: commit candidate -> seq
+			copy(seq, candidate)
 			best = c
 			tail = t
+		} else {
+			// Reject: revert candidate <- seq
+			copy(candidate, seq)
 		}
 
 		temp *= m.Cooling
 	}
 
-	// calibrated proxy confidence
-	conf :=
-		1 / (1 + math.Sqrt(tail))
-
+	conf := 1 / (1 + math.Sqrt(tail))
 	return seq, conf
 }

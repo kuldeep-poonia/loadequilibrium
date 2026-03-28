@@ -103,27 +103,6 @@ func NewRunner(horizonMs, shockFactor float64, asyncBuffer int) *Runner {
 		slaThresholdMs:    500.0,
 		nf:                modelling.NewNetworkField(),
 	}
-	log.Printf("[NF_DEBUG] networkField CREATED")
-
-	r.nf.Edges = make(map[string]*modelling.EdgeField)
-	edge := &modelling.EdgeField{
-		Dx:          1.0,
-		ServiceRate: 0.3,
-		NoiseAmp:    0.0,
-		SourceGain:  0.05,
-	}
-	edge.Cells = make([]modelling.Cell, 16)
-	for i := range edge.Cells {
-		if i < 3 {
-			edge.Cells[i].Rho = 0.9
-		} else {
-			edge.Cells[i].Rho = 0.2
-		}
-	}
-	edge.OutFlux = 0.25
-	r.nf.Edges["exp_edge"] = edge
-	log.Printf("[NF_DEBUG_GRID] experimental grid created")
-
 	return r
 }
 
@@ -140,6 +119,7 @@ func (r *Runner) SetStochasticMode(mode string) {
 //   - CollapseDetected / CascadeTriggered are OR'd across scenarios
 //   - CascadeFailureProbability is averaged across scenarios (empirical P(collapse))
 //   - Service outcomes use the mean of continuous metrics across scenarios
+//
 // CPU budget is divided equally among scenarios.
 func (r *Runner) Submit(
 	bundles map[string]*modelling.ServiceModelBundle,
@@ -332,7 +312,7 @@ func (r *Runner) LatestMultiScenario(
 		Runs: runs,
 	}
 }
-//
+
 // Merging semantics:
 //   - SystemStable: AND across scenarios (stable only if all scenarios are stable)
 //   - CollapseDetected / CascadeTriggered: OR (detected if any scenario hit it)
@@ -636,14 +616,14 @@ func (r *Runner) run(
 		}
 
 		states[s.id] = &ServiceSimState{
-			ServiceID:      s.id,
-			ArrivalRate:    plant.A,
-			BaseRate:       plant.A,
-			ServiceRate:    s.serviceRate,
-			Concurrency:    s.concurrency,
-			Utilisation:    s.utilisation,
-			SLAThresholdMs: s.slaThresholdMs,
-			Plant:          plant,
+			ServiceID:       s.id,
+			ArrivalRate:     plant.A,
+			BaseRate:        plant.A,
+			ServiceRate:     s.serviceRate,
+			Concurrency:     s.concurrency,
+			Utilisation:     s.utilisation,
+			SLAThresholdMs:  s.slaThresholdMs,
+			Plant:           plant,
 			LastPhysicsTime: 0,
 		}
 		// Schedule base arrival and first physics tick
@@ -939,7 +919,9 @@ func handleDeparture(e Event, st *ServiceSimState, sched interface{ Schedule(Eve
 // applyShock propagates load shock using probabilistic BFS with stochastic branching.
 //
 // Each downstream hop fires with probability proportional to the edge weight:
-//   P(cascade reaches tgt) = edge_weight × (0.6^hop)
+//
+//	P(cascade reaches tgt) = edge_weight × (0.6^hop)
+//
 // This models the reality that not every high-traffic edge will cascade —
 // the edge weight acts as both an amplitude damping AND a branching probability.
 // The rng is used for Bernoulli trial at each hop.

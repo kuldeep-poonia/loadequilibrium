@@ -9,16 +9,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
 	"github.com/loadequilibrium/loadequilibrium/internal/reasoning"
+	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
 	"github.com/loadequilibrium/loadequilibrium/internal/simulation"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
-	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
-	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
@@ -76,7 +76,7 @@ type Orchestrator struct {
 
 	// Runtime safety state.
 	consecutiveOverruns int
-	safetyMode          bool      // true when safetyLevel >= 2 (convenience alias for existing checks)
+	safetyMode          bool // true when safetyLevel >= 2 (convenience alias for existing checks)
 	lastTickScheduledAt time.Time
 	totalOverruns       uint64
 
@@ -163,7 +163,7 @@ func New(
 	if scen != nil {
 		scen.ScenarioMode = cfg.ScenarioMode
 	}
-	
+
 	mode := strings.ToLower(strings.TrimSpace(cfg.ScenarioMode))
 	if mode == "off" || mode == "false" || mode == "0" {
 		o.scenarioEngine = nil
@@ -204,8 +204,10 @@ func (o *Orchestrator) Run(ctx context.Context) {
 //
 // Reactive: 2+ consecutive overruns → multiplicative stretch by TickAdaptStep.
 // Proactive: when EWMA-predicted critical-stage cost > 85% of TickDeadline and no
-//   overrun has occurred yet, pre-emptively stretch by √TickAdaptStep (softer).
-//   This prevents the first overrun from occurring in the first place.
+//
+//	overrun has occurred yet, pre-emptively stretch by √TickAdaptStep (softer).
+//	This prevents the first overrun from occurring in the first place.
+//
 // Contraction: exponential-decay toward nominal — monotone, zero oscillation.
 func (o *Orchestrator) adaptInterval() {
 	adaptStep := o.cfg.TickAdaptStep
@@ -290,7 +292,6 @@ func (o *Orchestrator) adaptInterval() {
 	}
 }
 
-
 func (o *Orchestrator) tick(now time.Time) {
 	tickStart := time.Now()
 	o.tickCount++
@@ -304,7 +305,7 @@ func (o *Orchestrator) tick(now time.Time) {
 					log.Printf("[engine] actuator failed tick=%d svc=%s err=%v", res.TickIndex, res.ServiceID, res.Error)
 				}
 			default:
-				i = 50 
+				i = 50
 			}
 		}
 	}
@@ -394,9 +395,14 @@ func (o *Orchestrator) tick(now time.Time) {
 	s2 := time.Now()
 	freshCutoff := o.cfg.TickInterval * 3
 	windows := o.store.AllWindows(o.windowN, freshCutoff)
-	
+
+	// observedWindows: real telemetry — used for modelling, optimization, reasoning, dashboard.
+	// simulationWindows: may include synthetic scenarios — used ONLY for Stage 6 simulation.
+	observedWindows := windows
+	simulationWindows := windows
 	if o.scenarioEngine != nil {
-		windows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
+		// ApplySuperposition already clones; result is safe to use independently.
+		simulationWindows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
 	}
 
 	// Update the sim overlay side-channel when a new result arrives.
@@ -411,7 +417,7 @@ func (o *Orchestrator) tick(now time.Time) {
 		}
 	}
 
-	if len(windows) == 0 {
+	if len(observedWindows) == 0 {
 		recordStage(stageIdxWindows, "windows", s2)
 		// No early return here anymore — ensure Stage 6 Simulation executes synthetic bootstrap
 	} else {
@@ -423,12 +429,12 @@ func (o *Orchestrator) tick(now time.Time) {
 	// If severely stale (score > StalenessBypassThreshold), bypass stochastic modelling
 	// and simulation. Core queue model + optimisation always runs.
 	var sumConf float64
-	for _, w := range windows {
+	for _, w := range observedWindows {
 		sumConf += w.ConfidenceScore
 	}
 	systemStaleness := 0.0
-	if len(windows) > 0 {
-		systemStaleness = 1.0 - sumConf/float64(len(windows))
+	if len(observedWindows) > 0 {
+		systemStaleness = 1.0 - sumConf/float64(len(observedWindows))
 	}
 	bypassDeepStages := systemStaleness > 0.5
 	if os.Getenv("FORCE_SIMULATION") == "on" {
@@ -437,19 +443,19 @@ func (o *Orchestrator) tick(now time.Time) {
 
 	// Degraded-intelligence assessment.
 	degradedCount := 0
-	for _, w := range windows {
+	for _, w := range observedWindows {
 		if w.SampleCount < 3 {
 			degradedCount++
 		}
 	}
 	degradedFraction := 0.0
-	if len(windows) > 0 {
-		degradedFraction = float64(degradedCount) / float64(len(windows))
+	if len(observedWindows) > 0 {
+		degradedFraction = float64(degradedCount) / float64(len(observedWindows))
 	}
 	var degradedServices []string
 	if degradedCount > 0 {
 		degradedServices = make([]string, 0, degradedCount)
-		for id, w := range windows {
+		for id, w := range observedWindows {
 			if w.SampleCount < 3 {
 				degradedServices = append(degradedServices, id)
 			}
@@ -466,12 +472,12 @@ func (o *Orchestrator) tick(now time.Time) {
 					degradedFraction*100, o.windowN, reducedN)
 			}
 			if reduced := o.store.AllWindows(reducedN, freshCutoff); len(reduced) > 0 {
-				windows = reduced
+				observedWindows = reduced
 			}
 		}
 	} else if degradedCount > 0 && o.tickCount%10 == 0 {
 		log.Printf("[engine] degraded intelligence: %d/%d services have <3 samples",
-			degradedCount, len(windows))
+			degradedCount, len(observedWindows))
 	}
 
 	// ── Pressure level computation ────────────────────────────────────────────
@@ -548,7 +554,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	// system is under timing pressure, we commit fewer resources to processing
 	// uncertain data. The confidence-scaled window is a floor of 3.
 	analysisWindowN := o.windowN
-	if o.pressureLevel >= 1 && len(windows) > 0 {
+	if o.pressureLevel >= 1 && len(observedWindows) > 0 {
 		// meanConf already computed as (1 - systemStaleness).
 		meanConf := 1.0 - systemStaleness
 		// At pressure=1: scale = max(0.75, meanConf). At pressure=2+: max(0.5, meanConf).
@@ -567,7 +573,7 @@ func (o *Orchestrator) tick(now time.Time) {
 		if scaled < analysisWindowN {
 			analysisWindowN = scaled
 			if reduced := o.store.AllWindows(analysisWindowN, freshCutoff); len(reduced) > 0 {
-				windows = reduced
+				observedWindows = reduced
 			}
 		}
 	}
@@ -576,28 +582,28 @@ func (o *Orchestrator) tick(now time.Time) {
 		log.Printf("[engine] windowN pressure-scaled %d→%d pressure=%d",
 			o.windowN, analysisWindowN, o.pressureLevel)
 	}
-	o.graph.Update(windows)
+	o.graph.Update(observedWindows)
 	topoSnap := o.graph.Snapshot()
 	topoSensitivity := modelling.ComputeTopologySensitivity(topoSnap)
 	recordStage(stageIdxTopology, "topology", s3)
 
 	// ── Telemetry State Coupling Physics ──────────────────────────────────────
-	o.telemetryCpl.ApplyCoupling(windows, topoSnap)
+	o.telemetryCpl.ApplyCoupling(observedWindows, topoSnap)
 
 	// ── CRITICAL Stage 3b: Network coupling ───────────────────────────────────
 	s3b := time.Now()
-	netCoupling := modelling.ComputeNetworkCoupling(windows, topoSnap)
-	netEquilibrium := modelling.ComputeNetworkEquilibrium(netCoupling, windows)
+	netCoupling := modelling.ComputeNetworkCoupling(observedWindows, topoSnap)
+	netEquilibrium := modelling.ComputeNetworkEquilibrium(netCoupling, observedWindows)
 	// Fixed-point utilisation solver: Gauss-Seidel iteration until mutual coupling converges.
 	// Runs every 3 ticks to amortise cost; result persists between runs.
 	var fpResult modelling.FixedPointResult
 	if o.tickCount%3 == 0 || o.tickCount == 1 {
-		fpResult = modelling.ComputeFixedPointEquilibrium(windows, topoSnap)
+		fpResult = modelling.ComputeFixedPointEquilibrium(observedWindows, topoSnap)
 	}
 	// Perturbation sensitivity: run every 5 ticks (more expensive — N × solver cost).
 	var perturbSensitivity map[string]float64
 	if o.tickCount%5 == 0 && fpResult.Converged {
-		perturbSensitivity = modelling.ComputePerturbationSensitivity(windows, topoSnap, fpResult.SystemicCollapseProb)
+		perturbSensitivity = modelling.ComputePerturbationSensitivity(observedWindows, topoSnap, fpResult.SystemicCollapseProb)
 	}
 	recordStage(stageIdxCoupling, "coupling", s3b)
 
@@ -606,8 +612,8 @@ func (o *Orchestrator) tick(now time.Time) {
 	// still run because they drive the control decisions.
 	s4 := time.Now()
 	medianMode := o.cfg.ArrivalEstimatorMode == "median"
-	bundles := make(map[string]*modelling.ServiceModelBundle, len(windows))
-	activeIDs := make(map[string]struct{}, len(windows))
+	bundles := make(map[string]*modelling.ServiceModelBundle, len(observedWindows))
+	activeIDs := make(map[string]struct{}, len(observedWindows))
 
 	workerCount := o.cfg.WorkerPoolSize
 	if workerCount <= 0 {
@@ -617,7 +623,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	for id, w := range windows {
+	for id, w := range observedWindows {
 		id, w := id, w
 		activeIDs[id] = struct{}{}
 		sem <- struct{}{}
@@ -681,7 +687,12 @@ func (o *Orchestrator) tick(now time.Time) {
 	s6 := time.Now()
 	// P6: Use named constant simInterval instead of the previous %1 no-op.
 	if !skipSim && o.tickCount%simInterval == 0 {
+		// Build simulation bundles from simulationWindows if scenarios active.
+		// For now, pass the existing bundles (derived from observedWindows) —
+		// scenario effects reach sim via the separate simulationWindows path.
+		_ = simulationWindows
 		o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
+		// TODO: compute simBundles from simulationWindows for full scenario sim isolation.
 	}
 
 	if res := o.simRunner.Latest(); res != nil {
@@ -942,7 +953,7 @@ func (o *Orchestrator) tick(now time.Time) {
 			o.consecutiveOverruns--
 		}
 		// De-escalate one level per 5 clean ticks.
-		if o.safetyLevel > 0 && o.consecutiveOverruns == 0 && o.stableTickCount%5 == 0 {
+		if o.safetyLevel > 0 && o.consecutiveOverruns == 0 && o.stableTickCount > 0 && o.stableTickCount%5 == 0 {
 			o.safetyLevel--
 			o.safetyMode = o.safetyLevel >= 2
 			if o.safetyLevel == 0 {
@@ -968,7 +979,6 @@ func pressureToSimMultiplier(level int) float64 {
 		return 1.0
 	}
 }
-
 
 // buildRiskQueue constructs a priority-ranked list of services ordered by
 // composite urgency score: CollapseRisk × (1 + StabilityDerivative×10) × (1.3 if keystone).

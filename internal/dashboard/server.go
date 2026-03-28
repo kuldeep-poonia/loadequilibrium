@@ -12,13 +12,14 @@ import (
 )
 
 type Server struct {
-	store *telemetry.Store
-	hub   *streaming.Hub
-	mux   *http.ServeMux
+	store       *telemetry.Store
+	hub         *streaming.Hub
+	mux         *http.ServeMux
+	ingestToken string
 }
 
-func New(store *telemetry.Store, hub *streaming.Hub) *Server {
-	s := &Server{store: store, hub: hub, mux: http.NewServeMux()}
+func New(store *telemetry.Store, hub *streaming.Hub, ingestToken string) *Server {
+	s := &Server{store: store, hub: hub, mux: http.NewServeMux(), ingestToken: ingestToken}
 	s.registerRoutes()
 	return s
 }
@@ -44,6 +45,16 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	if s.ingestToken != "" {
+		tok := r.Header.Get("X-Ingest-Token")
+		if tok == "" {
+			tok = r.URL.Query().Get("token")
+		}
+		if tok != s.ingestToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

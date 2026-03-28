@@ -18,6 +18,8 @@ type ScalingSignal struct {
 
 type ScalingDecision struct {
 	DesiredReplicas int
+	MinReplicas     int
+	MaxReplicas     int
 	Score           float64
 
 	Reason     string
@@ -91,6 +93,8 @@ func RecommendScaling(s ScalingSignal) ScalingDecision {
 
 	return ScalingDecision{
 		DesiredReplicas: bestReplicas,
+		MinReplicas:     s.MinReplicas,
+		MaxReplicas:     s.MaxReplicas,
 		Score:           bestScore,
 		Reason:          reason,
 		Confidence:      confidence,

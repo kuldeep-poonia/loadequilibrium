@@ -19,6 +19,7 @@ services:
       EWMA_FAST_ALPHA: "0.30"
       EWMA_SLOW_ALPHA: "0.10"
       SPIKE_Z_SCORE: "3.0"
+      INGEST_TOKEN: "changeme-set-in-production"
       DATABASE_URL: "postgres://le:le@postgres:5432/le?sslmode=disable"
     depends_on:
       postgres:
@@ -31,6 +32,10 @@ services:
       POSTGRES_USER: le
       POSTGRES_PASSWORD: le
       POSTGRES_DB: le
+      POSTGRES_HOST_AUTH_METHOD: md5
+    command: >
+      postgres
+      -c password_encryption=md5
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -38,6 +43,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
 
 volumes:
   pgdata:

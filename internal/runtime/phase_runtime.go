@@ -72,22 +72,11 @@ func (p *phaseRuntime) apply(
 
 		phase1 := p.evaluatePolicy(bundle, base, &service.policyState)
 		phase2 := p.recommend(bundle, base, phase1, objective)
-		autoState, autoTel := p.runAutopilot(service, bundle, base, phase1, phase2)
-		service.autopilotState = autoState
 
-		simAdvice := service.lastSandbox.Advice
-		simRisk := 0.0
-		if tick%10 == 0 && p.shouldRunSandbox(bundle, phase1, phase2, objective) {
-			if outSim, err := p.runSandbox(id, tick, bundle, base, phase1, phase2, autoTel); err == nil {
-				service.lastSandbox = outSim
-				simAdvice = outSim.Advice
-				simRisk = outSim.Meta.UnifiedRisk
-			} else {
-				log.Printf("[phase4] sandbox skipped service=%s err=%v", id, err)
-			}
-		} else if service.lastSandbox.Meta.HorizonID != "" {
-			simAdvice = service.lastSandbox.Advice
-			simRisk = service.lastSandbox.Meta.UnifiedRisk
+		// Grab last known sandbox risk for infra state before RL / Autopilot
+		lastSimRisk := 0.0
+		if service.lastSandbox.Meta.HorizonID != "" {
+			lastSimRisk = service.lastSandbox.Meta.UnifiedRisk
 		}
 
 		infra := intelligence.InfraState{
@@ -95,12 +84,27 @@ func (p *phaseRuntime) apply(
 			LatencyP95:       bundle.Queue.AdjustedWaitMs,
 			CPUUsage:         phaseClamp(bundle.Queue.Utilisation, 0, 1.5),
 			RetryRate:        phaseClamp(float64(phase1.Retry.RetryLimit)/phaseMax(float64(p.currentRetry(bundle)), 1), 0, 4),
-			CapacityPressure: phaseClamp(phaseMax(phase2.RiskScore, simRisk), 0, 1.5),
+			CapacityPressure: phaseClamp(phaseMax(phase2.RiskScore, lastSimRisk), 0, 1.5),
 			SLASeverity:      p.slaSeverity(bundle, objective),
 			PerfScore:        phaseClamp(1-objective.CompositeScore, 0, 1),
 		}
 
+		// STEP 4: Relocate RL execution before Autopilot
 		intel := service.adapter.Step(infra)
+
+		autoState, autoTel := p.runAutopilot(service, bundle, base, phase1, phase2, intel)
+		service.autopilotState = autoState
+
+		simAdvice := service.lastSandbox.Advice
+		if tick%10 == 0 && p.shouldRunSandbox(bundle, phase1, phase2, objective) {
+			if outSim, err := p.runSandbox(id, tick, bundle, base, phase1, phase2, autoTel); err == nil {
+				service.lastSandbox = outSim
+				simAdvice = outSim.Advice
+			} else {
+				log.Printf("[phase4] sandbox skipped service=%s err=%v", id, err)
+			}
+		}
+
 		out[id] = p.mergeDirective(base, bundle, phase1, phase2, simAdvice, autoTel, intel, objective)
 	}
 
@@ -166,7 +170,7 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		MaxStepCache:  0.3,
 		InitTemp:      1.0,
 		Cooling:       0.95,
-		Iters:         8,
+		Iters:         40, // minimum for SA to explore meaningfully; effectiveIters() can scale this up
 	}
 
 	safety := &autopilot.SafetyEngine{
@@ -406,8 +410,32 @@ func (p *phaseRuntime) runAutopilot(
 	base optimisation.ControlDirective,
 	phase1 policy.EngineDecision,
 	phase2 sandbox.PolicyRecommendation,
+	intel intelligence.MPCWeighting,
 ) (autopilot.RuntimeState, autopilot.RuntimeTelemetry) {
 	state := service.autopilotState
+
+	// STEP 2: Wire Policy as Hard MPC Bounds
+	// The policy heuristic is securely converted into a mathematical boundary
+	// constrained within the MPC search engine, preserving MPC actuation authority.
+	currentReplicas := float64(p.currentReplicas(bundle))
+	if service.autopilot != nil && service.autopilot.MPC != nil && currentReplicas > 0 {
+		service.autopilot.MPC.MinCapacity = float64(phase1.Scaling.MinReplicas) / currentReplicas
+		service.autopilot.MPC.MaxCapacity = float64(phase1.Scaling.MaxReplicas) / currentReplicas
+	}
+
+	// STEP 3: Wire Sandbox as MPC Risk Barrier
+	// Maps the asynchronous simulated collapse probability into the core MPC
+	// objective formulation, forcing the optimizer to defensively penalize
+	// paths that the Sandbox flagged as probabilistically unsafe.
+	if service.autopilot != nil && service.autopilot.MPC != nil {
+		combinedRisk := phaseMax(phase2.RiskScore, service.lastSandbox.Meta.UnifiedRisk)
+		service.autopilot.MPC.SafetyBarrier = 0.15 + 2.0*combinedRisk
+		service.autopilot.MPC.RiskWeight = 0.4 + 1.5*combinedRisk
+
+		// STEP 4: Wire RL as Cost Tuning Modifier
+		service.autopilot.MPC.RiskWeight += intel.RiskWeight
+		service.autopilot.MPC.SmoothCost = phaseMax(0.01, service.autopilot.MPC.SmoothCost+intel.SmoothCost)
+	}
 
 	if state.Rollout.CapacityActive == 0 {
 		state.Rollout.CapacityActive = phaseMax(base.ScaleFactor, 0.5)
@@ -648,7 +676,7 @@ func (p *phaseRuntime) mergeDirective(
 	phase2 sandbox.PolicyRecommendation,
 	sim sandbox.PolicyRecommendation,
 	auto autopilot.RuntimeTelemetry,
-	intel intelligence.ControlBundle,
+	intel intelligence.MPCWeighting,
 	objective optimisation.ObjectiveScore,
 ) optimisation.ControlDirective {
 	currentReplicas := p.currentReplicas(bundle)
@@ -657,7 +685,7 @@ func (p *phaseRuntime) mergeDirective(
 	uPolicy := phaseClamp(scaleFromPolicy, 0.45, 3.0)
 	uMPC := phaseClamp(auto.Capacity, 0.45, 3.0)
 	uSandbox := phaseClamp(1+phase2.CapacityDelta+sim.CapacityDelta, 0.45, 3.0)
-	uIntel := phaseClamp(1+0.25*intel.ScaleDelta, 0.45, 3.0)
+	uIntel := phaseClamp(1, 0.45, 3.0) // RL Scale Action deactivated (Phase 4), now cost-tuned
 
 	// MPC confidence proxy: lower OverrideRate -> MPC is not fighting the plant -> higher confidence.
 	mpcConf := phaseClamp(1.0-auto.OverrideRate, 0, 1.0)

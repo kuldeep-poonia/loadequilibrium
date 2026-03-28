@@ -34,9 +34,16 @@ type RuntimeState struct {
 	LastAction []float64
 	SafeAnchor []float64
 
-	uncEW  float64
-	oscEW  float64
+	uncEW   float64
+	oscEW   float64
 	learnEW float64
+
+	// One-step TD delay buffer — stores (s, a, hazard) from previous tick
+	// so that TryStep can be called with (prevState, prevAction, prevHazard, r, nextState=current).
+	prevTDState  []float64
+	prevTDAction []float64
+	prevTDHazard float64
+	hasPrevTD    bool
 }
 
 type IntelligenceRuntime struct {
@@ -62,7 +69,7 @@ func NewIntelligenceRuntime(mod RuntimeModules, actDim int) *IntelligenceRuntime
 			LastAction: make([]float64, actDim),
 			SafeAnchor: safeDefault,
 		},
-		tickDur: 120 * time.Millisecond,
+		tickDur:  120 * time.Millisecond,
 		deadline: 80 * time.Millisecond,
 	}
 }
@@ -86,13 +93,13 @@ func (r *IntelligenceRuntime) Tick(in RuntimeInput) RuntimeOutput {
 	fc :=
 		r.mod.Rollout.Forecast(
 			RolloutInput{
-				State: in.State,
-				Action: uBest,
-				Regime: in.Regime,
-				ModelUnc: in.ModelUnc,
+				State:     in.State,
+				Action:    uBest,
+				Regime:    in.Regime,
+				ModelUnc:  in.ModelUnc,
 				HazardUnc: in.HazardUnc,
 				SLAWeight: in.StabilityVec,
-				Policy: in.Policy,
+				Policy:    in.Policy,
 			},
 		)
 
@@ -108,26 +115,26 @@ func (r *IntelligenceRuntime) Tick(in RuntimeInput) RuntimeOutput {
 	meta :=
 		r.mod.Meta.Step(
 			MetaInput{
-				GlobalRisk: riskBelief,
+				GlobalRisk:   riskBelief,
 				RiskForecast: fc.RiskTrajectory,
 
-				HazardUnc: hz.Uncertainty,
-				ModelUnc: in.ModelUnc,
+				HazardUnc:      hz.Uncertainty,
+				ModelUnc:       in.ModelUnc,
 				EpistemicTrend: hz.EpistemicTrend,
 
 				PerfSignal: in.Perf,
-				PerfTrend: in.PerfTrend,
+				PerfTrend:  in.PerfTrend,
 
 				StabilityMargin: avg(in.StabilityVec),
 
-				EntropyProxy: in.EntropyProxy,
-				GradMagProxy: in.GradProxy,
+				EntropyProxy:  in.EntropyProxy,
+				GradMagProxy:  in.GradProxy,
 				ReplayNovelty: in.Novelty,
 
 				CapacityPressure: in.CapacityPress,
 
 				SLASeverity: in.SLASeverity,
-				OscPenalty: fc.SpectralGrowth,
+				OscPenalty:  fc.SpectralGrowth,
 
 				Regime: in.Regime,
 			},
@@ -151,14 +158,14 @@ func (r *IntelligenceRuntime) Tick(in RuntimeInput) RuntimeOutput {
 	safe :=
 		r.mod.Safety.Project(
 			SafetyInput{
-				Action: uFuse,
-				PrevAction: r.st.LastAction,
-				State: in.State,
-				StabilityVec: in.StabilityVec,
-				Risk: riskBelief,
-				HazardProxy: hz.Mean,
+				Action:        uFuse,
+				PrevAction:    r.st.LastAction,
+				State:         in.State,
+				StabilityVec:  in.StabilityVec,
+				Risk:          riskBelief,
+				HazardProxy:   hz.Mean,
 				CapacityPress: in.CapacityPress,
-				SLAWeight: meta.SafetyGain,
+				SLAWeight:     meta.SafetyGain,
 			},
 		)
 
@@ -179,29 +186,33 @@ func (r *IntelligenceRuntime) Tick(in RuntimeInput) RuntimeOutput {
 
 	/* ===== async learning ===== */
 
-	// P7 — RL temporal difference note:
-	// TryStep receives the current action and the current state as the learning
-	// signal. A proper nextState (sₜ₊₁) is not available at this call site
-	// without cross-cutting the adapter interface. The TD target is therefore
-	// computed as r - V(sₜ) rather than r + γV(sₜ₊₁) - V(sₜ), which biases the
-	// critic toward a return estimator rather than a bootstrapped value function.
-	// This is a known limitation. No incorrect proxy data is injected here.
+	// Call TryStep with PREVIOUS tick's (s, a, hazard) and CURRENT state as s'.
+	// This gives the proper bootstrapped TD target: r + γV(s') - V(s).
+	if r.st.hasPrevTD {
+		r.mod.Trainer.TryStep(
+			r.st.prevTDState,
+			r.st.prevTDAction,
+			r.st.prevTDHazard,
+			in.Perf,
+			time.Since(start),
+		)
+	}
 
-	r.mod.Trainer.TryStep(
-		in.State,
-		action,
-		hz.Mean,
-		in.Perf,
-		time.Since(start),
-	)
+	// Store current (s, a, hazard) for next tick.
+	r.st.prevTDState = make([]float64, len(in.State))
+	copy(r.st.prevTDState, in.State)
+	r.st.prevTDAction = make([]float64, len(action))
+	copy(r.st.prevTDAction, action)
+	r.st.prevTDHazard = hz.Mean
+	r.st.hasPrevTD = true
 
 	r.st.LastAction = action
 
 	return RuntimeOutput{
-		Action: action,
-		AutonomyLevel: meta.AutonomyLevel,
+		Action:         action,
+		AutonomyLevel:  meta.AutonomyLevel,
 		GovernanceMode: meta.GovernanceMode,
-		Fallback: fallback,
+		Fallback:       fallback,
 	}
 }
 
@@ -223,13 +234,13 @@ func (r *IntelligenceRuntime) searchAction(in RuntimeInput) []float64 {
 		fc :=
 			r.mod.Rollout.Forecast(
 				RolloutInput{
-					State: in.State,
-					Action: u,
-					Regime: in.Regime,
-					ModelUnc: in.ModelUnc,
+					State:     in.State,
+					Action:    u,
+					Regime:    in.Regime,
+					ModelUnc:  in.ModelUnc,
 					HazardUnc: in.HazardUnc,
 					SLAWeight: in.StabilityVec,
-					Policy: in.Policy,
+					Policy:    in.Policy,
 				},
 			)
 
@@ -273,14 +284,14 @@ func (r *IntelligenceRuntime) certifiedFallback(
 
 	return r.mod.Safety.Project(
 		SafetyInput{
-			Action: r.st.SafeAnchor,
-			PrevAction: r.st.LastAction,
-			State: in.State,
-			StabilityVec: in.StabilityVec,
-			Risk: in.Risk,
-			HazardProxy: in.Risk,
+			Action:        r.st.SafeAnchor,
+			PrevAction:    r.st.LastAction,
+			State:         in.State,
+			StabilityVec:  in.StabilityVec,
+			Risk:          in.Risk,
+			HazardProxy:   in.Risk,
 			CapacityPress: in.CapacityPress,
-			SLAWeight: 1.5,
+			SLAWeight:     1.5,
 		},
 	).Action
 }

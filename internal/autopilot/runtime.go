@@ -3,7 +3,6 @@ package autopilot
 import (
 	"math"
 	"math/rand"
-	"time"
 )
 
 /*
@@ -32,10 +31,9 @@ const (
 )
 
 type RuntimeState struct {
-
-	Plant CongestionState
+	Plant   CongestionState
 	Rollout RolloutState
-	ID IdentificationState
+	ID      IdentificationState
 
 	LastPlan []MPCControl
 
@@ -45,37 +43,35 @@ type RuntimeState struct {
 	Mode AutonomyMode
 
 	OverrideHistory []float64
-	SafetyTight float64
+	SafetyTight     float64
 
 	MetaPersistence float64
 }
 
 type RuntimeTelemetry struct {
-
-	Backlog float64
-	Latency float64
+	Backlog  float64
+	Latency  float64
 	Capacity float64
 
-	Confidence float64
+	Confidence    float64
 	MPCConfidence float64
 
 	OverrideRate float64
-	Mode int
+	Mode         int
 
 	VarianceScale float64
-	SafetyScale float64
-	Damping float64
+	SafetyScale   float64
+	Damping       float64
 }
 
 type RuntimeOrchestrator struct {
-
 	Dt float64
 
 	Predictor *Predictor
-	MPC *MPCOptimiser
-	Safety *SafetyEngine
-	Rollout *RolloutController
-	ID *IdentificationEngine
+	MPC       *MPCOptimiser
+	Safety    *SafetyEngine
+	Rollout   *RolloutController
+	ID        *IdentificationEngine
 
 	SLA_Backlog float64
 
@@ -84,7 +80,7 @@ type RuntimeOrchestrator struct {
 	DampingMin float64
 	DampingMax float64
 
-	FailureScaleProb float64
+	FailureScaleProb  float64
 	FailureConfigProb float64
 
 	TelemetryTau float64
@@ -106,9 +102,9 @@ func (r *RuntimeOrchestrator) forecastBacklog(
 		u := plan[i]
 
 		sim.CapacityTarget = u.CapacityTarget
-		sim.RetryFactor    = u.RetryFactor
-		sim.CacheRelief    = u.CacheRelief
-		sim.ArrivalMean    = arrival
+		sim.RetryFactor = u.RetryFactor
+		sim.CacheRelief = u.CacheRelief
+		sim.ArrivalMean = arrival
 
 		sim = r.Predictor.Step(sim)
 	}
@@ -128,7 +124,7 @@ func (r *RuntimeOrchestrator) modeProb(
 	risk :=
 		math.Tanh(
 			backlog/r.SLA_Backlog +
-				(1-conf) +
+				(1 - conf) +
 				overrideRate,
 		)
 
@@ -161,10 +157,7 @@ func (r *RuntimeOrchestrator) delay(
 		)
 
 	noise :=
-		0.05 *
-			math.Sin(
-				float64(time.Now().UnixNano()),
-			)
+		(rand.Float64()*2 - 1) * 0.05
 
 	return alpha*prev +
 		(1-alpha)*value +
@@ -316,9 +309,9 @@ func (r *RuntimeOrchestrator) Tick(
 	plantIn := s.Plant
 	plantIn.CapacityActive = newRollout.CapacityActive
 	plantIn.CapacityTarget = newRollout.CapacityActive
-	plantIn.RetryFactor    = newRollout.RetryActive
-	plantIn.CacheRelief    = newRollout.CacheActive
-	plantIn.ArrivalMean    = measuredArrival
+	plantIn.RetryFactor = newRollout.RetryActive
+	plantIn.CacheRelief = newRollout.CacheActive
+	plantIn.ArrivalMean = measuredArrival
 	newPlant := r.Predictor.Step(plantIn)
 
 	newPlant.Backlog =
@@ -373,19 +366,19 @@ func (r *RuntimeOrchestrator) Tick(
 	next.Time += r.Dt
 
 	tel := RuntimeTelemetry{
-		Backlog: newPlant.Backlog,
-		Latency: newPlant.Latency,
+		Backlog:  newPlant.Backlog,
+		Latency:  newPlant.Latency,
 		Capacity: newRollout.CapacityActive,
 
-		Confidence: idState.ModelConfidence,
+		Confidence:    idState.ModelConfidence,
 		MPCConfidence: mpcConf,
 
 		OverrideRate: overrideRate,
-		Mode: int(next.Mode),
+		Mode:         int(next.Mode),
 
 		VarianceScale: sig.MPCVarianceScale,
-		SafetyScale: sig.SafetyMarginScale,
-		Damping: d,
+		SafetyScale:   sig.SafetyMarginScale,
+		Damping:       d,
 	}
 
 	return next, tel

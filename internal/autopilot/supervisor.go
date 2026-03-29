@@ -2,19 +2,7 @@ package autopilot
 
 import "math"
 
-/*
-PHASE-3 SUPERVISOR — RESEARCH UPGRADE 5
 
-New upgrades:
-
-• quantile burst arrival envelope
-• capacity-aware analytic energy bound
-• piecewise growth / contraction detection
-• primitive terminal safe congestion region
-• economic trigger integration
-• bidirectional adaptive tuning
-• confidence estimator hook
-*/
 
 type PlantState struct {
 	Backlog float64

@@ -2,23 +2,7 @@ package autopilot
 
 import "math"
 
-/*
-PHASE-3 ROLLOUT CONTROLLER — RESEARCH UPGRADE 4
-GOVERNANCE STATE MACHINE
 
-Modes:
-NORMAL → DEGRADED → EMERGENCY
-
-Adds:
-
-• SLA / cost / topology priority
-• queue-pressure feedback pacing
-• governance mode switching
-• nonlinear warmup readiness
-• asymmetric config dynamics
-• rollout retry + escalation
-• stochastic execution hook
-*/
 
 type GovernanceMode int
 

@@ -102,6 +102,8 @@ func (a *AutonomyControlAdapter) Step(
 				ModelUnc: 0.25,
 				HazardUnc: 0.25,
 				SLAWeight: norm,
+				Policy: a.policy,
+				PolicyUnc: 0.15,
 			},
 		)
 

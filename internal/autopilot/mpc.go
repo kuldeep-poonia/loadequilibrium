@@ -6,20 +6,7 @@ import (
 	"sort"
 )
 
-/*
-PHASE-3 MPC — RESEARCH UPGRADE 5 (FINAL)
 
-Adds:
-
-• adaptive regime probability hook
-• quantile-based CVaR risk objective
-• extended annealing schedule
-• deterministic fixed scenario mode
-• hybrid terminal constraint (soft + barrier)
-• variance memory + capacity damping
-• calibrated confidence proxy
-• extensible topology state placeholder
-*/
 
 type MPCState struct {
 	Backlog float64

@@ -102,7 +102,15 @@ func (r *PredictiveStabilityRollout) Forecast(in RolloutInput) StabilityForecast
 
 		r.identifyRLS(xPrev, x, u)
 
-		uPol := in.Policy(x)
+		uPol := clone(u)
+		if in.Policy != nil {
+			uPol = in.Policy(x)
+			if len(uPol) != len(u) {
+				aligned := make([]float64, len(u))
+				copy(aligned, uPol)
+				uPol = aligned
+			}
+		}
 
 		for i := range u {
 			u[i] =

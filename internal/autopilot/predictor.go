@@ -2,19 +2,7 @@ package autopilot
 
 import "math"
 
-/*
-PHASE-3 CONGESTION PREDICTOR — RESEARCH UPGRADE 5
 
-Refinements:
-
-• stochastic zero-mean rollout jitter
-• threshold-driven burst exit dynamics
-• explicit variance decay law
-• latency–service recovery coupling
-• consistent disturbance energy injection
-• numerically safe hybrid overload barrier
-• regime confidence hysteresis signal
-*/
 
 type CongestionState struct {
 

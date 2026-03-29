@@ -279,6 +279,9 @@ func (l *AdaptiveSignalLearner) closedLoopRisk(x []float64) float64 {
 
 	state := copyVec(x)
 	delayBuf := make([][]float64, l.ctrlDelay)
+	for i := range delayBuf {
+		delayBuf[i] = make([]float64, l.dim)
+	}
 
 	risk := 0.0
 

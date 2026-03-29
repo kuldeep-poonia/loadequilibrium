@@ -2,21 +2,7 @@ package autopilot
 
 import "math"
 
-/*
-PHASE-3 IDENTIFICATION ENGINE — META-LEARNING UPGRADE
 
-Now provides:
-
-• adaptive blend coefficient + separate estimate
-• bounded burst regime energy with reset logic
-• fast noise vs slow drift disturbance separation
-• dynamic confidence floor (SLA / maturity aware)
-• EVT-style heavy-tail risk envelope proxy
-• infra-conditioned rollout reliability learning
-• controller-ready damping signal
-• long-horizon seasonal meta-memory
-• supervisory anti-spiral stabilisation
-*/
 
 type IdentificationState struct {
 

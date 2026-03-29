@@ -2,21 +2,7 @@ package autopilot
 
 import "math"
 
-/*
-PHASE-3 SAFETY ENGINE — RESEARCH UPGRADE 3
 
-Key advances:
-
-• higher-dimensional invariant approximation
-• disturbance-tube aware adaptive energy bound
-• terminal contraction slack tolerance
-• adaptive instability detection horizon
-• topology delay feasibility penalty
-• state-dependent terminal safe region
-• nonlinear reaction capability estimate
-• emergency fallback control synthesis
-• safety hysteresis gating
-*/
 
 type SafetyState struct {
 

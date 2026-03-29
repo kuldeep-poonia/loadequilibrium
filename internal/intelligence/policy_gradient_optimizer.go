@@ -205,7 +205,7 @@ func (p *PolicyGradientOptimizer) computeGAE(tr []pgTransition) []float64 {
 		v := p.value(tr[t].feat)
 		vNext := 0.0
 
-		if !tr[t].done {
+		if !tr[t].done && len(tr[t].nextFeat) > 0 {
 			vNext = p.value(tr[t].nextFeat)
 		}
 
@@ -333,6 +333,9 @@ func (p *PolicyGradientOptimizer) actorMean(feat []float64) ([]float64, []float6
 }
 
 func (p *PolicyGradientOptimizer) value(feat []float64) float64 {
+	if len(feat) == 0 {
+		return 0
+	}
 
 	h := make([]float64, p.hDim)
 

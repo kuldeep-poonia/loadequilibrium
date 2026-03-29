@@ -5,21 +5,7 @@ import (
 	"math/rand"
 )
 
-/*
-PHASE-3 FINAL AUTONOMY RUNTIME KERNEL
 
-Improvements:
-
-• predictor-rollout backlog forecast
-• probabilistic autonomy regime classification + hysteresis
-• correlated stochastic telemetry delay model
-• multidimensional rollout failure physics
-• state-dependent safety tightening
-• damping affects MPC cadence + rollout pacing
-• severity-weighted override memory (sliding window)
-• long-horizon learning persistence hooks
-• anti-oscillation governance stabiliser
-*/
 
 type AutonomyMode int
 

@@ -4,20 +4,7 @@ import (
 	"math"
 )
 
-/*
-Ultra-Advanced Autonomy Control Adapter v2
 
-Fixes:
-
-• robust feature normalization + stationarity filter
-• physically meaningful nonlinear risk model
-• real telemetry introspection signals (uncertainty / entropy / gradient proxy)
-• predictive rollout forecast integration
-• temporal + hysteretic regime classifier
-• actuator space decoupled from state space
-• architecture cleanup → only orchestrator dependency
-• actuator feasibility scaling (quantization + rate-limit + latency model)
-*/
 
 type InfraState struct {
 	QueueDepth float64

@@ -4,19 +4,7 @@ import (
 	"time"
 )
 
-/*
-Ultra-Advanced Autonomy Orchestrator v3
 
-Major upgrades:
-
-• autonomy mode propagated downward (runtime gating + fusion hint)
-• safe-anchor periodic re-validation using rollout + hazard
-• adaptive fallback risk weighting derived from telemetry
-• probabilistic degradation boundary (EW anomaly score)
-• short-horizon trajectory certification
-• regime-aware hysteresis memory depth
-• simple meta-learning of degrade / recovery timing
-*/
 
 type AutonomyMode int
 

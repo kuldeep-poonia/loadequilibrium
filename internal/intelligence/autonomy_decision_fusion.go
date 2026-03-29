@@ -6,17 +6,7 @@ import (
 	"sync"
 )
 
-/*
-Frontier Fusion v4
 
-• small coupled QP-style solver (iterative projected gradient)
-• adaptive predictive risk weighting
-• multi-mode stability vector gating
-• frequency-phase oscillation detector
-• asymmetric nonlinear feasibility projection
-• stochastic safety margin injection
-• regime performance-aware safety learning
-*/
 
 type FusionInput struct {
 	State      []float64

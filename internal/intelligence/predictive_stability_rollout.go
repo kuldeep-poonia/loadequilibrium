@@ -5,19 +5,7 @@ import (
 	"math/rand"
 )
 
-/*
-Frontier Predictive Stability Rollout v4
 
-Fixes:
-
-• matrix-RLS identification (proper gain + covariance update)
-• trajectory spectral growth estimation (multi-step Rayleigh accumulation)
-• multivariate heavy-tail shock generator (correlated burst)
-• adaptive tipping barrier learned online
-• uncertainty-aware policy preview blending
-• compute-budget spectral thinning
-• physical feasibility projection (state box + positivity + saturation)
-*/
 
 type RolloutInput struct {
 	State []float64

@@ -5,19 +5,7 @@ import (
 	"sync"
 )
 
-/*
-Frontier Meta Autonomy Controller v3
 
-Major upgrades:
-
-• adaptive multi-objective weighting (meta-learned governance utility)
-• vector risk planning (shape-aware trajectory features)
-• entropy / gradient proxy driven exploration control
-• soft meta-policy governance mode scheduler (POMDP-like belief update)
-• stability-margin-normalized safety gain
-• regime-conditioned autonomy shaping
-• long-horizon governance trend planning
-*/
 
 type MetaInput struct {
 	GlobalRisk float64

@@ -6,20 +6,7 @@ import (
 	"sync"
 )
 
-/*
-Advanced hazard critic v4
 
-Major upgrades:
-
-• bootstrap-diverse ensemble (bagging mask + param noise)
-• logistic-normal aleatoric variance head
-• epistemic variance from ensemble
-• constrained learned horizon (sigmoid projection)
-• multi-step survival rollout target
-• temporal hazard smoothing filter
-• likelihood-based temperature calibration
-• fine-grained RW lock (parallel inference safe)
-*/
 
 type HazardSample struct {
 	Feature []float64

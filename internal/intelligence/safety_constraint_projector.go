@@ -4,19 +4,7 @@ import (
 	"math"
 )
 
-/*
-Frontier Safety Constraint Projector v3
 
-Major upgrades:
-
-• adaptive primal-dual constrained QP style solver
-• correct L1 capacity gradient geometry
-• modal-directional stability barrier
-• adaptive convergence stopping
-• envelope curvature integrated inside solve
-• actuator coupling matrix constraints
-• risk feedback aligned with hazard prediction proxy
-*/
 
 type SafetyInput struct {
 	Action     []float64

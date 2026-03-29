@@ -146,7 +146,7 @@ func nonlinearEmbed(x []float64) []float64 {
 	return out
 }
 
-/* ===== dynamics ===== */
+/* dynamics  */
 
 func (l *AdaptiveSignalLearner) rls(phi []float64, x []float64) {
 
@@ -168,7 +168,7 @@ func (l *AdaptiveSignalLearner) rls(phi []float64, x []float64) {
 	projectEigen(l.A, 0.95)
 }
 
-/* ===== covariance ===== */
+/*  covariance  */
 
 func (l *AdaptiveSignalLearner) updateCov(x []float64) {
 
@@ -209,7 +209,7 @@ func (l *AdaptiveSignalLearner) mahal(x []float64) float64 {
 	return math.Sqrt(math.Abs(d))
 }
 
-/* ===== regime ===== */
+/* regime */
 
 func (l *AdaptiveSignalLearner) regimeFilter(x []float64) []float64 {
 
@@ -249,7 +249,7 @@ func (l *AdaptiveSignalLearner) regimeFilter(x []float64) []float64 {
 	return next
 }
 
-/* ===== spectral ===== */
+/* specteral */
 
 func (l *AdaptiveSignalLearner) spectral() []float64 {
 
@@ -273,7 +273,7 @@ func (l *AdaptiveSignalLearner) spectral() []float64 {
 	return modes
 }
 
-/* ===== risk ===== */
+/* risks */
 
 func (l *AdaptiveSignalLearner) closedLoopRisk(x []float64) float64 {
 

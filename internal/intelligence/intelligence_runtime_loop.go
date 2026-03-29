@@ -6,18 +6,7 @@ import (
 	"time"
 )
 
-/*
-Frontier Intelligence Runtime Loop v3
 
-Major upgrades:
-
-• multi-candidate control horizon optimisation (light MPC search)
-• probabilistic fusion of rollout risk + hazard critic
-• async / budget-aware online learning
-• governance-mode aware fusion context
-• certified safe fallback via projector on safe anchor config
-• runtime health watchdog (divergence / uncertainty / oscillation)
-*/
 
 type RuntimeModules struct {
 	Meta    *MetaAutonomyController

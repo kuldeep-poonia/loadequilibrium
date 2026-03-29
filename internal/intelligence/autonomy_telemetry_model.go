@@ -5,18 +5,6 @@ import (
 	"sync"
 )
 
-/*
-Ultra-Advanced Autonomy Telemetry Model v4
-
-Fixes:
-
-• reliability-curve calibrated confidence (online isotonic bins + Bayesian fusion)
-• dynamic spectral clustering (adaptive band count)
-• closed-loop instability uses executed (post-safety) action
-• normalized adaptive health weights (simplex projection)
-• replay collapse persistence (KL trend EW)
-• rich regime context memory vector (load / failure / seasonality)
-*/
 
 type TelemetryInput struct {
 	RiskForecast []float64

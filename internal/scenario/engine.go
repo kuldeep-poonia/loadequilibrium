@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
@@ -16,12 +17,61 @@ func isScenarioDisabled() bool {
 }
 
 type SuperpositionEngine struct {
+	mu           sync.RWMutex
 	scenarios    []Scenario
+	overlays     map[string]scheduledScenario
 	ScenarioMode string
 }
 
+type scheduledScenario struct {
+	scenario  Scenario
+	untilTick uint64
+}
+
 func NewEngine(scenarios ...Scenario) *SuperpositionEngine {
-	return &SuperpositionEngine{scenarios: scenarios}
+	base := make([]Scenario, len(scenarios))
+	copy(base, scenarios)
+	return &SuperpositionEngine{
+		scenarios: base,
+		overlays:  make(map[string]scheduledScenario),
+	}
+}
+
+func (e *SuperpositionEngine) SetOverlay(name string, scenario Scenario, untilTick uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.overlays[name] = scheduledScenario{scenario: scenario, untilTick: untilTick}
+}
+
+func (e *SuperpositionEngine) clearExpiredLocked(tick uint64) {
+	for name, slot := range e.overlays {
+		if slot.untilTick > 0 && tick > slot.untilTick {
+			delete(e.overlays, name)
+		}
+	}
+}
+
+func (e *SuperpositionEngine) OverlayNames(tick uint64) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.clearExpiredLocked(tick)
+	names := make([]string, 0, len(e.overlays))
+	for name := range e.overlays {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (e *SuperpositionEngine) scenariosForTick(tick uint64) []Scenario {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.clearExpiredLocked(tick)
+	all := make([]Scenario, 0, len(e.scenarios)+len(e.overlays))
+	all = append(all, e.scenarios...)
+	for _, slot := range e.overlays {
+		all = append(all, slot.scenario)
+	}
+	return all
 }
 
 func (e *SuperpositionEngine) ApplySuperposition(
@@ -34,12 +84,13 @@ func (e *SuperpositionEngine) ApplySuperposition(
 		return windows
 	}
 
-	if len(e.scenarios) == 0 {
+	scenarios := e.scenariosForTick(tick)
+	if len(scenarios) == 0 {
 		return windows
 	}
 
 	var active []Disturbance
-	for _, s := range e.scenarios {
+	for _, s := range scenarios {
 		if ds := s.Evaluate(tick, topo, windows); ds != nil {
 			active = append(active, ds...)
 		}
@@ -82,11 +133,22 @@ func (e *SuperpositionEngine) ApplySuperposition(
 			tick, d.ScenarioID, d.Phase, d.ServiceID, d.Metric, d.Factor, d.PropagationDepth, d.PropagationDelayEst)
 	}
 
+	applyToServices := func(target string, fn func(string)) {
+		if target == "*" {
+			for id := range mutated {
+				fn(id)
+			}
+			return
+		}
+		fn(target)
+	}
+
 	for svc, rateMult := range rateMultipliers {
-		w, ok := mutated[svc]
+		applyToServices(svc, func(serviceID string) {
+		w, ok := mutated[serviceID]
 		if !ok {
 			w = &telemetry.ServiceWindow{
-				ServiceID:        svc,
+				ServiceID:        serviceID,
 				MeanRequestRate:  100.0,
 				LastRequestRate:  100.0,
 				StdRequestRate:   5.0,
@@ -99,7 +161,7 @@ func (e *SuperpositionEngine) ApplySuperposition(
 				SignalQuality:    "synthetic",
 				SampleCount:      30,
 			}
-			mutated[svc] = w
+			mutated[serviceID] = w
 		}
 
 		clamped := math.Min(rateMult, 10.0)
@@ -121,13 +183,15 @@ func (e *SuperpositionEngine) ApplySuperposition(
 			}
 			w.UpstreamEdges = newEdges
 		}
+		})
 	}
 
 	for svc, latMult := range latencyMultipliers {
-		w, ok := mutated[svc]
+		applyToServices(svc, func(serviceID string) {
+		w, ok := mutated[serviceID]
 		if !ok {
 			w = &telemetry.ServiceWindow{
-				ServiceID:        svc,
+				ServiceID:        serviceID,
 				MeanRequestRate:  100.0,
 				LastRequestRate:  100.0,
 				MeanActiveConns:  10.0,
@@ -139,7 +203,7 @@ func (e *SuperpositionEngine) ApplySuperposition(
 				SignalQuality:    "synthetic",
 				SampleCount:      30,
 			}
-			mutated[svc] = w
+			mutated[serviceID] = w
 		}
 
 		clamped := math.Min(latMult, 10.0)
@@ -147,6 +211,7 @@ func (e *SuperpositionEngine) ApplySuperposition(
 		w.MaxLatencyMs *= clamped
 		w.LastLatencyMs *= clamped
 		w.LastP99LatencyMs *= clamped
+		})
 	}
 
 	return mutated

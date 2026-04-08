@@ -6,9 +6,7 @@ import (
 	"time"
 )
 
-// RingBuffer is a fixed-capacity circular buffer of MetricPoints.
-// Writes overwrite the oldest entry when full.
-// All operations are goroutine-safe.
+
 type RingBuffer struct {
 	mu   sync.RWMutex
 	buf  []*MetricPoint
@@ -36,9 +34,7 @@ func (r *RingBuffer) Push(p *MetricPoint) {
 	r.mu.Unlock()
 }
 
-// Snapshot returns a copy of all valid entries in chronological order
-// (oldest first). The returned slice is a new allocation — safe to read
-// without holding the lock.
+
 func (r *RingBuffer) Snapshot() []*MetricPoint {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -73,9 +69,7 @@ func (r *RingBuffer) Size() int {
 	return r.size
 }
 
-// RingSummary is a compact statistical summary over the full ring buffer history.
-// It avoids allocating the full point slice, making it safe for frequent calls
-// on large buffers without GC pressure.
+
 type RingSummary struct {
 	Count          int
 	MeanReqRate    float64
@@ -87,8 +81,7 @@ type RingSummary struct {
 	NewestAt       time.Time
 }
 
-// SummaryStats computes a compact statistical summary over all stored points.
-// This is used for historical telemetry summarisation without returning the
+
 // full point slice.
 func (r *RingBuffer) SummaryStats() RingSummary {
 	r.mu.RLock()

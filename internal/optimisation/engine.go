@@ -13,7 +13,7 @@ import (
 
 // Engine runs the optimisation and control loop across all services.
 type Engine struct {
-	cfg       *config.Config
+	cfg           *config.Config
 	pids          map[string]*PIDController
 	lastScale     map[string]float64
 	stictionCount map[string]int
@@ -109,6 +109,16 @@ func (e *Engine) RunControl(
 
 		output := pid.Update(rho, now)
 
+		// CRITICAL FIX: Gate PID output based on collapse zone, not rho
+		// During collapse zone (zone=collapse): ONLY allow dampening, NEVER amplify
+		// This prevents amplification even when delayed telemetry makes rho appear high
+		if b.Stability.CollapseZone == "collapse" && output > 0 {
+			// Collapse zone: suppress any amplification from PID
+			// During recovery from actual overload, even with stale telemetry,
+			// we must prevent amplification until queue physically drains
+			output = -0.2 // Small negative to gently reduce scale toward 1.0
+		}
+
 		// D. Soft Constraint Dynamics: replacing hard 0.5 saturation with a smooth exponential barrier
 		bareScale := 1.0 + output
 		var scaleFactor float64
@@ -128,19 +138,22 @@ func (e *Engine) RunControl(
 		}
 
 		// A. Recovery Incentive Term: Reward gradual utilisation restoration when queue pressure decreases
+		// CRITICAL: Only apply recovery incentive in safe/warning zones, NOT during collapse
+		// (collapse zone = ρ ≥ 0.90, in which case we need maximum dampening, not relief)
 		recoveryIncentive := 0.0
-		if obs.RecoveryActivation > 0 && scaleFactor < 0.9 {
+		if b.Stability.CollapseZone != "collapse" && obs.RecoveryActivation > 0 && scaleFactor < 0.9 {
 			recoveryIncentive = math.Min(obs.RecoveryActivation*0.5, 0.20)
 			scaleFactor += recoveryIncentive
 		}
 
 		// C. Predictive Relief Estimation: Forecast decay
+		// CRITICAL: Only add relief in safe/warning zones; during collapse, maintaining maximum dampening is required
 		predictedReliefMs := 0.0
 		if lastSimResult != nil && lastSimResult.RecoveryConvergenceMs > 0 {
 			predictedReliefMs = lastSimResult.RecoveryConvergenceMs
 		}
 		predictedRelief := 0.0
-		if obs.DisturbanceDecay > 0 {
+		if b.Stability.CollapseZone != "collapse" && obs.DisturbanceDecay > 0 {
 			predictedRelief = math.Min(obs.DisturbanceDecay*0.1, 0.1)
 			scaleFactor += predictedRelief
 		}
@@ -175,25 +188,32 @@ func (e *Engine) RunControl(
 		e.lastScale[id] = scaleFactor
 
 		// Stability-aware actuation amplification from cost gradient.
+		// CRITICAL: During collapse, NEVER amplify — collapse requires dampening only
 		gradientAmplification := 1.0
-		if cg, ok := costGradients[id]; ok && cg.CostGradient > 0.5 {
-			gradientAmplification = 1.0 + math.Min(cg.CostGradient/10.0*0.25, 0.25)
-			scaleFactor = math.Min(scaleFactor*gradientAmplification, 3.0)
-			e.lastScale[id] = scaleFactor
+		if b.Stability.CollapseZone != "collapse" {
+			if cg, ok := costGradients[id]; ok && cg.CostGradient > 0.5 {
+				gradientAmplification = 1.0 + math.Min(cg.CostGradient/10.0*0.25, 0.25)
+				scaleFactor = math.Min(scaleFactor*gradientAmplification, 3.0)
+				e.lastScale[id] = scaleFactor
+			}
 		}
 
 		// Trajectory planner: bounded objective-surface search over N candidate
 		// scale factors to find the convergence-aware optimum.
 		// The planner's recommendation is blended with the PID+MPC result:
 		// if the planner finds a better convergent trajectory, we shift toward it.
+		// CRITICAL: During collapse, NEVER blend with trajectory planner — use PID+MPC only.
 		plan := PlanTrajectory(b, e.cfg.UtilisationSetpoint, horizonTicks,
 			e.cfg.TickInterval.Seconds(), e.cfg.CollapseThreshold)
-		if plan.BestScaleFactor > 0 && plan.ConvergenceAware {
-			// Blend: 60% PID/MPC, 40% trajectory planner when planner is convergence-aware.
-			scaleFactor = 0.60*scaleFactor + 0.40*plan.BestScaleFactor
-		} else if plan.BestScaleFactor > 0 && !plan.ObjectiveSurfaceConvex {
-			// Non-convex surface: rely more on planner which searched more broadly.
-			scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
+		if b.Stability.CollapseZone != "collapse" {
+			// Only blend with planner in safe/warning zones
+			if plan.BestScaleFactor > 0 && plan.ConvergenceAware {
+				// Blend: 60% PID/MPC, 40% trajectory planner when planner is convergence-aware.
+				scaleFactor = 0.60*scaleFactor + 0.40*plan.BestScaleFactor
+			} else if plan.BestScaleFactor > 0 && !plan.ObjectiveSurfaceConvex {
+				// Non-convex surface: rely more on planner which searched more broadly.
+				scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
+			}
 		}
 		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 3.0))
 
@@ -224,23 +244,23 @@ func (e *Engine) RunControl(
 		}
 
 		directives[id] = ControlDirective{
-			ServiceID:               id,
-			ComputedAt:              now,
-			ScaleFactor:             scaleFactor,
-			TargetUtilisation:       e.cfg.UtilisationSetpoint,
-			Error:                   rho - e.cfg.UtilisationSetpoint,
-			PIDOutput:               output,
-			Active:                  pid.Active,
-			StabilityMargin:         b.Stability.StabilityMargin,
-			HysteresisState:         pid.HysteresisState,
-			ActuationBound:          maxScaleDelta,
-			PredictiveTarget:        predictiveTarget,
-			MPCPredictedRho:         mpcRes.PredictedRhoAtHorizon,
-			MPCOvershootRisk:        mpcRes.OvershootRisk,
-			MPCUnderactuationRisk:   mpcRes.UnderactuationRisk,
-			CostGradient:            cgVal,
-			TrajectoryCostAvg:       mpcRes.TrajectoryCostAvg,
-			MaxTrajectoryCost:       mpcRes.MaxTrajectoryCost,
+			ServiceID:                 id,
+			ComputedAt:                now,
+			ScaleFactor:               scaleFactor,
+			TargetUtilisation:         e.cfg.UtilisationSetpoint,
+			Error:                     rho - e.cfg.UtilisationSetpoint,
+			PIDOutput:                 output,
+			Active:                    pid.Active,
+			StabilityMargin:           b.Stability.StabilityMargin,
+			HysteresisState:           pid.HysteresisState,
+			ActuationBound:            maxScaleDelta,
+			PredictiveTarget:          predictiveTarget,
+			MPCPredictedRho:           mpcRes.PredictedRhoAtHorizon,
+			MPCOvershootRisk:          mpcRes.OvershootRisk,
+			MPCUnderactuationRisk:     mpcRes.UnderactuationRisk,
+			CostGradient:              cgVal,
+			TrajectoryCostAvg:         mpcRes.TrajectoryCostAvg,
+			MaxTrajectoryCost:         mpcRes.MaxTrajectoryCost,
 			PlannerScaleFactor:        plan.BestScaleFactor,
 			PlannerConvergent:         plan.ConvergenceAware,
 			PlannerConvex:             plan.ObjectiveSurfaceConvex,
@@ -267,6 +287,7 @@ func sortFloat64s(s []float64) {
 		}
 	}
 }
+
 // Objective: minimise composite of predicted tail latency, cascade failure
 // probability, and weighted instability — balancing all four axes explicitly.
 //

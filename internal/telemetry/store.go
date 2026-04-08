@@ -6,9 +6,7 @@ import (
 	"time"
 )
 
-// Store is the central in-memory registry of all service telemetry.
-// It maintains one ring buffer per service, enforces a cardinality cap,
-// and prunes services that have not reported within the stale age.
+
 type Store struct {
 	mu       sync.RWMutex
 	buffers  map[string]*RingBuffer
@@ -209,9 +207,7 @@ func computeWindow(serviceID string, pts []*MetricPoint) *ServiceWindow {
 		stdReq = math.Sqrt(sumSqDiff / (n - 1))
 	}
 
-	// ── Missing metric inference ──────────────────────────────────────────────
-	// When a metric is absent or zero, infer it from related signals rather than
-	// leaving it at zero (which would cause downstream models to produce wrong results).
+	
 
 	// P99 latency inference: use Last→P95→Mean progression if P99 is absent.
 	lastP99 := last.Latency.P99

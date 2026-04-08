@@ -12,12 +12,12 @@ import (
 
 // PhysicalQueueState maintains continuous system momentum between disjoint ticks.
 type PhysicalQueueState struct {
-	accumulatedBacklog   float64
-	arrivalMomentum      float64
-	localArrivalEwma     float64
-	delayBuffer          [3]float64
-	delayIdx             int
-	lastTickTime         time.Time
+	accumulatedBacklog float64
+	arrivalMomentum    float64
+	localArrivalEwma   float64
+	delayBuffer        [3]float64
+	delayIdx           int
+	lastTickTime       time.Time
 }
 
 // QueuePhysicsEngine encapsulates the Stateful Erlang-C fluid approximations.
@@ -51,7 +51,7 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	st, ok := pe.states[w.ServiceID]
 	if !ok {
 		st = &PhysicalQueueState{
-			lastTickTime: time.Now(),
+			lastTickTime:     time.Now(),
 			localArrivalEwma: w.MeanRequestRate,
 		}
 		pe.states[w.ServiceID] = st
@@ -101,19 +101,54 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	// D. Latency Feedback Coupling
 	// Normalise accumulated queue across concurrency
 
-	// MINIMAL PATCH: TelemetryCoupler already persists physical latency penalties into
-	// w.MeanLatencyMs. We use it directly to prevent compounding exponential explosions.
+	// LATENCY CEILING: During collapse (high queue), latency feedback mechanisms
+	// can create explosive positive feedback loops. We cap effective latency to
+	// prevent the 1/latency reciprocal from driving rate to zero.
 	effectiveLatency := w.MeanLatencyMs
 	if effectiveLatency <= 0 {
 		effectiveLatency = 50.0
+	}
+	// Latency ceiling: if queue > 10k AND latency has exploded, cap at 500ms.
+	if st.accumulatedBacklog > 10000.0 && effectiveLatency > 500.0 {
+		effectiveLatency = 500.0
 	}
 
 	// B. Service Saturation Model (Resource contention collapse)
 	// Apply hazard-based degradation to service rate
 	hazardFactor := math.Exp(-w.Hazard * 0.1)
-	serviceRatePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
-	m.ServiceRate = serviceRatePerServer * c
-	
+
+	// TWO-COMPONENT SERVICE MODEL:
+	// During sustained high queue, latency-derived rates become unreliable (they're
+	// confounded by queue delays, not fundamental capacity). Instead, use a blend of
+	// latency-derived + baseline capacity estimates.
+	//
+	// Baseline capacity: ~700 req/s per server (system-designed processing rate).
+	// Latency-derived capacity: 1000 / eff_latency.
+	// Use a weighted blend to preserve latency feedback during mild overload while
+	// preventing catastrophic underestimation during collapse.
+	baselineServicePerServer := 700.0 // nominal req/s per server (designed capacity)
+	latencyServicePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
+
+	// Weight: during high hazard (hazard > 0.5), shift weight toward baseline.
+	// hazardWeight ∈ [0,1]: 0 → full baseline, 1 → full latency estimate.
+	hazardWeight := math.Min(w.Hazard, 1.0)
+	if hazardWeight > 0.5 {
+		// High hazard: 50-100% weight on baseline to avoid underestimation
+		hazardWeight = 0.5 + (hazardWeight-0.5)*0.2 // compress the range
+	}
+	serviceRatePerServer := hazardWeight*latencyServicePerServer + (1.0-hazardWeight)*baselineServicePerServer
+
+	// Apply controller-applied scaling if present. Default scale = 1.0
+	appliedScale := 1.0
+	if w.AppliedScale > 0 {
+		appliedScale = w.AppliedScale
+	}
+	m.ServiceRate = serviceRatePerServer * c * appliedScale
+
+	// DIAGNOSTIC: Log service rate computation steps for debugging physics coupling
+	log.Printf("[service-rate-coupling] svc=%s srv_per_server=%.2f c=%.0f applied_scale=%.4f base_service=%.2f final_service_rate=%.2f arrival_rate=%.2f util_before_service=%.4f",
+		w.ServiceID, serviceRatePerServer, c, appliedScale, serviceRatePerServer*c, m.ServiceRate, m.ArrivalRate, m.ArrivalRate/math.Max(m.ServiceRate, 1))
+
 	// C. Backlog Accumulation Memory & A. Arrival Burst Inertia
 	// Integrate fluid mechanics across tick dt
 	netFlowNormalised := (m.ArrivalRate - m.ServiceRate) / c
@@ -141,7 +176,7 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	m.AdjustedWaitMs = m.MeanWaitMs
 	m.MeanSojournMs = m.MeanWaitMs + effectiveLatency
 	m.BurstFactor = 1.0
-	
+
 	rawTrend := utilTrendRegression(w, m.ServiceRate)
 	m.UtilisationTrend = rawTrend * trustWeight
 
@@ -154,12 +189,14 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	m.UpstreamPressure = computeInboundPressure(w) * trustWeight
 
 	covPenalty := math.Exp(-w.StdRequestRate / math.Max(w.MeanRequestRate, 1) * 0.5)
-	if math.IsNaN(covPenalty) || covPenalty <= 0 { covPenalty = 0.5 }
+	if math.IsNaN(covPenalty) || covPenalty <= 0 {
+		covPenalty = 0.5
+	}
 	m.Confidence = m.Confidence * covPenalty * stalePenalty(w, 2.0)
 
-	// G. Structured Physics Logging
-	log.Printf("[physics] svc=%s queue_next=%.3f effective_service_rate=%.3f latency_feedback=%.3f propagation_delay_stage=%d",
-		w.ServiceID, m.MeanQueueLen, m.ServiceRate, 1.0, st.delayIdx)
+	// G. Structured Physics Logging (expanded)
+	log.Printf("[physics] svc=%s arrival=%.3f c=%.0f eff_latency=%.6e hazard=%.6f srv_per_server=%.6e applied_scale=%.6f service_rate=%.6e netflow_norm=%.6e queue_next=%.3f propagation_delay_stage=%d",
+		w.ServiceID, m.ArrivalRate, c, effectiveLatency, hazardFactor, serviceRatePerServer, appliedScale, m.ServiceRate, netFlowNormalised, m.MeanQueueLen, st.delayIdx)
 
 	return m
 }
@@ -269,7 +306,7 @@ func estimateServiceCoV(w *telemetry.ServiceWindow) float64 {
 	// Under exponential distribution P99 ≈ 4.6·mean; CoV=1.
 	expectedP99Ratio := 4.6
 	actualRatio := w.LastP99LatencyMs / w.MeanLatencyMs
-	cov := math.Sqrt(math.Max((actualRatio/expectedP99Ratio), 0.1))
+	cov := math.Sqrt(math.Max((actualRatio / expectedP99Ratio), 0.1))
 	return math.Min(cov, 5.0)
 }
 
@@ -277,7 +314,8 @@ func estimateServiceCoV(w *telemetry.ServiceWindow) float64 {
 // two-point OLS over the analysis window.
 //
 // With only mean/last aggregates available (no raw point array), we use:
-//   slope = (ρ_last - ρ_mean) / (halfWindow_sec)
+//
+//	slope = (ρ_last - ρ_mean) / (halfWindow_sec)
 //
 // This is the minimum-variance linear estimator given the available statistics.
 // The result is weighted by sample confidence so sparse windows produce near-zero trends.

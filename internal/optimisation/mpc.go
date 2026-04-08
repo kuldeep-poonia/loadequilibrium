@@ -17,9 +17,9 @@ import (
 // Returns an adjusted scale factor that is damped when the simulation predicts
 // overshoot, and amplified when under-actuation is detected.
 type MPCHorizonEval struct {
-	horizon     int     // number of ticks to simulate ahead
-	tickSec     float64 // seconds per tick (for trend extrapolation)
-	setpoint    float64
+	horizon      int     // number of ticks to simulate ahead
+	tickSec      float64 // seconds per tick (for trend extrapolation)
+	setpoint     float64
 	maxOvershoot float64 // max acceptable predicted overshoot above setpoint
 }
 
@@ -66,7 +66,7 @@ func sigmoid(x float64) float64 {
 // The trajectory is evaluated step-by-step over the full horizon. At each step:
 //   - ρ is projected forward using trend + PID correction
 //   - A per-step cost is computed as a risk-latency trade-off:
-//       cost(k) = w_lat × normalisedWait(ρ) + w_risk × collapseRisk(ρ)
+//     cost(k) = w_lat × normalisedWait(ρ) + w_risk × collapseRisk(ρ)
 //   - The trajectory cost integral is used to detect overshoot/undershoot
 //     not just by final position, but by the worst-case cost along the path.
 //
@@ -123,11 +123,11 @@ func (m *MPCHorizonEval) Evaluate(
 		waitCost := 0.0
 		if simRho < 1.0 && serviceRate > 0 {
 			wq := simRho / ((1.0 - simRho) * serviceRate) // M/M/1 wait (s)
-			waitCost = math.Tanh(wq * 2.0)               // 0→0, large→1
+			waitCost = math.Tanh(wq * 2.0)                // 0→0, large→1
 		} else if simRho >= 1.0 {
 			waitCost = 1.0
 		}
-		riskCost := sigmoid((simRho-0.85) / 0.06) // sigmoid centred at 0.85
+		riskCost := sigmoid((simRho - 0.85) / 0.06) // sigmoid centred at 0.85
 
 		stepCost := wLat*waitCost + wRisk*riskCost
 		trajectoryCostSum += stepCost
@@ -141,13 +141,15 @@ func (m *MPCHorizonEval) Evaluate(
 
 	// Scale factor adjustment uses trajectory cost rather than final-position only.
 	// High trajectory cost (path through risky zone) → amplify; overshoot → damp.
+	// CRITICAL: During collapse (rho ≥ 0.85), NEVER amplify — collapse requires dampening only.
 	adjusted := currentScale
 	if overshootRisk && currentScale > 1.0 {
 		overshootMag := math.Max(m.setpoint-m.maxOvershoot-minRho, 0)
 		dampFactor := 1.0 - overshootMag*0.3
 		adjusted = 1.0 + (currentScale-1.0)*math.Max(dampFactor, 0.3)
-	} else if undershoot && currentScale > 1.0 {
-		// Amplify more aggressively when trajectory cost was high (dangerous path).
+	} else if undershoot && currentScale > 1.0 && rho < 0.85 {
+		// ONLY amplify when undershoot is detected AND not in collapse zone (rho < 0.85).
+		// When rho ≥ 0.85, always damp to prevent positive feedback amplification.
 		costAmplification := math.Min((simRho-m.setpoint)*0.3+trajectoryCostAvg*0.15, 0.20)
 		adjusted = currentScale * (1.0 + costAmplification)
 	}
@@ -155,11 +157,11 @@ func (m *MPCHorizonEval) Evaluate(
 	adjusted = math.Max(0.5, math.Min(adjusted, 3.0))
 
 	return MPCResult{
-		AdjustedScaleFactor:    adjusted,
-		PredictedRhoAtHorizon:  simRho,
-		OvershootRisk:          overshootRisk,
-		UnderactuationRisk:     undershoot,
-		TrajectoryCostAvg:      trajectoryCostAvg,
-		MaxTrajectoryCost:      maxTrajectoryCost,
+		AdjustedScaleFactor:   adjusted,
+		PredictedRhoAtHorizon: simRho,
+		OvershootRisk:         overshootRisk,
+		UnderactuationRisk:    undershoot,
+		TrajectoryCostAvg:     trajectoryCostAvg,
+		MaxTrajectoryCost:     maxTrajectoryCost,
 	}
 }

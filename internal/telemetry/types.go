@@ -3,15 +3,15 @@ package telemetry
 import "time"
 
 type MetricPoint struct {
-	ServiceID     string        `json:"service_id"`
-	Timestamp     time.Time     `json:"timestamp"`
-	RequestRate   float64       `json:"request_rate"`
-	ErrorRate     float64       `json:"error_rate"`
-	Latency       LatencyStats  `json:"latency"`
-	CPUUsage      float64       `json:"cpu_usage"`
-	MemUsage      float64       `json:"mem_usage"`
-	ActiveConns   int64         `json:"active_conns"`
-	QueueDepth    int64         `json:"queue_depth"`
+	ServiceID     string         `json:"service_id"`
+	Timestamp     time.Time      `json:"timestamp"`
+	RequestRate   float64        `json:"request_rate"`
+	ErrorRate     float64        `json:"error_rate"`
+	Latency       LatencyStats   `json:"latency"`
+	CPUUsage      float64        `json:"cpu_usage"`
+	MemUsage      float64        `json:"mem_usage"`
+	ActiveConns   int64          `json:"active_conns"`
+	QueueDepth    int64          `json:"queue_depth"`
 	UpstreamCalls []UpstreamCall `json:"upstream_calls,omitempty"`
 }
 
@@ -50,6 +50,11 @@ type ServiceWindow struct {
 	MeanActiveConns  float64
 	UpstreamEdges    map[string]EdgeWindow
 
+	// AppliedScale is an optional control directive applied by the controller
+	// indicating desired capacity scaling for the service (1.0 = no change).
+	// Controllers should write this into the telemetry window to influence
+	// how the physics engine computes effective service rate.
+	AppliedScale float64
 	// ConfidenceScore: composite signal quality [0,1] combining:
 	//   - sample count adequacy
 	//   - arrival rate stability (low CoV = high confidence)

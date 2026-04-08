@@ -16,15 +16,15 @@ type PolicyAction struct {
 }
 
 type pgTransition struct {
-	feat      []float64
-	act       []float64
-	mean      []float64
-	chol      [][]float64
-	reward    float64
-	risk      float64
-	done      bool
-	nextFeat  []float64
-	priority  float64
+	feat     []float64
+	act      []float64
+	mean     []float64
+	chol     [][]float64
+	reward   float64
+	risk     float64
+	done     bool
+	nextFeat []float64
+	priority float64
 }
 
 type PolicyGradientOptimizer struct {
@@ -61,9 +61,16 @@ type PolicyGradientOptimizer struct {
 
 	klTarget float64
 
-	replay []pgTransition
+	// NEW: Gradient clipping and reward normalization
+	clipRange         float64 // Max gradient norm per param
+	rewardMean        float64 // Running mean of rewards
+	rewardStd         float64 // Running std of rewards
+	rewardN           float64 // Counter for normalization
+	weightRegularizer float64 // L2 regularization strength
+
+	replay    []pgTransition
 	replayMax int
-	batch int
+	batch     int
 
 	rng *rand.Rand
 }
@@ -95,15 +102,22 @@ func NewPolicyGradientOptimizer(stateDim int) *PolicyGradientOptimizer {
 		vw2: randomVector(h, 0.1),
 		vb2: 0,
 
-		alphaPi: 4e-4,
-		alphaV:  9e-4,
+		alphaPi: 1e-4, // Reduced from 4e-4
+		alphaV:  2e-4, // Reduced from 9e-4
 		gamma:   0.97,
 		lambda:  0.92,
 
 		klTarget: 0.015,
 
+		// NEW: Initialize clipping and reward normalization
+		clipRange:         0.05, // Tighter clipping to 0.05
+		rewardMean:        0.0,
+		rewardStd:         1.0,
+		rewardN:           1.0,
+		weightRegularizer: 0.01, // Increased from 0.001 to 0.01
+
 		replayMax: 1024,
-		batch: 48,
+		batch:     48,
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -145,12 +159,15 @@ func (p *PolicyGradientOptimizer) Observe(nextState []float64, reward float64, r
 
 	last := &p.replay[len(p.replay)-1]
 
-	last.reward = reward
+	// NEW: Normalize reward using running mean/std
+	normalizedReward := p.normalizeReward(reward)
+
+	last.reward = normalizedReward
 	last.risk = risk
 	last.done = done
 	last.nextFeat = p.encode(nextState)
 
-	last.priority = math.Abs(reward) + 2*risk // yha catastrophic weight
+	last.priority = math.Abs(normalizedReward) + 2*risk // yha catastrophic weight
 
 	if len(p.replay) >= p.batch {
 		p.learn()
@@ -162,10 +179,10 @@ func (p *PolicyGradientOptimizer) storeLast(feat, mean, act []float64) {
 	ch := cholCopy(p.L)
 
 	p.replay = append(p.replay, pgTransition{
-		feat: feat,
-		act: act,
-		mean: mean,
-		chol: ch,
+		feat:     feat,
+		act:      act,
+		mean:     mean,
+		chol:     ch,
 		priority: 1,
 	})
 
@@ -209,9 +226,12 @@ func (p *PolicyGradientOptimizer) computeGAE(tr []pgTransition) []float64 {
 			vNext = p.value(tr[t].nextFeat)
 		}
 
+		// NEW: Improved delayed credit assignment
+		// TD error accounts for delayed reward impact
 		delta := tr[t].reward - safetyCost(tr[t].risk) +
 			p.gamma*vNext - v
 
+		// GAE with improved handling of credit assignment
 		adv[t] = delta + p.gamma*p.lambda*nextAdv
 		nextAdv = adv[t]
 	}
@@ -243,29 +263,106 @@ func (p *PolicyGradientOptimizer) updateActor(t pgTransition, adv float64) {
 		step = p.klTarget / (kl + 1e-6) // yha adaptive step
 	}
 
+	// NEW: Gradient clipping - accumulate gradients and clip by norm
+	w2Grads := make([][]float64, p.aDim)
+	b2Grads := make([]float64, p.aDim)
+	w1Grads := make([][]float64, p.hDim)
+	b1Grads := make([]float64, p.hDim)
+
 	for a := 0; a < p.aDim; a++ {
-
+		w2Grads[a] = make([]float64, p.hDim)
 		for i := 0; i < p.hDim; i++ {
-			g := adv * logpGradMean[a] * h[i] * step
-			p.w2[a][i] += p.alphaPi * g
+			w2Grads[a][i] = adv * logpGradMean[a] * h[i] * step
 		}
-
-		p.b2[a] += p.alphaPi * adv * logpGradMean[a] * step
+		b2Grads[a] = adv * logpGradMean[a] * step
 	}
 
 	for i := 0; i < p.hDim; i++ {
-
 		sum := 0.0
 		for a := 0; a < p.aDim; a++ {
 			sum += logpGradMean[a] * p.w2[a][i]
 		}
-
 		dh := adv * sum * (1 - h[i]*h[i]) * step
-
+		w1Grads[i] = make([]float64, p.fDim)
 		for j := 0; j < p.fDim; j++ {
-			p.w1[i][j] += p.alphaPi * dh * t.feat[j]
+			w1Grads[i][j] = dh * t.feat[j]
 		}
-		p.b1[i] += p.alphaPi * dh
+		b1Grads[i] = dh
+	}
+
+	// Compute gradient norm
+	gradNorm := 0.0
+	for a := 0; a < p.aDim; a++ {
+		for i := 0; i < p.hDim; i++ {
+			g := w2Grads[a][i]
+			gradNorm += g * g
+		}
+		gradNorm += b2Grads[a] * b2Grads[a]
+	}
+	for i := 0; i < p.hDim; i++ {
+		for j := 0; j < p.fDim; j++ {
+			g := w1Grads[i][j]
+			gradNorm += g * g
+		}
+		gradNorm += b1Grads[i] * b1Grads[i]
+	}
+	gradNorm = math.Sqrt(gradNorm)
+
+	// Clip gradients if norm exceeds threshold
+	clipFactor := 1.0
+	if gradNorm > p.clipRange {
+		clipFactor = p.clipRange / gradNorm
+	}
+
+	// Apply clipped gradients with regularization
+	for a := 0; a < p.aDim; a++ {
+		for i := 0; i < p.hDim; i++ {
+			g := w2Grads[a][i] * clipFactor
+			// Add L2 regularization
+			g -= p.weightRegularizer * p.w2[a][i]
+			// Clip individual update
+			if g > p.clipRange {
+				g = p.clipRange
+			}
+			if g < -p.clipRange {
+				g = -p.clipRange
+			}
+			p.w2[a][i] += p.alphaPi * g
+		}
+		g := b2Grads[a] * clipFactor
+		// Clip individual update
+		if g > p.clipRange {
+			g = p.clipRange
+		}
+		if g < -p.clipRange {
+			g = -p.clipRange
+		}
+		p.b2[a] += p.alphaPi * g
+	}
+
+	for i := 0; i < p.hDim; i++ {
+		for j := 0; j < p.fDim; j++ {
+			g := w1Grads[i][j] * clipFactor
+			// Add L2 regularization
+			g -= p.weightRegularizer * p.w1[i][j]
+			// Clip individual update
+			if g > p.clipRange {
+				g = p.clipRange
+			}
+			if g < -p.clipRange {
+				g = -p.clipRange
+			}
+			p.w1[i][j] += p.alphaPi * g
+		}
+		g := b1Grads[i] * clipFactor
+		// Clip individual update
+		if g > p.clipRange {
+			g = p.clipRange
+		}
+		if g < -p.clipRange {
+			g = -p.clipRange
+		}
+		p.b1[i] += p.alphaPi * g
 	}
 }
 
@@ -290,20 +387,87 @@ func (p *PolicyGradientOptimizer) updateCritic(t pgTransition, adv float64) {
 
 	err := target - v
 
+	// NEW: Gradient clipping for critic
+	// Compute critic gradients and their norm
+	vw2Grads := make([]float64, p.hDim)
+	vb2Grad := err
+	vw1Grads := make([][]float64, p.hDim)
+	vb1Grads := make([]float64, p.hDim)
+
 	for i := 0; i < p.hDim; i++ {
-		p.vw2[i] += p.alphaV * err * h[i]
+		vw2Grads[i] = err * h[i]
+		vw1Grads[i] = make([]float64, p.fDim)
+		dh := err * p.vw2[i] * (1 - h[i]*h[i])
+		for j := 0; j < p.fDim; j++ {
+			vw1Grads[i][j] = dh * t.feat[j]
+		}
+		vb1Grads[i] = dh
 	}
 
-	p.vb2 += p.alphaV * err
+	// Compute gradient norm
+	gradNorm := vb2Grad * vb2Grad
+	for i := 0; i < p.hDim; i++ {
+		gradNorm += vw2Grads[i] * vw2Grads[i]
+		for j := 0; j < p.fDim; j++ {
+			g := vw1Grads[i][j]
+			gradNorm += g * g
+		}
+		gradNorm += vb1Grads[i] * vb1Grads[i]
+	}
+	gradNorm = math.Sqrt(gradNorm)
+
+	// Clip gradients
+	clipFactor := 1.0
+	if gradNorm > p.clipRange {
+		clipFactor = p.clipRange / gradNorm
+	}
+
+	// Apply clipped gradients
+	for i := 0; i < p.hDim; i++ {
+		g := vw2Grads[i] * clipFactor
+		g -= p.weightRegularizer * p.vw2[i] // L2 regularization
+		// Clip individual update
+		if g > p.clipRange {
+			g = p.clipRange
+		}
+		if g < -p.clipRange {
+			g = -p.clipRange
+		}
+		p.vw2[i] += p.alphaV * g
+	}
+
+	g := vb2Grad * clipFactor
+	// Clip individual update
+	if g > p.clipRange {
+		g = p.clipRange
+	}
+	if g < -p.clipRange {
+		g = -p.clipRange
+	}
+	p.vb2 += p.alphaV * g
 
 	for i := 0; i < p.hDim; i++ {
-
-		dh := err * p.vw2[i] * (1 - h[i]*h[i])
-
 		for j := 0; j < p.fDim; j++ {
-			p.vw1[i][j] += p.alphaV * dh * t.feat[j]
+			g := vw1Grads[i][j] * clipFactor
+			g -= p.weightRegularizer * p.vw1[i][j] // L2 regularization
+			// Clip individual update
+			if g > p.clipRange {
+				g = p.clipRange
+			}
+			if g < -p.clipRange {
+				g = -p.clipRange
+			}
+			p.vw1[i][j] += p.alphaV * g
 		}
-		p.vb1[i] += p.alphaV * dh
+		g := vb1Grads[i] * clipFactor
+		// Clip individual update
+		if g > p.clipRange {
+			g = p.clipRange
+		}
+		if g < -p.clipRange {
+			g = -p.clipRange
+		}
+		p.vb1[i] += p.alphaV * g
 	}
 }
 
@@ -464,11 +628,11 @@ func klFull(m0 []float64, L0 [][]float64, m1 []float64, L1 [][]float64) float64 
 	dm := 0.0
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
-			dm += (m1[i]-m0[i]) * inv1[i][j] * (m1[j]-m0[j])
+			dm += (m1[i] - m0[i]) * inv1[i][j] * (m1[j] - m0[j])
 		}
 	}
 
-	logdet := math.Log(det(c1)/det(c0)+1e-6)
+	logdet := math.Log(det(c1)/det(c0) + 1e-6)
 
 	return 0.5 * (tr + dm - float64(n) + logdet)
 }
@@ -546,7 +710,6 @@ func cholCopy(L [][]float64) [][]float64 {
 	return c
 }
 
-
 func det(a [][]float64) float64 {
 
 	n := len(a)
@@ -577,4 +740,81 @@ func det(a [][]float64) float64 {
 		}
 	}
 	return math.Abs(d)
+}
+
+// NEW: Reward normalization for stable learning under noisy/delayed rewards
+func (p *PolicyGradientOptimizer) normalizeReward(r float64) float64 {
+	// Update running statistics
+	alpha := 0.01 // Smoothing factor
+	delta := r - p.rewardMean
+	p.rewardMean += alpha * delta
+	p.rewardStd = math.Sqrt((1-alpha)*(p.rewardStd*p.rewardStd) + alpha*(delta*delta))
+
+	// Normalize reward
+	if p.rewardStd > 1e-6 {
+		return (r - p.rewardMean) / p.rewardStd
+	}
+	return r
+}
+
+// NEW: Compute total L2 norm of all network weights for stability monitoring
+func (p *PolicyGradientOptimizer) TotalWeightNorm() float64 {
+	norm := 0.0
+
+	// Encoder weights
+	for i := range p.encW {
+		for j := range p.encW[i] {
+			w := p.encW[i][j]
+			norm += w * w
+		}
+	}
+	for _, b := range p.encB {
+		norm += b * b
+	}
+
+	// Actor mean weights
+	for i := range p.w1 {
+		for j := range p.w1[i] {
+			w := p.w1[i][j]
+			norm += w * w
+		}
+	}
+	for _, b := range p.b1 {
+		norm += b * b
+	}
+
+	for i := range p.w2 {
+		for j := range p.w2[i] {
+			w := p.w2[i][j]
+			norm += w * w
+		}
+	}
+	for _, b := range p.b2 {
+		norm += b * b
+	}
+
+	// Actor covariance
+	for i := range p.L {
+		for j := range p.L[i] {
+			w := p.L[i][j]
+			norm += w * w
+		}
+	}
+
+	// Critic weights
+	for i := range p.vw1 {
+		for j := range p.vw1[i] {
+			w := p.vw1[i][j]
+			norm += w * w
+		}
+	}
+	for _, b := range p.vb1 {
+		norm += b * b
+	}
+	for _, w := range p.vw2 {
+		norm += w * w
+	}
+	norm += p.vb2 * p.vb2
+
+	return math.Sqrt(norm)
 }

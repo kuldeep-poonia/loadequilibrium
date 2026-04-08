@@ -221,7 +221,7 @@ func (f *field) rtt()float64{
 	return t
 }
 
-/**************** USER / ENGINE (same logic) ****************/
+
 
 type user struct{
 	dt float64

@@ -1,5 +1,4 @@
-// Package ws provides a minimal, RFC 6455 compliant WebSocket server
-// implementation using only the Go standard library.
+
 package ws
 
 import (

@@ -13,7 +13,7 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
-	"github.com/loadequilibrium/loadequilibrium/internal/dashboard"
+	"github.com/loadequilibrium/loadequilibrium/internal/api"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
 	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
@@ -42,15 +42,6 @@ func main() {
 		log.Println("[persistence] disabled (no DATABASE_URL)")
 	}
 
-	srv := dashboard.New(store, hub, cfg.IngestToken)
-	httpServer := &http.Server{
-		Addr:         cfg.ListenAddr,
-		Handler:      srv.Handler(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 0,
-		IdleTimeout:  60 * time.Second,
-	}
-
 	queueBackend := backends.NewQueueBackend()
 	routerBackend := actuator.NewRouterBackend(queueBackend)
 
@@ -70,9 +61,27 @@ func main() {
 
 	act := actuator.NewCoalescingActuator(1024, routerBackend)
 
-	scenarios := scenario.NewEngine() // empty by default; operators add via config or plugin
+	// Initialize scenario engine with connectivity proof baseline
+	scenarios := scenario.NewEngine(
+		scenario.NewConnectivityProof(0), // Start from tick 0
+	)
+	log.Println("[main] initialized connectivity proof scenario (8 services, deterministic baseline)")
 
 	orch := runtime.New(cfg, store, hub, pw, act, scenarios)
+
+	// Now create headless api server with full backend references
+	srv := api.NewServer(store, hub, cfg.IngestToken)
+	srv.SetOrchestrator(orch)
+	srv.SetActuator(act)
+	srv.SetScenarios(scenarios)
+
+	httpServer := &http.Server{
+		Addr:         cfg.ListenAddr,
+		Handler:      srv.Handler(),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 0,
+		IdleTimeout:  60 * time.Second,
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

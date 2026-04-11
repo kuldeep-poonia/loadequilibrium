@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useTelemetryStore } from '@/store/useTelemetryStore';
 import { normalizeTickPayload } from '@/lib/telemetry';
 
-const WS_URL = 'ws://localhost:8081/ws';
+const WS_URL = 'ws://localhost:8080/ws';
 const BACKOFF_BASE = 1000;
 const BACKOFF_MAX = 30000;
 const STALE_TIMEOUT = 10000;
@@ -27,6 +27,29 @@ export function useWebSocket() {
       }
     }, STALE_TIMEOUT);
   }, [setConnected]);
+
+  // connect declared first, scheduleReconnect references via ref
+  const connectRef = useRef<(() => void) | null>(null);
+
+  // Declare scheduleReconnect FIRST to fix hoisting / temporal dead zone
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectTimerRef.current) return;
+    if (!mountedRef.current) return;
+    
+    // Exponential backoff with jitter
+    const base = Math.min(BACKOFF_BASE * Math.pow(2, attemptRef.current), BACKOFF_MAX);
+    const jitter = base * 0.3 * Math.random();
+    const delay = base + jitter;
+    attemptRef.current++;
+    
+    console.log(`[ws] reconnect in ${Math.round(delay)}ms (attempt ${attemptRef.current})`);
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (mountedRef.current && connectRef.current) {
+        connectRef.current();
+      }
+    }, delay);
+  }, []);
 
   const connect = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -83,23 +106,6 @@ export function useWebSocket() {
       scheduleReconnect();
     }
   }, [setTick, setConnected, resetStaleTimer]);
-
-  const scheduleReconnect = useCallback(() => {
-    if (reconnectTimerRef.current) return;
-    if (!mountedRef.current) return;
-    
-    // Exponential backoff with jitter
-    const base = Math.min(BACKOFF_BASE * Math.pow(2, attemptRef.current), BACKOFF_MAX);
-    const jitter = base * 0.3 * Math.random();
-    const delay = base + jitter;
-    attemptRef.current++;
-    
-    console.log(`[ws] reconnect in ${Math.round(delay)}ms (attempt ${attemptRef.current})`);
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (mountedRef.current) connect();
-    }, delay);
-  }, [connect]);
 
   useEffect(() => {
     mountedRef.current = true;

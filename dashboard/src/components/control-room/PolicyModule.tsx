@@ -26,13 +26,16 @@ export function PolicyModule() {
         <TacticalBox title="POLICY PRESETS" badge="CONTROL">
           <div className="flex flex-col gap-2">
             {['aggressive', 'balanced', 'conservative', 'defensive'].map((preset) => (
-              <button
+              <motion.button
                 key={preset}
                 onClick={() => handlePolicyChange(preset)}
-                className="px-3 py-2 bg-white/[0.02] border border-white/10 hover:border-cyan-500/30 hover:bg-cyan-500/5 text-left transition-all group"
+                whileHover={{ y: -1, scale: 1.005 }}
+                whileTap={{ y: 1, scale: 0.99 }}
+                transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                className="neo-control neo-control--cyan px-4 py-3 text-left rounded-[14px]"
               >
-                <span className="text-[9px] font-hud tracking-widest text-slate-400 group-hover:text-cyan-400 uppercase">{preset}</span>
-              </button>
+                <span className="text-[9px] font-hud tracking-[0.22em] text-slate-300 group-hover:text-cyan-300 uppercase">{preset}</span>
+              </motion.button>
             ))}
           </div>
         </TacticalBox>
@@ -73,7 +76,12 @@ export function PolicyModule() {
               <div className="text-[9px] text-slate-600 font-data animate-pulse">NO ACTIVE DIRECTIVES...</div>
             ) : (
               directiveList.map((d) => (
-                <div key={d.svc} className="p-2 bg-white/[0.02] border border-white/5 hover:border-cyan-500/15 transition-all">
+                <motion.div 
+                  key={d.svc} 
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control p-2 rounded-[12px]"
+                >
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[9px] font-hud text-cyan-400 tracking-wider uppercase">{d.svc}</span>
                     <span className={`text-[7px] font-hud px-1 py-0.5 rounded-sm ${
@@ -89,7 +97,7 @@ export function PolicyModule() {
                     <div>Cache:{d.cache_ttl_ms}ms</div>
                   </div>
                   {d.reason && <div className="text-[7px] text-slate-600 mt-1 truncate">{d.reason}</div>}
-                </div>
+                </motion.div>
               ))
             )}
           </div>

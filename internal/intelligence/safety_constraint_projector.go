@@ -4,8 +4,6 @@ import (
 	"math"
 )
 
-
-
 type SafetyInput struct {
 	Action     []float64
 	PrevAction []float64
@@ -13,8 +11,8 @@ type SafetyInput struct {
 
 	StabilityVec []float64
 
-	Risk          float64
-	HazardProxy   float64
+	Risk        float64
+	HazardProxy float64
 
 	CapacityPress float64
 	SLAWeight     float64
@@ -23,7 +21,7 @@ type SafetyInput struct {
 type SafetyOutput struct {
 	Action []float64
 
-	ViolationNorm float64
+	ViolationNorm  float64
 	ConstraintCost float64
 }
 
@@ -44,7 +42,7 @@ func NewSafetyConstraintProjector(actDim int) *SafetyConstraintProjector {
 
 	return &SafetyConstraintProjector{
 		actDim: actDim,
-		C: C,
+		C:      C,
 	}
 }
 
@@ -87,8 +85,8 @@ func (s *SafetyConstraintProjector) Project(in SafetyInput) SafetyOutput {
 	cost := vecNorm(s.constraintVector(x, in))
 
 	return SafetyOutput{
-		Action: x,
-		ViolationNorm: vecNorm(diff(x, in.Action)),
+		Action:         x,
+		ViolationNorm:  vecNorm(diff(x, in.Action)),
 		ConstraintCost: cost,
 	}
 }
@@ -155,7 +153,7 @@ func (s *SafetyConstraintProjector) totalGrad(
 
 		bar :=
 			sigmoid(
-				3*(in.Risk-
+				3 * (in.Risk -
 					math.Abs(proj)),
 			)
 
@@ -190,7 +188,7 @@ func (s *SafetyConstraintProjector) totalGrad(
 
 	h := sigmoid(
 		in.SLAWeight *
-			(in.HazardProxy-in.Risk),
+			(in.HazardProxy - in.Risk),
 	)
 
 	for i := range x {
@@ -255,6 +253,21 @@ func (s *SafetyConstraintProjector) integratedEnvelope(
 
 		v := x[i]
 
+		if math.IsNaN(v) {
+			v = 0
+			if i < len(in.Action) && !math.IsNaN(in.Action[i]) {
+				v = in.Action[i]
+			}
+		}
+
+		if math.IsInf(v, 1) {
+			v = up
+		}
+
+		if math.IsInf(v, -1) {
+			v = lo
+		}
+
 		if v > up {
 			v = up
 		}
@@ -283,4 +296,3 @@ func unitNormalize(x []float64) []float64 {
 
 	return v
 }
-

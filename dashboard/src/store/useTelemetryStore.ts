@@ -25,7 +25,7 @@ interface TelemetryState {
 }
 
 const MAX_HISTORY = 60;
-const API_BASE = 'http://localhost:8081';
+const API_BASE = 'http://localhost:8080';
 
 export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   tick: null,

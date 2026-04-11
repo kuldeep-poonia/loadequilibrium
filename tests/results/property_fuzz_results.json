@@ -1,0 +1,449 @@
+[
+  {
+    "test_id": "L1-MOD-001",
+    "layer": 1,
+    "name": "Stability zone classification correctness",
+    "aim": "RunStabilityAssessment must classify CollapseZone correctly for any (ρ, hazard, reservoir)",
+    "package": "internal/modelling",
+    "file": "stability.go",
+    "function_under_test": "RunStabilityAssessment",
+    "threshold": {
+      "metric": "misclassification_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Zone boundaries: safe \u003c 0.83*threshold \u003c warning \u003c threshold \u003c collapse. Any misclassification sends controller into wrong mode"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 30000,
+      "seed": 31415,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 80
+    },
+    "on_exceed": "Controller receives wrong zone → 'collapse' zone triggers max damping; wrong zone = either overreaction (capacity waste) or underreaction (congestion crash)",
+    "answered_questions": {
+      "what_was_tested": "RunStabilityAssessment zone classification across 30000 random (ρ, hazard, reservoir) triples",
+      "why_this_threshold": "Zone boundaries are exact: effectiveRho = ρ + hazard*0.2 + reservoir*0.1 checked against threshold*0.83 and threshold. Any misclassification is a bug",
+      "what_happens_if_it_fails": "Controller applies wrong damping strategy; collapse zone underreaction causes congestion crash; safe zone overreaction wastes capacity",
+      "is_the_test_deterministic": "Yes — gopter seed=31415",
+      "has_this_ever_failed": "0 violations",
+      "worst_case_description": "misclassification at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:21Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-MOD-002",
+    "layer": 1,
+    "name": "Stability margin formula correctness",
+    "aim": "StabilityMargin must equal 1 - (ρ + hazard*0.2 + reservoir*0.1) when no upstream pressure",
+    "package": "internal/modelling",
+    "file": "stability.go",
+    "function_under_test": "RunStabilityAssessment",
+    "threshold": {
+      "metric": "margin_formula_error",
+      "operator": "\u003c=",
+      "value": 1e-10,
+      "unit": "dimensionless",
+      "rationale": "Direct algebraic identity: margin = 1 - effectiveRho. 1e-10 covers float64 rounding"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "dimensionless",
+      "iterations_run": 30000,
+      "seed": 54321,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 86
+    },
+    "on_exceed": "StabilityMargin miscalculated → Engine.RunControl uses wrong distance-to-saturation → PID tunes deadband incorrectly → control oscillation or stiction",
+    "answered_questions": {
+      "what_was_tested": "StabilityMargin formula across 30000 random (ρ, hazard, reservoir) inputs with 0 upstream pressure",
+      "why_this_threshold": "margin = 1 - effectiveRho is a single subtraction; 1e-10 is generous for float64. Any larger error means the formula changed or has a bug",
+      "what_happens_if_it_fails": "Controller bases all decisions on distance-to-saturation. Wrong margin → wrong deadband → either chattering (too tight) or unresponsive (too loose)",
+      "is_the_test_deterministic": "Yes — gopter seed=54321",
+      "has_this_ever_failed": "0 violations, worst error=0.0000e+00",
+      "worst_case_description": "worst err=0.0000e+00 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:21Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-MOD-003",
+    "layer": 1,
+    "name": "CollapseRisk monotonicity with utilisation",
+    "aim": "Higher effective ρ must always produce equal or higher CollapseRisk",
+    "package": "internal/modelling",
+    "file": "stability.go",
+    "function_under_test": "RunStabilityAssessment",
+    "threshold": {
+      "metric": "monotonicity_violation_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Sigmoid is monotonically increasing; any regression means cascade amplification or upstream pressure logic inverted a sign"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 30000,
+      "seed": 27182,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 64
+    },
+    "on_exceed": "CollapseRisk decreases with load → stability model claims higher load is safer → controller reduces capacity when it should increase it → congestion crash",
+    "answered_questions": {
+      "what_was_tested": "CollapseRisk monotonicity across 30000 random (ρ_low, ρ_high) pairs",
+      "why_this_threshold": "CollapseRisk = sigmoid((effectiveRho - threshold*0.95) / 0.04). Sigmoid is strictly monotone increasing. Any regression is a formula error, not numeric noise",
+      "what_happens_if_it_fails": "Stability model gives inverted advice; autopilot reduces capacity under increasing load; guaranteed congestion crash",
+      "is_the_test_deterministic": "Yes — gopter seed=27182",
+      "has_this_ever_failed": "0 violations, worst regression=0.0000e+00",
+      "worst_case_description": "worst regression=0.0000e+00 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:22Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-NET-001",
+    "layer": 1,
+    "name": "NetworkField finite-state invariant",
+    "aim": "All cell densities, TotalMass, and TotalVariation must remain finite (no NaN/Inf) for any configuration",
+    "package": "internal/modelling",
+    "file": "network_field.go",
+    "function_under_test": "NetworkField.Step + TotalMass + TotalVariation",
+    "threshold": {
+      "metric": "nan_inf_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "NaN/Inf in density field = PDE solver divergence. Any single occurrence corrupts the entire network model"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 10000,
+      "seed": 99887,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 818
+    },
+    "on_exceed": "PDE solver produces NaN/Inf → density field becomes garbage → all network-coupled load propagation and routing produce meaningless results",
+    "answered_questions": {
+      "what_was_tested": "NetworkField finite-state across 10000 random configs (nCells, initRho, noiseAmp, serviceRate), 30 steps each",
+      "why_this_threshold": "The solver uses Godunov flux, MUSCL limiters, and explicit [0,1] clamping. NaN/Inf can only appear from division by zero in dt() or unguarded floating point operations — any occurrence is a code defect",
+      "what_happens_if_it_fails": "Density field contains NaN/Inf → all downstream consumers (topology, routing, network coupling) produce garbage → system-wide control failure",
+      "is_the_test_deterministic": "Yes — gopter seed=99887, deterministic RNG",
+      "has_this_ever_failed": "0 violations",
+      "worst_case_description": "NaN/Inf at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:22Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-NET-002",
+    "layer": 1,
+    "name": "NetworkField density bounds [0, 1]",
+    "aim": "Every cell Rho must remain in [0, 1] after any number of steps",
+    "package": "internal/modelling",
+    "file": "network_field.go",
+    "function_under_test": "NetworkField.Step (fluxStep clamping)",
+    "threshold": {
+      "metric": "density_oob_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "fluxStep has explicit clamp: if Rho \u003c 0 → 0; if Rho \u003e 1 → 1. Any OOB means clamp bypassed or applied in wrong order"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 10000,
+      "seed": 77777,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 673
+    },
+    "on_exceed": "Density outside [0,1] → Flux(ρ)=ρ(1-ρ) produces negative values → Godunov flux sign inverts → solver diverges catastrophically",
+    "answered_questions": {
+      "what_was_tested": "Cell density bounds across 10000 random field configs, 30 steps each",
+      "why_this_threshold": "fluxStep clamps every cell to [0,1] after update. Any OOB is a code defect, not numeric noise",
+      "what_happens_if_it_fails": "Flux function Flux(ρ)=ρ(1-ρ) produces wrong sign when ρ∉[0,1]; GodunovFlux comparison logic breaks; solver produces garbage",
+      "is_the_test_deterministic": "Yes — gopter seed=77777",
+      "has_this_ever_failed": "0 violations, worst OOB=0.000000",
+      "worst_case_description": "worst OOB=0.000000 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-OPT-001",
+    "layer": 1,
+    "name": "MPC trajectory cost bounded [0, 1]",
+    "aim": "MPCHorizonEval.Evaluate must produce trajectory costs within [0, 1] for all inputs",
+    "package": "internal/optimisation",
+    "file": "mpc.go",
+    "function_under_test": "MPCHorizonEval.Evaluate",
+    "threshold": {
+      "metric": "trajectory_cost_oob_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Trajectory cost is defined as normalised risk-latency in [0,1] by construction (tanh and sigmoid outputs)"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 20000,
+      "seed": 1337,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 77
+    },
+    "on_exceed": "Trajectory cost outside [0,1] → composite objective function produces wrong scale factor → MPC steers system away from setpoint",
+    "answered_questions": {
+      "what_was_tested": "MPCHorizonEval.Evaluate across 20000 random (ρ, trend, μ, pid, scale) tuples",
+      "why_this_threshold": "The cost function uses tanh(Wq*2) ∈ [0,1] and sigmoid ∈ [0,1], weighted sum with w_lat+w_risk=1.0, so output is mathematically in [0,1]",
+      "what_happens_if_it_fails": "MPC cost normalisation is broken; optimizer cannot compare trajectories correctly; control quality degrades unpredictably",
+      "is_the_test_deterministic": "Yes — gopter seed=1337",
+      "has_this_ever_failed": "0 violations found in this run",
+      "worst_case_description": "worst value=0.000000 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-OPT-002",
+    "layer": 1,
+    "name": "PID saturation limit safety",
+    "aim": "PIDController.Update must never exceed [OutputMin, OutputMax] for any gains/setpoint/measurement",
+    "package": "internal/optimisation",
+    "file": "pid.go",
+    "function_under_test": "PIDController.Update",
+    "threshold": {
+      "metric": "bound_violation_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "OutputMin/OutputMax are hard actuator limits — any violation is unacceptable"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 500000,
+      "seed": 777,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 2349
+    },
+    "on_exceed": "PID output exceeds configured bounds → scale factor exceeds physical actuator range → control system instability or hardware damage",
+    "answered_questions": {
+      "what_was_tested": "PIDController.Update across 500000 random (kp,ki,kd,sp,pv) tuples, 10 steps each",
+      "why_this_threshold": "PID has explicit clamp: output = max(OutputMin, min(output, OutputMax)). Any violation means clamp is bypassed or order-of-operations wrong",
+      "what_happens_if_it_fails": "Actuator commanded beyond physical range; in load-balancing context, scale factor goes beyond [0.5, 3.0] bounds → other safety checks cascade-fail",
+      "is_the_test_deterministic": "Yes — gopter seed=777",
+      "has_this_ever_failed": "0 violations, worst overshoot=0.000000",
+      "worst_case_description": "worst overshoot=0.000000 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:25Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-OPT-003",
+    "layer": 1,
+    "name": "MPC adjusted scale factor bounds [0.5, 3.0]",
+    "aim": "MPCHorizonEval.Evaluate must clamp AdjustedScaleFactor to [0.5, 3.0]",
+    "package": "internal/optimisation",
+    "file": "mpc.go",
+    "function_under_test": "MPCHorizonEval.Evaluate",
+    "threshold": {
+      "metric": "scale_factor_oob_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Hard clamp at line: adjusted = math.Max(0.5, math.Min(adjusted, 3.0)). Any OOB means clamp bypassed"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 30000,
+      "seed": 2024,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 147
+    },
+    "on_exceed": "MPC scale factor exceeds [0.5, 3.0] → Engine.RunControl amplifies it further → actuator receives unbounded capacity change → system crash",
+    "answered_questions": {
+      "what_was_tested": "MPCHorizonEval.Evaluate across 30000 random input tuples",
+      "why_this_threshold": "MPC has explicit clamp: math.Max(0.5, math.Min(adjusted, 3.0)). Any value outside this range means dead code path or clamp bypass",
+      "what_happens_if_it_fails": "Scale factor passes unchecked to Engine.RunControl which applies further amplification — cascading out-of-bounds through the entire control pipeline",
+      "is_the_test_deterministic": "Yes — gopter seed=2024",
+      "has_this_ever_failed": "0 violations",
+      "worst_case_description": "worst OOB=0.000000 at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:26Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-OPT-004",
+    "layer": 1,
+    "name": "Trajectory planner feasibility selection",
+    "aim": "PlanTrajectory must select a feasible candidate when any feasible candidate exists",
+    "package": "internal/optimisation",
+    "file": "trajectory_planner.go",
+    "function_under_test": "PlanTrajectory",
+    "threshold": {
+      "metric": "infeasible_selection_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "A planner that selects infeasible trajectories when feasible ones exist has broken selection logic"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "iterations_run": 20000,
+      "seed": 54321,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 98
+    },
+    "on_exceed": "Planner selects infeasible trajectory → system deliberately steered past collapse threshold → congestion collapse",
+    "answered_questions": {
+      "what_was_tested": "PlanTrajectory feasibility across 20000 random (ρ, trend, μ) inputs",
+      "why_this_threshold": "The planner's contract is 'prefer feasible candidates'. Selecting infeasible when feasible exists is a logic error in candidate ranking",
+      "what_happens_if_it_fails": "Planner recommends a trajectory that crosses the collapse threshold, causing the Engine to drive the system into overload",
+      "is_the_test_deterministic": "Yes — gopter seed=54321",
+      "has_this_ever_failed": "0 violations",
+      "worst_case_description": "infeasible selection at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T05:15:26Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-PHY-001",
+    "layer": 1,
+    "name": "Bounded state evolution (no divergence)",
+    "aim": "FluidPlant.Step must never produce NaN/Inf/unbounded Q for any arrival rate over 100 ticks",
+    "package": "internal/physics",
+    "file": "plant.go",
+    "function_under_test": "FluidPlant.Step + FluidPlant.Snapshot",
+    "threshold": {
+      "metric": "max_queue_length",
+      "operator": "\u003c=",
+      "value": 100,
+      "unit": "requests",
+      "rationale": "StabilityGain=0.42 ensures dissipative contraction: bounded input → bounded Q. 100 is generous; math says ~12 is steady-state max at arrival=5"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1.867190355884401,
+      "actual_unit": "requests",
+      "iterations_run": 50000,
+      "seed": 42,
+      "worst_case_input": {
+        "arrival_rate": 4.999898344972868,
+        "max_q": 1.867190355884401
+      },
+      "worst_case_output": 1.867190355884401,
+      "duration_ms": 11024
+    },
+    "on_exceed": "Unbounded queue length → MPC operates on divergent state → actuator command has no physical bound → system crash or hardware damage",
+    "answered_questions": {
+      "what_was_tested": "FluidPlant.Step across 50000 random arrival rates [0, 5], each run for 100 ticks",
+      "why_this_threshold": "The plant has dissipative drift -0.42*Q; for bounded arrivals (max 5), steady-state Q ≈ (A-S)/0.42 ≈ 12. Threshold 100 gives 8× headroom for stochastic excursions",
+      "what_happens_if_it_fails": "Queue length diverges without bound, MPC and PID operate on meaningless state, all downstream control becomes unstable",
+      "is_the_test_deterministic": "Yes — gopter seed=42, FluidPlant seed=42, fully reproducible",
+      "has_this_ever_failed": "0 violations found in this run",
+      "worst_case_description": "worst Q=1.8672 at input map[arrival_rate:4.999898344972868 max_q:1.867190355884401]"
+    },
+    "run_at": "2026-04-11T05:15:37Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-PHY-002",
+    "layer": 1,
+    "name": "Deterministic reproducibility",
+    "aim": "Two FluidPlant runs with identical seed+inputs must produce bit-identical state",
+    "package": "internal/physics",
+    "file": "plant.go",
+    "function_under_test": "FluidPlant.Step (deterministic seed path)",
+    "threshold": {
+      "metric": "max_state_diff",
+      "operator": "==",
+      "value": 0,
+      "unit": "dimensionless",
+      "rationale": "Same seed + same input = same output by construction of math/rand.NewSource"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "dimensionless",
+      "iterations_run": 20000,
+      "seed": 99,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 4035
+    },
+    "on_exceed": "Non-determinism breaks simulation replay, A/B testing, and offline debugging — root cause analysis becomes impossible",
+    "answered_questions": {
+      "what_was_tested": "FluidPlant determinism across 20000 seed/arrival combinations, 50 ticks each",
+      "why_this_threshold": "Threshold is exactly 0: Go's math/rand with same source produces identical sequence. Any nonzero diff means external state leaked into the computation",
+      "what_happens_if_it_fails": "Simulation replay produces different results → debugging and regression testing become unreliable",
+      "is_the_test_deterministic": "Yes — gopter seed=99, plant seeds generated deterministically",
+      "has_this_ever_failed": "0 violations found in this run",
+      "worst_case_description": "worst diff=0.0000e+00 at input map[]"
+    },
+    "run_at": "2026-04-11T05:15:41Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L1-PHY-003",
+    "layer": 1,
+    "name": "Hazard non-negativity invariant",
+    "aim": "FluidPlant.Z (hazard) must stay \u003e= 0 for all inputs at every tick",
+    "package": "internal/physics",
+    "file": "plant.go",
+    "function_under_test": "FluidPlant.updateHazard (via Step)",
+    "threshold": {
+      "metric": "min_hazard_z",
+      "operator": "\u003e=",
+      "value": 0,
+      "unit": "dimensionless",
+      "rationale": "Hazard is a damage accumulator — negative hazard is physically meaningless (you cannot un-damage hardware)"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "dimensionless",
+      "iterations_run": 50000,
+      "seed": 1337,
+      "worst_case_input": null,
+      "worst_case_output": 0,
+      "duration_ms": 9616
+    },
+    "on_exceed": "Negative hazard → BaseService/(1+α*q+β*Z) increases service rate → physics model rewards damage → MPC exploits this to steer into collapse",
+    "answered_questions": {
+      "what_was_tested": "FluidPlant.Z non-negativity across 50000 random arrival rates, 100 ticks each",
+      "why_this_threshold": "Z represents cumulative structural degradation. updateHazard clamps Z\u003e=0 explicitly. If the clamp is removed or bypassed, Z goes negative under healing+drag",
+      "what_happens_if_it_fails": "Service rate formula S = BaseService/(1+α*Q+β*Z) produces S \u003e BaseService when Z \u003c 0 → degraded system appears faster than healthy one",
+      "is_the_test_deterministic": "Yes — gopter seed=1337, plant seed=1337",
+      "has_this_ever_failed": "0 violations found in this run",
+      "worst_case_description": "worst Z=0.000000 at input map[]"
+    },
+    "run_at": "2026-04-11T05:15:50Z",
+    "go_version": "go1.26.0"
+  }
+]

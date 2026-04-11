@@ -1,0 +1,650 @@
+[
+  {
+    "test_id": "L2-SAFETY-001",
+    "layer": 2,
+    "name": "SafetyConstraintProjector envelope bounds",
+    "aim": "Project() output must be within integratedEnvelope [lo, up] for any input",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project → integratedEnvelope",
+    "threshold": {
+      "metric": "envelope_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "CRITICAL — no action may exceed the safety envelope"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 200000,
+      "duration_ms": 416
+    },
+    "on_exceed": "CRITICAL: Action exceeds physical safety envelope → actuator operates in unsafe regime → hardware damage risk",
+    "answered_questions": {
+      "what_was_tested": "50000 inputs × 4 dimensions = 200000 bound checks with action magnitudes up to ±190",
+      "why_this_threshold": "integratedEnvelope is the hard safety clamp. The gradient descent may not converge, but the envelope MUST clamp",
+      "what_happens_if_it_fails": "Action outside envelope → actuator commanded beyond physical limits → mechanical/electrical failure",
+      "how_interface_was_verified": "Compute exact upper/lower per dimension from integratedEnvelope formula, check every output element",
+      "has_this_ever_failed": "0 violations in this run",
+      "worst_case_description": "violation: \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:05Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-SAFETY-002",
+    "layer": 2,
+    "name": "SafetyConstraintProjector correction effectiveness",
+    "aim": "Projector must reduce action magnitude for \u003e99% of unsafe inputs",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project",
+    "threshold": {
+      "metric": "correction_rate_pct",
+      "operator": "\u003e=",
+      "value": 99,
+      "unit": "percent",
+      "rationale": "Projector that doesn't correct is a no-op — defeats safety purpose"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 100,
+      "actual_unit": "percent",
+      "sample_count": 10000,
+      "duration_ms": 102
+    },
+    "on_exceed": "Projector passes unsafe actions through unchanged → safety layer is decorative, not functional",
+    "answered_questions": {
+      "what_was_tested": "10000 inputs with action magnitude 20+ (far beyond envelope ~3.7)",
+      "why_this_threshold": "Input at 20+ vs envelope at ~3.7 → projector must reduce. 99% allows tiny tolerance for edge cases where gradient is trapped",
+      "what_happens_if_it_fails": "Safety projector passes dangerous actions unchanged → actuator operates in unsafe region → damage",
+      "how_interface_was_verified": "Compare ‖input action‖ vs ‖projected action‖, verify output norm \u003c input norm",
+      "has_this_ever_failed": "correction rate=100.00%, worst ratio=0.0000",
+      "worst_case_description": "worst uncorrected: \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:05Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-SAFETY-003",
+    "layer": 2,
+    "name": "SafetyConstraintProjector output finite",
+    "aim": "Project() must never return NaN/Inf in Action, ViolationNorm, or ConstraintCost",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project",
+    "threshold": {
+      "metric": "nan_inf_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "CRITICAL — NaN in action vector → undefined actuator behavior"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 20000,
+      "duration_ms": 272
+    },
+    "on_exceed": "CRITICAL: NaN/Inf in projected action → actuator receives undefined command → system crash or hardware damage",
+    "answered_questions": {
+      "what_was_tested": "20000 adversarial inputs with action range [-500, 499], risk [0, 1], capPress [0, 1]",
+      "why_this_threshold": "NaN/Inf propagates through the entire actuator chain — any single occurrence is catastrophic",
+      "what_happens_if_it_fails": "NaN action → actuator produces undefined behavior → system enters unknown state",
+      "how_interface_was_verified": "Check all output fields (Action[], ViolationNorm, ConstraintCost) for IsNaN/IsInf",
+      "has_this_ever_failed": "0 NaN/Inf in this run",
+      "worst_case_description": "NaN at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:05Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-PIPE-001",
+    "layer": 2,
+    "name": "Full autopilot pipeline end-to-end tick latency",
+    "aim": "MPC→Safety→Rollout→Predictor→ID pipeline must complete within SLA: p50\u003c1ms p95\u003c3ms p99\u003c8ms p100\u003c20ms",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "RuntimeOrchestrator.Tick (full pipeline)",
+    "threshold": {
+      "metric": "pipeline_tick_p99_ms",
+      "operator": "\u003c",
+      "value": 8,
+      "unit": "ms",
+      "rationale": "Control loop at 125Hz = 8ms budget per pipeline tick"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 2.965,
+      "actual_unit": "ms",
+      "sample_count": 1000,
+      "percentiles": {
+        "p50_ms": 0.534,
+        "p95_ms": 1.885,
+        "p99_ms": 2.965,
+        "p100_ms": 6.019
+      },
+      "duration_ms": 647
+    },
+    "on_exceed": "Pipeline too slow → control frequency drops → actuator corrections delayed → system drifts",
+    "answered_questions": {
+      "what_was_tested": "Full pipeline across 1000 ticks with oscillating arrival (3±4) and infraLoad (0.2±0.1)",
+      "why_this_threshold": "The autopilot tick includes MPC SA optimization (50 iters × 8 scenarios), safety evaluation, rollout, predictor, and identification — all must fit in \u003c8ms at p99",
+      "what_happens_if_it_fails": "Autopilot cannot maintain \u003e100Hz control frequency → delayed corrections → oscillation/instability",
+      "how_interface_was_verified": "Wall-clock measurement of each Tick() call with varying arrival and infra load",
+      "has_this_ever_failed": "p50=0.53ms p95=1.89ms p99=2.96ms p100=6.02ms",
+      "worst_case_description": "p99=2.96ms (threshold 8ms), p100=6.02ms"
+    },
+    "run_at": "2026-04-11T07:04:02Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-PIPE-002",
+    "layer": 2,
+    "name": "Pipeline output no NaN/Inf corruption",
+    "aim": "RuntimeOrchestrator.Tick must never produce NaN/Inf in any telemetry field",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "RuntimeOrchestrator.Tick → RuntimeTelemetry",
+    "threshold": {
+      "metric": "nan_inf_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any NaN/Inf in telemetry corrupts all downstream consumers"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 18000,
+      "duration_ms": 1937
+    },
+    "on_exceed": "NaN/Inf in telemetry → dashboard shows garbage → operator loses situational awareness → bad decisions",
+    "answered_questions": {
+      "what_was_tested": "2000 ticks × 9 telemetry fields = 18000 values checked",
+      "why_this_threshold": "NaN/Inf propagates: one bad value corrupts all downstream computations (MPC cost, safety energy, etc.)",
+      "what_happens_if_it_fails": "NaN enters feedback loop → MPC produces NaN cost → simulated annealing accepts anything → system diverges",
+      "how_interface_was_verified": "Check every RuntimeTelemetry field for math.IsNaN and math.IsInf after each Tick() call",
+      "has_this_ever_failed": "0 NaN/Inf values in this run",
+      "worst_case_description": "NaN/Inf at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:04Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-PIPE-003",
+    "layer": 2,
+    "name": "MPC plan length always matches horizon",
+    "aim": "MPCOptimiser.Optimise must return exactly Horizon-length sequence",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "MPCOptimiser.Optimise",
+    "threshold": {
+      "metric": "plan_length_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Short plan → truncated safety trajectory → undetected risk"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 20,
+      "duration_ms": 2
+    },
+    "on_exceed": "MPC returns short plan → SafetyEngine.ShouldOverrideProb operates on truncated trajectory → misses future hazards",
+    "answered_questions": {
+      "what_was_tested": "20 combinations of horizon [3,5,8,10] × prevSeqLen [0,1,3,5,10]",
+      "why_this_threshold": "Safety evaluation depends on len(plan)==Horizon. Any mismatch silently truncates the safety check",
+      "what_happens_if_it_fails": "Safety engine evaluates fewer future states than expected → blind spot in predictive safety",
+      "how_interface_was_verified": "Call Optimise with various prevSeq lengths, check len(result)==Horizon",
+      "has_this_ever_failed": "0 mismatches in this run",
+      "worst_case_description": "mismatches: []"
+    },
+    "run_at": "2026-04-11T07:04:04Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-001",
+    "layer": 2,
+    "name": "CoalescingActuator dispatch + feedback contract",
+    "aim": "Every dispatched active directive must produce feedback with Success=true",
+    "packages_involved": [
+      "internal/actuator"
+    ],
+    "function_under_test": "CoalescingActuator.Dispatch + Feedback",
+    "threshold": {
+      "metric": "failed_feedback_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "LogOnlyBackend never errors → all feedback must show Success=true"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "failed_count",
+      "sample_count": 50,
+      "duration_ms": 127
+    },
+    "on_exceed": "Actuator feedback shows failures for noop backend → feedback channel logic broken → control loop cannot confirm actuation",
+    "answered_questions": {
+      "what_was_tested": "Dispatched 50 unique-service directives, collected 50 feedbacks",
+      "why_this_threshold": "LogOnlyBackend.Execute always returns nil → 0 failures expected",
+      "what_happens_if_it_fails": "Control loop thinks actuation failed → triggers fallback/retry paths unnecessarily",
+      "how_interface_was_verified": "Dispatch → drain Feedback() channel → verify each ActuationResult.Success==true",
+      "has_this_ever_failed": "0 failures in this run",
+      "worst_case_description": "failures: []"
+    },
+    "run_at": "2026-04-11T07:04:05Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-002",
+    "layer": 2,
+    "name": "Coalescer map-overwrite contract",
+    "aim": "10 rapid dispatches for same service must coalesce — only latest executes",
+    "packages_involved": [
+      "internal/actuator"
+    ],
+    "function_under_test": "CoalescingActuator.Dispatch (map coalescing)",
+    "threshold": {
+      "metric": "last_executed_scale",
+      "operator": "\u003e=",
+      "value": 9,
+      "unit": "scale_factor",
+      "rationale": "Map overwrite ensures only latest pending directive survives per service key"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "scale_factor",
+      "sample_count": 1,
+      "duration_ms": 200
+    },
+    "on_exceed": "Stale directives execute alongside fresh ones → actuator sends contradictory commands → system oscillation",
+    "answered_questions": {
+      "what_was_tested": "10 rapid dispatches for same service key, 1 actual executions",
+      "why_this_threshold": "Map-coalesce contract: pending[serviceID] = latest snapshot. Worker drains once → executes only the latest",
+      "what_happens_if_it_fails": "Stale scale factors reach backend → actuator oscillates between old and new targets",
+      "how_interface_was_verified": "Tracking backend records every Execute call; verify last executed scale \u003e= 9.0",
+      "has_this_ever_failed": "executions=1, last=10.0",
+      "worst_case_description": "scale factors executed: [10]"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-003",
+    "layer": 2,
+    "name": "RouterBackend correct service routing",
+    "aim": "Directives must be routed to service-specific backends; unknown services go to default",
+    "packages_involved": [
+      "internal/actuator"
+    ],
+    "function_under_test": "RouterBackend.Execute + AddRoute",
+    "threshold": {
+      "metric": "misrouted_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Each service must reach exactly the backend registered via AddRoute"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "misrouted_count",
+      "sample_count": 4,
+      "duration_ms": 0
+    },
+    "on_exceed": "Directive sent to wrong backend → wrong subsystem actuated → cascading control failure",
+    "answered_questions": {
+      "what_was_tested": "4 directives across 3 services (2 explicitly routed, 1 default)",
+      "why_this_threshold": "Routing is deterministic — any misroute is a code defect in RouterBackend.Execute",
+      "what_happens_if_it_fails": "Scaling commands sent to wrong microservice → capacity mismatch → instability",
+      "how_interface_was_verified": "Register 2 service-specific backends + default, execute snaps, verify which backend received each",
+      "has_this_ever_failed": "0 misrouted in this run",
+      "worst_case_description": "misrouted: []"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-004",
+    "layer": 2,
+    "name": "Actuator dispatch-to-feedback latency SLA",
+    "aim": "CoalescingActuator dispatch→feedback latency: p50\u003c5ms p95\u003c15ms p99\u003c30ms",
+    "packages_involved": [
+      "internal/actuator"
+    ],
+    "function_under_test": "CoalescingActuator.Dispatch → Feedback",
+    "threshold": {
+      "metric": "dispatch_latency_p99_ms",
+      "operator": "\u003c",
+      "value": 30,
+      "unit": "ms",
+      "rationale": "Real-time control loop requires \u003c30ms actuator response at p99"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.6,
+      "actual_unit": "ms",
+      "sample_count": 200,
+      "percentiles": {
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0.6,
+        "p100_ms": 0.614
+      },
+      "duration_ms": 1
+    },
+    "on_exceed": "Actuator feedback arrives late → control loop operates on stale confirmation → timing drift",
+    "answered_questions": {
+      "what_was_tested": "Dispatch-to-feedback latency across 200 sequential directives with LogOnlyBackend",
+      "why_this_threshold": "Control loop runs at ~33Hz (30ms). Actuator feedback must arrive within 1 cycle",
+      "what_happens_if_it_fails": "Control loop starts next tick before knowing if previous actuation succeeded",
+      "how_interface_was_verified": "Measure wall-clock time from Dispatch() to Feedback() receipt per directive",
+      "has_this_ever_failed": "p50=0.00ms p95=0.00ms p99=0.60ms p100=0.61ms errors=0",
+      "worst_case_description": "p99=0.60ms (threshold 30ms), p100=0.61ms"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-005",
+    "layer": 2,
+    "name": "QueueBackend worker scaling correctness",
+    "aim": "QueueBackend must scale workers as round(current*scaleFactor), clamped to minWorkers=1",
+    "packages_involved": [
+      "internal/actuator/backends"
+    ],
+    "function_under_test": "QueueBackend.Execute + WorkerCount",
+    "threshold": {
+      "metric": "scaling_deviations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Worker count must follow round(current*scale) with minWorkers=1 floor"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "deviations",
+      "sample_count": 5,
+      "duration_ms": 0
+    },
+    "on_exceed": "Worker scaling formula wrong → capacity mismatch → over/under-provisioned services",
+    "answered_questions": {
+      "what_was_tested": "5 scaling scenarios across 3 services",
+      "why_this_threshold": "Scaling is deterministic arithmetic — any deviation is a code defect",
+      "what_happens_if_it_fails": "Backend provisions wrong number of workers → service either overloaded or wasting resources",
+      "how_interface_was_verified": "Execute with known scaleFactor, check WorkerCount() against expected",
+      "has_this_ever_failed": "0 deviations in this run",
+      "worst_case_description": "deviations: []"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-ACT-006",
+    "layer": 2,
+    "name": "Feedback backpressure behavior documentation",
+    "aim": "Document feedback drop rate when buffer is full (bufSize=1, N=50 dispatches)",
+    "packages_involved": [
+      "internal/actuator"
+    ],
+    "function_under_test": "CoalescingActuator feedback channel backpressure",
+    "threshold": {
+      "metric": "feedback_received",
+      "operator": "\u003e=",
+      "value": 1,
+      "unit": "count",
+      "rationale": "At least 1 feedback must arrive even under extreme backpressure"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "received_count",
+      "sample_count": 50,
+      "duration_ms": 500
+    },
+    "on_exceed": "Zero feedbacks received = feedback channel completely broken, not just backpressure",
+    "answered_questions": {
+      "what_was_tested": "50 rapid dispatches with feedback buffer=1, 1 received",
+      "why_this_threshold": "With buf=1, most feedbacks are dropped by the select-default pattern. \u003e=1 proves the channel works at all",
+      "what_happens_if_it_fails": "Feedback channel completely dead — control loop has zero actuation confirmation",
+      "how_interface_was_verified": "Dispatch N directives, drain Feedback(), count what gets through",
+      "has_this_ever_failed": "received=1 of 50 dispatched",
+      "worst_case_description": "received 1 of 50 (49 dropped by backpressure)"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-001",
+    "layer": 2,
+    "name": "SafetyEngine EmergencyOverride fires on unsafe trajectory",
+    "aim": "EmergencyOverride must trigger when all trajectory states exceed safety limits",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "SafetyEngine.EmergencyOverride",
+    "threshold": {
+      "metric": "missed_overrides",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "CRITICAL — zero tolerance for missed unsafe detection"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 1000,
+      "duration_ms": 0
+    },
+    "on_exceed": "CRITICAL: Unsafe trajectory passes without safety override → system runs in dangerous state → compounding damage",
+    "answered_questions": {
+      "what_was_tested": "EmergencyOverride across 1000 trajectories with backlog [200, 5200], all exceeding BaseMaxBacklog=100",
+      "why_this_threshold": "backlog \u003e\u003e BaseMaxBacklog in every step → PredictiveSafe must return false → override must trigger",
+      "what_happens_if_it_fails": "Safety engine fails to detect blatantly unsafe trajectories → system crashes without intervention",
+      "how_interface_was_verified": "Build trajectory with backlog=200+(i*5)+(j*10), verify EmergencyOverride returns true",
+      "has_this_ever_failed": "0 missed in this run",
+      "worst_case_description": "missed at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-002",
+    "layer": 2,
+    "name": "PredictiveSafe no false alarms on benign trajectories",
+    "aim": "PredictiveSafe must return true when backlog\u003c\u003c100 and latency\u003c\u003c50",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "SafetyEngine.PredictiveSafe",
+    "threshold": {
+      "metric": "false_alarms",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Safe trajectories must not trigger override — false alarms waste capacity"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 1000,
+      "duration_ms": 0
+    },
+    "on_exceed": "False alarms → system enters unnecessary emergency mode → capacity waste + operator alert fatigue",
+    "answered_questions": {
+      "what_was_tested": "PredictiveSafe across 1000 benign trajectories with backlog [0, 10]",
+      "why_this_threshold": "backlog 0-10 vs limit 100 → well within safe zone. Any alarm is a false positive",
+      "what_happens_if_it_fails": "System triggers emergency override during normal operation → unnecessary capacity spikes",
+      "how_interface_was_verified": "Build trajectory with backlog\u003c\u003c100, latency\u003c\u003c50, verify PredictiveSafe returns true",
+      "has_this_ever_failed": "0 false alarms in this run",
+      "worst_case_description": "false alarm at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-003",
+    "layer": 2,
+    "name": "RolloutController capacity ramp bounded",
+    "aim": "Each Step must limit CapacityActive change to ramp_rate * Dt * pressure_gain",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "RolloutController.Step → rampCap",
+    "threshold": {
+      "metric": "ramp_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Max ramp per step = 1.250 (CapRampUpEmergency * Dt * max_pressure_mult)"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 5000,
+      "duration_ms": 6
+    },
+    "on_exceed": "Capacity jumps beyond ramp rate → infrastructure shock (too many containers spawned at once)",
+    "answered_questions": {
+      "what_was_tested": "5000 rollout steps with oscillating capacity targets [1, 19]",
+      "why_this_threshold": "rampCap clamps step to ±rate*Dt. max rate=5*0.1*2.5=1.250. Any larger jump is a code defect",
+      "what_happens_if_it_fails": "Infrastructure receives sudden capacity change → cold start latency spike → service degradation",
+      "how_interface_was_verified": "Call Step() N times, check |ΔCapacityActive| \u003c= maxRamp per step",
+      "has_this_ever_failed": "0 violations, worst delta=0.0000",
+      "worst_case_description": "worst ramp violation: \u003cnil\u003e"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-004",
+    "layer": 2,
+    "name": "GovernanceMode transition correctness",
+    "aim": "GovernanceMode must follow: Normal \u003c DegradedBacklog \u003c Degraded \u003c EmergencyBacklog \u003c Emergency",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "RolloutController.modeNext (via Step)",
+    "threshold": {
+      "metric": "misclassifications",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Mode boundaries are deterministic thresholds"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 7,
+      "duration_ms": 0
+    },
+    "on_exceed": "Wrong governance mode → wrong ramp rate (normal vs emergency) → capacity response too slow or too fast",
+    "answered_questions": {
+      "what_was_tested": "7 backlog levels against mode thresholds (DegradedBacklog=50, EmergencyBacklog=100)",
+      "why_this_threshold": "Mode transitions are boundary checks — exact. Any wrong classification is a logic error",
+      "what_happens_if_it_fails": "Emergency capacity ramp applied during normal operation or vice versa",
+      "how_interface_was_verified": "Step() with known backlog, check resulting RolloutState.Mode",
+      "has_this_ever_failed": "0 misclassifications in this run",
+      "worst_case_description": "misclassed: []"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-005",
+    "layer": 2,
+    "name": "Supervisor ShouldRecompute determinism",
+    "aim": "Same PlantState + fresh Supervisor must produce same ShouldRecompute result",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "Supervisor.ShouldRecompute",
+    "threshold": {
+      "metric": "determinism_flips",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Same input → same output for fresh Supervisor instance"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 200,
+      "duration_ms": 1
+    },
+    "on_exceed": "Non-deterministic supervisor → recomputation timing unpredictable → control loop scheduling unreliable",
+    "answered_questions": {
+      "what_was_tested": "2 PlantState configurations, each tested 100 times",
+      "why_this_threshold": "Supervisor.ShouldRecompute is pure function of PlantState + Supervisor params — must be deterministic for fresh instance",
+      "what_happens_if_it_fails": "MPC recomputation triggers at random → control quality degrades unpredictably",
+      "how_interface_was_verified": "Create fresh Supervisor, call ShouldRecompute(same state) N times, verify all return same value",
+      "has_this_ever_failed": "0 flips in this run",
+      "worst_case_description": "0 non-deterministic results"
+    },
+    "run_at": "2026-04-11T07:04:06Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-AUTO-006",
+    "layer": 2,
+    "name": "RuntimeOrchestrator.Tick latency SLA",
+    "aim": "Single Tick() must complete within p50\u003c2ms p95\u003c5ms p99\u003c10ms",
+    "packages_involved": [
+      "internal/autopilot"
+    ],
+    "function_under_test": "RuntimeOrchestrator.Tick",
+    "threshold": {
+      "metric": "tick_latency_p99_ms",
+      "operator": "\u003c",
+      "value": 10,
+      "unit": "ms",
+      "rationale": "Autopilot runs at 100Hz → 10ms budget per tick"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 5.324,
+      "actual_unit": "ms",
+      "sample_count": 500,
+      "percentiles": {
+        "p50_ms": 0.515,
+        "p95_ms": 2.025,
+        "p99_ms": 5.324,
+        "p100_ms": 42.226
+      },
+      "duration_ms": 386
+    },
+    "on_exceed": "Tick exceeds budget → autopilot frequency drops → control latency increases → system drift",
+    "answered_questions": {
+      "what_was_tested": "500 sequential Tick() calls measuring wall-clock latency",
+      "why_this_threshold": "100Hz autopilot loop = 10ms budget. MPC SA optimization + safety + rollout must fit",
+      "what_happens_if_it_fails": "Autopilot cannot maintain target control frequency → delayed corrections → instability",
+      "how_interface_was_verified": "Wall-clock measurement of each Tick() call duration",
+      "has_this_ever_failed": "p50=0.52ms p95=2.02ms p99=5.32ms p100=42.23ms",
+      "worst_case_description": "p99=5.32ms (threshold 10ms), p100=42.23ms"
+    },
+    "run_at": "2026-04-11T07:04:07Z",
+    "go_version": "go1.26.0"
+  }
+]

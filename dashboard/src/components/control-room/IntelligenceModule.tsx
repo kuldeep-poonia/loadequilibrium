@@ -27,18 +27,42 @@ export function IntelligenceModule() {
       <motion.div initial={{ x: -10, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.2 }}>
         <TacticalBox title="TACTICAL COMMAND" badge="ACTUATOR">
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => handleAction('toggle')} className="bg-cyan-500/5 border border-cyan-500/20 hover:bg-cyan-500/10 text-cyan-400 py-2 font-hud text-[8px] tracking-widest uppercase transition-all">
+            <motion.button 
+              onClick={() => handleAction('toggle')} 
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--cyan py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
+            >
               Toggle Node
-            </button>
-            <button onClick={() => handleAction('chaos-run')} className="bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 text-red-400 py-2 font-hud text-[8px] tracking-widest uppercase transition-all">
+            </motion.button>
+            <motion.button 
+              onClick={() => handleAction('chaos-run')} 
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--red py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
+            >
               Inject Chaos
-            </button>
-            <button onClick={() => handleAction('replay-burst')} className="bg-white/[0.02] border border-white/10 hover:bg-white/5 text-slate-400 py-2 font-hud text-[8px] tracking-widest uppercase transition-all">
+            </motion.button>
+            <motion.button 
+              onClick={() => handleAction('replay-burst')} 
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center text-slate-300"
+            >
               Replay Burst
-            </button>
-            <button onClick={() => handleRollout()} className="bg-amber-500/5 border border-amber-500/20 hover:bg-amber-500/10 text-amber-400 py-2 font-hud text-[8px] tracking-widest uppercase transition-all">
+            </motion.button>
+            <motion.button 
+              onClick={() => handleRollout()} 
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--amber py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
+            >
               RL Rollout
-            </button>
+            </motion.button>
           </div>
         </TacticalBox>
       </motion.div>
@@ -51,7 +75,12 @@ export function IntelligenceModule() {
               <div className="text-[9px] text-slate-600 font-data p-1">NO CRITICAL RISKS</div>
             ) : (
               riskQueue.slice(0, 8).map((r, i) => (
-                <div key={i} className="flex items-center gap-2 p-1.5 bg-white/[0.02] border border-white/5 hover:border-amber-500/15 transition-all">
+                <motion.div 
+                  key={i} 
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control flex items-center gap-2 p-2 rounded-[12px]"
+                >
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                     r.urgency_class === 'critical' ? 'bg-red-500 animate-pulse' :
                     r.urgency_class === 'warning' ? 'bg-amber-500' :
@@ -62,7 +91,7 @@ export function IntelligenceModule() {
                     {(r.collapse_risk * 100).toFixed(0)}%
                   </span>
                   {r.is_keystone && <span className="text-[6px] font-hud text-amber-400 bg-amber-500/10 px-1 py-0.5 rounded-sm">KEY</span>}
-                </div>
+                </motion.div>
               ))
             )}
           </div>
@@ -77,7 +106,12 @@ export function IntelligenceModule() {
               <div className="text-[9px] text-slate-600 font-data p-1 animate-pulse">AWAITING EVENTS...</div>
             ) : (
               events.slice(0, 8).map((e, i) => (
-                <div key={i} className="p-1.5 border-l-2 border-white/5 hover:border-cyan-500/30 transition-all pl-3">
+                <motion.div 
+                  key={i} 
+                  whileHover={{ x: 2 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control p-2 rounded-[12px] border-l-2 border-white/5"
+                >
                   <div className="flex justify-between items-center">
                     <span className={`text-[7px] font-hud uppercase tracking-wider ${
                       e.severity === 'critical' ? 'text-red-400' :
@@ -86,7 +120,7 @@ export function IntelligenceModule() {
                     {e.service_id && <span className="text-[7px] font-data text-slate-600">{e.service_id}</span>}
                   </div>
                   <span className="text-[8px] text-slate-400 font-data leading-tight block mt-0.5">{e.description}</span>
-                </div>
+                </motion.div>
               ))
             )}
           </div>

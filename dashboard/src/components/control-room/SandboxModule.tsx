@@ -27,30 +27,33 @@ export function SandboxModule() {
       <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25 }} className="flex flex-col gap-4">
         <TacticalBox title="SANDBOX CONTROLS" badge="ISOLATED">
           <div className="flex flex-col gap-2">
-            {['structural_break', 'latency_spike', 'cascade_inject', 'traffic_surge'].map((type) => (
-              <button
+            {['structural_break', 'latency_spike', 'cascade_inject', 'traffic_surge'].map((type, index) => (
+              <motion.button
                 key={type}
                 onClick={() => handleTrigger(type)}
-                className="px-3 py-2 bg-white/[0.02] border border-red-500/20 hover:border-red-500/40 hover:bg-red-500/5 text-left transition-all group"
+                whileHover={{ y: -1, scale: 1.005 }}
+                whileTap={{ y: 1, scale: 0.99 }}
+                transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                className="neo-control px-4 py-3 border-red-500/15 hover:border-red-500/30 text-left group rounded-[14px]"
               >
-                <span className="text-[8px] font-hud tracking-widest text-red-400/70 group-hover:text-red-400 uppercase">{type.replace(/_/g, ' ')}</span>
-              </button>
+                <span className="text-[9px] font-hud tracking-[0.22em] text-red-300/80 group-hover:text-red-300 uppercase">{type.replace(/_/g, ' ')}</span>
+              </motion.button>
             ))}
           </div>
         </TacticalBox>
 
         {simResult && (
           <TacticalBox title="SIM STATUS" status={simResult.system_stable ? 'nominal' : 'critical'}>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-[7px] font-hud text-slate-600 uppercase">Stable</span>
-                <span className={`text-[10px] font-data font-bold ${simResult.system_stable ? 'text-cyan-400' : 'text-red-400'}`}>
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[8px] font-hud text-slate-500 uppercase tracking-[0.2em]">STABLE</span>
+                <span className={`text-[11px] font-data font-bold ${simResult.system_stable ? 'text-cyan-300' : 'text-red-300'}`}>
                   {simResult.system_stable ? 'YES' : 'NO'}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-[7px] font-hud text-slate-600 uppercase">Recovery</span>
-                <span className="text-[10px] font-data text-slate-300">{simResult.recovery_convergence_ms?.toFixed(0) ?? '—'}ms</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[8px] font-hud text-slate-500 uppercase tracking-[0.2em]">RECOVERY</span>
+                <span className="text-[11px] font-data text-slate-300">{simResult.recovery_convergence_ms?.toFixed(0) ?? '—'}ms</span>
               </div>
             </div>
           </TacticalBox>
@@ -58,9 +61,9 @@ export function SandboxModule() {
 
         {simOverlay && (
           <TacticalBox title="SIM OVERLAY" badge={`AGE:${simOverlay.sim_tick_age}`} status={simOverlay.sim_tick_age > 5 ? 'warning' : 'nominal'}>
-            <div className="flex justify-between">
-              <span className="text-[7px] font-hud text-slate-600 uppercase">Horizon</span>
-              <span className="text-[10px] font-data text-slate-300">{simOverlay.horizon_ms?.toFixed(0) ?? '—'}ms</span>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[8px] font-hud text-slate-500 uppercase tracking-[0.2em]">HORIZON</span>
+              <span className="text-[11px] font-data text-slate-300">{simOverlay.horizon_ms?.toFixed(0) ?? '—'}ms</span>
             </div>
           </TacticalBox>
         )}

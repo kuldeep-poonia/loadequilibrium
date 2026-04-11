@@ -2,64 +2,60 @@ package autopilot
 
 import "math"
 
-
-
 type CongestionState struct {
-
 	Backlog float64
 
 	ArrivalMean float64
 	ArrivalVar  float64
 
-	BurstState float64
+	BurstState       float64
 	RegimeConfidence float64
 
-	ServiceRate float64
+	ServiceRate       float64
 	ServiceEfficiency float64
-	ConcurrencyLimit float64
+	ConcurrencyLimit  float64
 
-	CapacityActive float64
-	CapacityTarget float64
-	CapacityTauUp  float64
+	CapacityActive  float64
+	CapacityTarget  float64
+	CapacityTauUp   float64
 	CapacityTauDown float64
 
 	RetryFactor float64
 
-	Latency float64
-	CPUPressure float64
+	Latency       float64
+	CPUPressure   float64
 	NetworkJitter float64
 
-	Disturbance float64
+	Disturbance       float64
 	DisturbanceEnergy float64
 
-	UpstreamPressure float64
+	UpstreamPressure      float64
 	TopologyAmplification float64
 
 	CacheRelief float64
 }
 
 type Predictor struct {
-
-	Dt float64
+	Dt       float64
 	MaxQueue float64
 
-	BurstEntryRate float64
+	BurstEntryRate         float64
 	BurstCollapseThreshold float64
-	BurstIntensity float64
+	BurstIntensity         float64
 
-	ArrivalRiseGain float64
-	ArrivalDropGain float64
+	ArrivalRiseGain   float64
+	ArrivalDropGain   float64
 	VarianceDecayRate float64
 
-	RetryGain float64
+	RetryGain     float64
 	RetryDelayTau float64
 
-	DisturbanceSigma float64
+	DisturbanceSigma         float64
 	DisturbanceInjectionGain float64
-	DisturbanceBound float64
+	DisturbanceBound         float64
 
 	TopologyCouplingK float64
-	TopologyAdaptTau float64
+	TopologyAdaptTau  float64
 
 	CacheAdaptTau float64
 
@@ -134,10 +130,10 @@ Retry cascade
 func (p *Predictor) retryCascade(x CongestionState) float64 {
 
 	lag :=
-		math.Exp(-p.Dt/p.RetryDelayTau)
+		math.Exp(-p.Dt / p.RetryDelayTau)
 
 	pressure :=
-		(1-lag)*(x.Backlog+x.Latency)
+		(1 - lag) * (x.Backlog + x.Latency)
 
 	load :=
 		p.RetryGain *
@@ -208,8 +204,8 @@ func (p *Predictor) disturbanceNext(x CongestionState) (float64, float64) {
 	energy :=
 		math.Max(
 			0,
-			x.DisturbanceEnergy +
-				injection*p.Dt -
+			x.DisturbanceEnergy+
+				injection*p.Dt-
 				val*p.Dt,
 		)
 
@@ -235,7 +231,7 @@ Cache relief
 func (p *Predictor) cacheNext(x CongestionState) float64 {
 
 	target :=
-		1/(1+math.Sqrt(x.Backlog+1)) *
+		1 / (1 + math.Sqrt(x.Backlog+1)) *
 			(1 + 0.3*x.CapacityActive)
 
 	return x.CacheRelief +
@@ -247,6 +243,18 @@ func (p *Predictor) cacheNext(x CongestionState) float64 {
 Numerically safe hybrid overload barrier
 */
 func (p *Predictor) overloadBarrier(q float64) float64 {
+
+	if math.IsNaN(q) || math.IsInf(q, -1) {
+		return 0
+	}
+
+	if q <= 0 {
+		return 0
+	}
+
+	if math.IsInf(q, 1) {
+		return p.BarrierCap
+	}
 
 	if q <= p.MaxQueue {
 		return q
@@ -282,7 +290,7 @@ func (p *Predictor) Step(x CongestionState) CongestionState {
 		p.updateArrivalStats(x, arrival)
 
 	next.ArrivalMean = m
-	next.ArrivalVar  = v
+	next.ArrivalVar = v
 
 	retry :=
 		p.retryCascade(x)

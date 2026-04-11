@@ -172,11 +172,13 @@ function FrameStrip({
     <div className="grid h-full grid-cols-1 gap-2 md:grid-cols-2 2xl:grid-cols-4">
       {frames.map((frame, index) => (
         <motion.div
-          layout
           key={frame.seq}
+          initial={{ opacity: 0, y: -12, height: 0 }}
+          animate={{ opacity: 1, y: 0, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           whileHover={{ y: -2 }}
-          transition={interactionSpring}
-          className="industrial-inset dock-transition timeline-frame rounded-[18px] px-3 py-3"
+          className="industrial-inset dock-transition timeline-frame rounded-[18px] px-3 py-3 min-h-[120px]"
         >
           <div className="flex items-center justify-between gap-2">
             <span className="font-hud text-[8px] uppercase tracking-[0.22em] text-slate-500">frame {frame.seq}</span>
@@ -547,7 +549,7 @@ export default function CommandCenter() {
           </div>
         </motion.aside>
 
-        <div className="grid min-h-0 min-w-0 gap-3 xl:grid-rows-[minmax(0,1fr)_332px]">
+        <div className="grid min-h-0 min-w-0 gap-3 xl:grid-rows-[minmax(0,1fr)_680px]">
           <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.08 }} className="min-h-[420px] min-w-0 xl:min-h-0">
             <TacticalBox
               title="TOPOLOGY FIELD"
@@ -685,7 +687,7 @@ export default function CommandCenter() {
                     </div>
                     <div className="shrink-0 font-data text-[10px] text-slate-500">{formatClock(tick?.ts)}</div>
                   </div>
-                  <div className="mt-3 min-h-0 min-w-0 flex-1">
+                  <div className="mt-3 min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hud">
                     <FrameStrip frames={replayFrames} />
                   </div>
                 </div>

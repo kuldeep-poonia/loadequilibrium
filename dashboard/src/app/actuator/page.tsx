@@ -15,18 +15,24 @@ export default function ActuatorPage() {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
         <TacticalBox title="ACTUATOR CONTROLS" badge="CONTROL_PLANE">
           <div className="flex gap-3">
-            <button
+            <motion.button
               onClick={() => triggerAction('toggle')}
-              className="px-4 py-2 bg-cyan-500/5 border border-cyan-500/20 hover:bg-cyan-500/10 text-[8px] font-hud tracking-widest text-cyan-400 uppercase transition-all"
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--cyan px-6 py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
             >
               TOGGLE
-            </button>
-            <button
+            </motion.button>
+            <motion.button
               onClick={() => triggerAction('chaos-run')}
-              className="px-4 py-2 bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 text-[8px] font-hud tracking-widest text-red-400 uppercase transition-all"
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--red px-6 py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
             >
               CHAOS RUN
-            </button>
+            </motion.button>
           </div>
         </TacticalBox>
       </motion.div>
@@ -38,7 +44,12 @@ export default function ActuatorPage() {
               <div className="text-[9px] text-slate-600 font-data animate-pulse">NO ACTIVE DIRECTIVES...</div>
             ) : (
               directiveList.map(({ svc, target_replicas, retry_budget, queue_limit, cache_ttl_ms, reason }) => (
-                <div key={svc} className="p-2.5 bg-white/[0.02] border border-white/5 hover:border-cyan-500/15 transition-all">
+                <motion.div 
+                  key={svc} 
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control p-3 rounded-[12px]"
+                >
                   <div className="flex justify-between items-center mb-1.5">
                     <span className="text-[9px] font-hud text-cyan-400 tracking-wider uppercase font-bold">{svc}</span>
                   </div>
@@ -61,7 +72,7 @@ export default function ActuatorPage() {
                     </div>
                   </div>
                   {reason && <div className="text-[7px] text-slate-600 mt-1.5 font-data">{reason}</div>}
-                </div>
+                </motion.div>
               ))
             )}
           </div>

@@ -11,7 +11,7 @@ export default function NotFound() {
             The requested module or coordination point does not exist in the loadequilibrium system map. Vector alignment failed.
           </p>
           <Link 
-            href="/telemetry" 
+            href="/" 
             className="inline-block px-8 py-3 bg-cyan-500/10 border border-cyan-400 text-cyan-400 font-hud text-[11px] uppercase tracking-widest hover:bg-cyan-500/20 transition-all"
           >
             RETURN_TO_COMMAND

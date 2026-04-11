@@ -25,12 +25,24 @@ export function SimulationModule() {
       <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25 }} className="flex min-h-0 min-w-0 flex-col gap-3">
         <TacticalBox title="SIM CONTROL">
           <div className="flex min-w-0 flex-col gap-2">
-            <button onClick={() => handleSim('start')} className="px-3 py-2 bg-cyan-500/5 border border-cyan-500/20 hover:bg-cyan-500/10 text-[8px] font-hud tracking-widest text-cyan-400 uppercase transition-all">
+            <motion.button 
+              onClick={() => handleSim('start')}
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--cyan px-4 py-3 text-[9px] font-hud tracking-[0.22em] uppercase rounded-[14px] text-center"
+            >
               START SCENARIO
-            </button>
-            <button onClick={() => handleSim('reset')} className="px-3 py-2 bg-white/[0.02] border border-white/10 hover:bg-white/5 text-[8px] font-hud tracking-widest text-slate-400 uppercase transition-all">
+            </motion.button>
+            <motion.button 
+              onClick={() => handleSim('reset')}
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control px-4 py-3 text-[9px] font-hud tracking-[0.22em] uppercase rounded-[14px] text-center text-slate-300"
+            >
               RESET BRANCH
-            </button>
+            </motion.button>
           </div>
         </TacticalBox>
 
@@ -72,7 +84,12 @@ export function SimulationModule() {
               <div className="text-[9px] text-slate-600 font-data animate-pulse">NO PREDICTION DATA...</div>
             ) : (
               predServices.map(([svc, points]) => (
-                <div key={svc} className="min-w-0">
+                <motion.div 
+                  key={svc}
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control p-2 rounded-[12px] min-w-0"
+                >
                   <span className="block min-w-0 break-all text-[8px] font-hud text-cyan-400/70 uppercase tracking-wider">{svc}</span>
                   <div className="flex items-end gap-0.5 h-8 mt-1">
                     {(points || []).map((pt, i) => {
@@ -87,7 +104,7 @@ export function SimulationModule() {
                       );
                     })}
                   </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>
@@ -102,7 +119,12 @@ export function SimulationModule() {
               <div className="text-[9px] text-slate-600 font-data animate-pulse">NO RISK TIMELINE...</div>
             ) : (
               riskServices.map(([svc, points]) => (
-                <div key={svc} className="min-w-0">
+                <motion.div 
+                  key={svc}
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control p-2 rounded-[12px] min-w-0"
+                >
                   <span className="block min-w-0 break-all text-[8px] font-hud text-amber-400/70 uppercase tracking-wider">{svc}</span>
                   <div className="flex items-end gap-0.5 h-8 mt-1">
                     {(points || []).map((pt, i) => {
@@ -117,7 +139,7 @@ export function SimulationModule() {
                       );
                     })}
                   </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>

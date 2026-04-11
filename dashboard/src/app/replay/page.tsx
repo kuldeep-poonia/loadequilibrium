@@ -14,24 +14,32 @@ export default function ReplayPage() {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
         <TacticalBox title="REPLAY CONTROLS" badge="EVENT_LOG">
           <div className="flex gap-3">
-            <button
+            <motion.button
               onClick={() => triggerAction('replay-burst')}
-              className="px-4 py-2 bg-cyan-500/5 border border-cyan-500/20 hover:bg-cyan-500/10 text-[8px] font-hud tracking-widest text-cyan-400 uppercase transition-all"
+              whileHover={{ y: -1, scale: 1.005 }}
+              whileTap={{ y: 1, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="neo-control neo-control--cyan px-6 py-3 font-hud text-[9px] tracking-[0.22em] uppercase rounded-[14px] text-center"
             >
               TRIGGER REPLAY BURST
-            </button>
+            </motion.button>
           </div>
         </TacticalBox>
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.05 }} className="flex-1 min-h-0 flex flex-col">
         <TacticalBox title="EVENT TIMELINE" badge={`${events.length} EVENTS`} className="flex-1 overflow-hidden flex flex-col">
-          <div className="flex-1 overflow-y-auto scrollbar-hud space-y-1">
+          <div className="flex-1 overflow-y-auto scrollbar-hud space-y-1.5">
             {events.length === 0 ? (
               <div className="text-[9px] text-slate-600 font-data animate-pulse">NO EVENT HISTORY...</div>
             ) : (
               events.map((e, i) => (
-                <div key={i} className="flex items-start gap-3 p-2 bg-white/[0.02] border border-white/5 hover:border-cyan-500/15 transition-all">
+                <motion.div 
+                  key={i} 
+                  whileHover={{ x: 1 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                  className="neo-control flex items-start gap-3 p-3 rounded-[12px]"
+                >
                   <div className={`w-1.5 h-1.5 mt-1 rounded-full shrink-0 ${
                     e.severity === 'critical' ? 'bg-red-500' :
                     e.severity === 'warning' ? 'bg-amber-500' : 'bg-cyan-500/60'
@@ -50,7 +58,7 @@ export default function ReplayPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>

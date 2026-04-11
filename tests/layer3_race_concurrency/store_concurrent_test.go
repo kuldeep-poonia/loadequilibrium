@@ -1,4 +1,4 @@
-package layer3_test
+package layer3
 
 // FILE: tests/layer3_race_concurrency/L3_TEL_003_store_concurrent_test.go
 //

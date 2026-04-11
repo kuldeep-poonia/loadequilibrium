@@ -1,4 +1,4 @@
-package layer3_test
+package layer3
 
 // FILE: tests/layer3_race_concurrency/L3_TEL_002_ringbuffer_memory_stability_test.go
 //

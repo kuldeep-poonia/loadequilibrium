@@ -1,0 +1,1649 @@
+[
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 2439741,
+      "race_detector_active_flag": true,
+      "duration_ms": 20000,
+      "error_messages": [
+        "broadcasts=2439741 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-11T10:17:32Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 667,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:17:32Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9948180236386165,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 2384,
+      "error_messages": [
+        "after_1M: heap=1536KB",
+        "after_2M: heap=1536KB",
+        "after_3M: heap=1536KB",
+        "after_4M: heap=1536KB",
+        "after_5M: heap=1536KB",
+        "after_6M: heap=1536KB",
+        "after_7M: heap=1536KB",
+        "after_8M: heap=1536KB",
+        "after_9M: heap=1536KB",
+        "after_10M: heap=1536KB",
+        "heap_before=1544KB heap_after=1536KB growth=0.9948x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-11T10:17:35Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 564169,
+      "race_detector_active_flag": true,
+      "duration_ms": 30000,
+      "error_messages": [
+        "pushes_done=564169 snapshots=1806376 last_calls=13163200 size_calls=743477 summary_calls=743477 final_size=1024 mean_req=56608.25"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 564169 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:18:05Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 1159,
+      "race_detector_active_flag": true,
+      "duration_ms": 30013,
+      "error_messages": [
+        "pushes_done=1159 snapshots=496030 last_calls=18768164 size_calls=184306 summary_calls=184306 final_size=1024 mean_req=70.60"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 1159 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:23:36Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 898,
+      "race_detector_active_flag": true,
+      "duration_ms": 30010,
+      "error_messages": [
+        "pushes_done=898 snapshots=1255451 last_calls=16741745 size_calls=403268 summary_calls=403268 final_size=898 mean_req=45.44"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 898 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:24:05Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 971,
+      "race_detector_active_flag": true,
+      "duration_ms": 30004,
+      "error_messages": [
+        "pushes_done=971 snapshots=877395 last_calls=17675379 size_calls=317542 summary_calls=317542 final_size=971 mean_req=49.25"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 971 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:24:34Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 976,
+      "race_detector_active_flag": true,
+      "duration_ms": 30007,
+      "error_messages": [
+        "pushes_done=976 snapshots=1007171 last_calls=17600386 size_calls=335255 summary_calls=335255 final_size=976 mean_req=49.50"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 976 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:25:02Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 1988,
+      "race_detector_active_flag": true,
+      "duration_ms": 30030,
+      "error_messages": [
+        "pushes_done=1988 snapshots=262039 last_calls=18769832 size_calls=96782 summary_calls=96782 final_size=1024 mean_req=227.51"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 1988 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:25:31Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 935,
+      "race_detector_active_flag": true,
+      "duration_ms": 30016,
+      "error_messages": [
+        "pushes_done=935 snapshots=879940 last_calls=17560483 size_calls=307381 summary_calls=307381 final_size=935 mean_req=47.68"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 935 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:25:59Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 976,
+      "race_detector_active_flag": true,
+      "duration_ms": 30015,
+      "error_messages": [
+        "pushes_done=976 snapshots=985549 last_calls=17624642 size_calls=348240 summary_calls=348240 final_size=976 mean_req=49.42"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 976 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:26:28Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 918,
+      "race_detector_active_flag": true,
+      "duration_ms": 30001,
+      "error_messages": [
+        "pushes_done=918 snapshots=875308 last_calls=16820936 size_calls=314025 summary_calls=314025 final_size=918 mean_req=46.55"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 918 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:26:57Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 962,
+      "race_detector_active_flag": true,
+      "duration_ms": 30013,
+      "error_messages": [
+        "pushes_done=962 snapshots=807869 last_calls=17445044 size_calls=260237 summary_calls=260237 final_size=962 mean_req=48.88"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 962 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:27:25Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 890,
+      "race_detector_active_flag": true,
+      "duration_ms": 30012,
+      "error_messages": [
+        "pushes_done=890 snapshots=721223 last_calls=15063589 size_calls=264098 summary_calls=264098 final_size=890 mean_req=45.58"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 890 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:27:54Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 1106,
+      "race_detector_active_flag": true,
+      "duration_ms": 30010,
+      "error_messages": [
+        "pushes_done=1106 snapshots=471950 last_calls=17529864 size_calls=165799 summary_calls=165799 final_size=1024 mean_req=76.25"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 1106 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:28:22Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 929,
+      "race_detector_active_flag": true,
+      "duration_ms": 30002,
+      "error_messages": [
+        "pushes_done=929 snapshots=887048 last_calls=17823217 size_calls=303793 summary_calls=303793 final_size=929 mean_req=47.02"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 929 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:28:51Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 932,
+      "race_detector_active_flag": true,
+      "duration_ms": 30025,
+      "error_messages": [
+        "pushes_done=932 snapshots=1050552 last_calls=18564439 size_calls=379631 summary_calls=379631 final_size=932 mean_req=47.29"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 932 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:29:43Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 834,
+      "race_detector_active_flag": true,
+      "duration_ms": 30012,
+      "error_messages": [
+        "pushes_done=834 snapshots=915590 last_calls=15209631 size_calls=314440 summary_calls=314440 final_size=834 mean_req=42.83"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 834 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:30:11Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 944,
+      "race_detector_active_flag": true,
+      "duration_ms": 30008,
+      "error_messages": [
+        "pushes_done=944 snapshots=852624 last_calls=17337274 size_calls=284332 summary_calls=284332 final_size=944 mean_req=48.01"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 944 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:30:40Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 958,
+      "race_detector_active_flag": true,
+      "duration_ms": 30038,
+      "error_messages": [
+        "pushes_done=958 snapshots=959087 last_calls=18244313 size_calls=333127 summary_calls=333127 final_size=958 mean_req=48.46"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 958 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:31:08Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 790,
+      "race_detector_active_flag": true,
+      "duration_ms": 30046,
+      "error_messages": [
+        "pushes_done=790 snapshots=1305947 last_calls=15772049 size_calls=417248 summary_calls=417248 final_size=790 mean_req=40.06"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 790 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:31:37Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 954,
+      "race_detector_active_flag": true,
+      "duration_ms": 30020,
+      "error_messages": [
+        "pushes_done=954 snapshots=929715 last_calls=19263784 size_calls=332766 summary_calls=332766 final_size=954 mean_req=48.33"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 954 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:32:06Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 942,
+      "race_detector_active_flag": true,
+      "duration_ms": 30002,
+      "error_messages": [
+        "pushes_done=942 snapshots=889842 last_calls=16981894 size_calls=299248 summary_calls=299248 final_size=942 mean_req=47.73"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 942 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:32:34Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 951,
+      "race_detector_active_flag": true,
+      "duration_ms": 30019,
+      "error_messages": [
+        "pushes_done=951 snapshots=765487 last_calls=17594714 size_calls=264161 summary_calls=264161 final_size=951 mean_req=48.31"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 951 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:33:03Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 917,
+      "race_detector_active_flag": true,
+      "duration_ms": 30074,
+      "error_messages": [
+        "pushes_done=917 snapshots=873604 last_calls=16449701 size_calls=315331 summary_calls=315331 final_size=917 mean_req=46.49"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 917 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-11T10:33:32Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 647,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:35:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 652,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:39:02Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 650,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:39:31Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 650,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:40:26Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 661,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=538 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:48:09Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 654,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=2074 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:48:25Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 2371888,
+      "race_detector_active_flag": true,
+      "duration_ms": 20000,
+      "error_messages": [
+        "broadcasts=2371888 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-11T10:49:03Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 661,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=2074 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:49:04Z",
+    "go_version": "go1.26.0"
+  }
+]

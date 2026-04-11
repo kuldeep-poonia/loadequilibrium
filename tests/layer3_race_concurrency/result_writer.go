@@ -1,4 +1,4 @@
-package layer3_test
+package layer3
 
 // FILE: tests/layer3_race_concurrency/result_writer.go
 // Module: github.com/loadequilibrium/loadequilibrium
@@ -64,15 +64,14 @@ type L3Record struct {
 
 var (
 	l3Mu      sync.Mutex
-	l3OutPath = "tests/results/layer3_results.json"
+	l3OutPath = "../results/layer3_results.json"
 )
-
 func writeL3Result(r L3Record) {
 	l3Mu.Lock()
 	defer l3Mu.Unlock()
 
 	// Ensure the results directory exists.
-	_ = os.MkdirAll("tests/results", 0o755)
+	_ = os.MkdirAll("../results", 0o755)
 
 	var existing []L3Record
 	if raw, err := os.ReadFile(l3OutPath); err == nil {

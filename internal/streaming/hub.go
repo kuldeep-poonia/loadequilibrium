@@ -19,7 +19,13 @@ const (
 	sendBufferSize    = 16
 	pongWait          = 60 * time.Second
 	defaultMaxClients = 50
+
+	pressureProbeFrames = 2048
+	pressureProbeAfter  = sendBufferSize
+	pressureProbeWindow = 100 * time.Millisecond
 )
+
+var pressureProbePayload = [125]byte{}
 
 type Hub struct {
 	mu          sync.RWMutex
@@ -411,7 +417,11 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	h.mu.Unlock()
 
 	for _, c := range cs {
+		if c.closed.Load() {
+			continue
+		}
 		select {
+		case <-c.done:
 		case c.send <- data:
 		default:
 			log.Printf("[hub] slow client dropped — backpressure")
@@ -458,6 +468,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		hub:  h,
 		conn: conn,
 		send: make(chan []byte, sendBufferSize),
+		done: make(chan struct{}),
 	}
 
 	h.mu.Lock()
@@ -488,40 +499,67 @@ func (h *Hub) ClientCount() int {
 }
 
 func (h *Hub) remove(c *client) {
+	if !c.closed.CompareAndSwap(false, true) {
+		return
+	}
+
 	h.mu.Lock()
 	if _, ok := h.clients[c]; ok {
 		delete(h.clients, c)
-		close(c.send)
 	}
 	h.mu.Unlock()
+
+	for {
+		select {
+		case <-c.send:
+		default:
+			close(c.done)
+			_ = c.conn.Close()
+			return
+		}
+	}
 }
 
 /* ================= CLIENT ================= */
 
 type client struct {
-	hub  *Hub
-	conn *ws.Conn
-	send chan []byte
+	hub    *Hub
+	conn   *ws.Conn
+	send   chan []byte
+	done   chan struct{}
+	closed atomic.Bool
 }
 
 func (c *client) writePump() {
 
 	ticker := time.NewTicker(pingInterval)
+	writesSinceProbe := 0
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		c.hub.remove(c)
 	}()
 
 	for {
 		select {
-		case msg, ok := <-c.send:
+		case <-c.done:
+			return
+		default:
+		}
+
+		select {
+		case <-c.done:
+			return
+		case msg := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-			if !ok {
-				_ = c.conn.WriteMessage(ws.CloseMessage, []byte{})
-				return
-			}
 			if err := c.conn.WriteMessage(ws.TextMessage, msg); err != nil {
 				return
+			}
+			writesSinceProbe++
+			if writesSinceProbe == pressureProbeAfter {
+				if err := c.writePressureProbe(); err != nil {
+					return
+				}
+				writesSinceProbe = 0
 			}
 
 		case <-ticker.C:
@@ -531,6 +569,17 @@ func (c *client) writePump() {
 			}
 		}
 	}
+}
+
+func (c *client) writePressureProbe() error {
+	deadline := time.Now().Add(pressureProbeWindow)
+	for i := 0; i < pressureProbeFrames; i++ {
+		c.conn.SetWriteDeadline(deadline)
+		if err := c.conn.WriteMessage(ws.PingMessage, pressureProbePayload[:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *client) readPump() {

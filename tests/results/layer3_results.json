@@ -1645,5 +1645,152 @@
     },
     "run_at": "2026-04-11T10:49:04Z",
     "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 651,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=1050 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:57:29Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 3349787,
+      "race_detector_active_flag": true,
+      "duration_ms": 20000,
+      "error_messages": [
+        "broadcasts=3349787 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-11T10:58:02Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 649,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=2074 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-11T10:58:02Z",
+    "go_version": "go1.26.0"
   }
 ]

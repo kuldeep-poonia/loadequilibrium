@@ -31,18 +31,18 @@ func EvaluateHorizonCost(
 	horizonTime :=
 		float64(cfg.HorizonSteps) * cfg.Dt
 
-	// ---------- infra cost ----------
+	//  infra cost 
 	infraCost :=
 		float64(b.Replicas) *
 			p.InfraUnitCost *
 			horizonTime
 
-	// ---------- SLA area ----------
+	// SLA area 
 	slaCost :=
 		p.SLAWeight *
 			traj.SLAIntegral
 
-	// ---------- adaptive risk aversion ----------
+	// adaptive risk aversion 
 	riskExponent := 1.3
 	if mem != nil {
 		riskExponent =

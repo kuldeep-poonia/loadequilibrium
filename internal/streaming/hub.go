@@ -20,7 +20,8 @@ const (
 	pongWait          = 60 * time.Second
 	defaultMaxClients = 50
 
-	pressureProbeFrames = 2048
+	pressureProbeFrames = 1024
+	pressureProbeChunk  = 64
 	pressureProbeAfter  = sendBufferSize
 	pressureProbeWindow = 100 * time.Millisecond
 )
@@ -454,7 +455,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 	upgrader := &ws.Upgrader{
 		ReadBufferSize:  512,
-		WriteBufferSize: 32 * 1024,
+		WriteBufferSize: 1024,
 		CheckOrigin:     func(*http.Request) bool { return true },
 	}
 
@@ -514,7 +515,7 @@ func (h *Hub) remove(c *client) {
 		case <-c.send:
 		default:
 			close(c.done)
-			_ = c.conn.Close()
+			go c.conn.Close()
 			return
 		}
 	}
@@ -573,9 +574,13 @@ func (c *client) writePump() {
 
 func (c *client) writePressureProbe() error {
 	deadline := time.Now().Add(pressureProbeWindow)
-	for i := 0; i < pressureProbeFrames; i++ {
+	for remaining := pressureProbeFrames; remaining > 0; remaining -= pressureProbeChunk {
+		n := pressureProbeChunk
+		if remaining < n {
+			n = remaining
+		}
 		c.conn.SetWriteDeadline(deadline)
-		if err := c.conn.WriteMessage(ws.PingMessage, pressureProbePayload[:]); err != nil {
+		if err := c.conn.WriteRepeatedMessage(ws.PingMessage, pressureProbePayload[:], n); err != nil {
 			return err
 		}
 	}

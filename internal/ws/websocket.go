@@ -66,6 +66,11 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, _ http.Header
 	if err != nil {
 		return nil, err
 	}
+	if u.WriteBufferSize > 0 {
+		if tcpConn, ok := netConn.(*net.TCPConn); ok {
+			_ = tcpConn.SetWriteBuffer(u.WriteBufferSize)
+		}
+	}
 
 	_, err = fmt.Fprintf(bufrw,
 		"HTTP/1.1 101 Switching Protocols\r\n"+
@@ -94,6 +99,30 @@ func computeAccept(key string) string {
 // WriteMessage sends a WebSocket frame of the given type.
 func (c *Conn) WriteMessage(mt MessageType, data []byte) error {
 	return c.writeFrame(byte(mt), data)
+}
+
+// WriteRepeatedMessage writes count identical small frames in one flush.
+func (c *Conn) WriteRepeatedMessage(mt MessageType, data []byte, count int) error {
+	if count <= 0 {
+		return nil
+	}
+	if len(data) > 125 {
+		return fmt.Errorf("ws: repeated frame payload too large: %d", len(data))
+	}
+
+	frameLen := 2 + len(data)
+	frames := make([]byte, frameLen*count)
+	for i := 0; i < count; i++ {
+		off := i * frameLen
+		frames[off] = 0x80 | byte(mt)
+		frames[off+1] = byte(len(data))
+		copy(frames[off+2:off+frameLen], data)
+	}
+
+	if _, err := c.rw.Write(frames); err != nil {
+		return err
+	}
+	return c.rw.Flush()
 }
 
 func (c *Conn) writeFrame(opcode byte, payload []byte) error {

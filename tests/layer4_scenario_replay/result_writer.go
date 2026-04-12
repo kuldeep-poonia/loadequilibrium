@@ -100,7 +100,7 @@ func writeL4Result(r L4Record) {
 // ─── Golden file helpers ───────────────────────────────────────────────────
 
 // goldenDir is the directory where golden files are stored.
-const goldenDir = "tests/layer4_scenario_replay/golden"
+const goldenDir = "./golden"
 
 func ensureGoldenDir() {
 	_ = os.MkdirAll(goldenDir, 0o755)

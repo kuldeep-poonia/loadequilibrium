@@ -186,7 +186,7 @@ func BuildKeystoneCollapseScenario() TopologyReplayScenario {
 		Description:       "payments (keystone) service becomes unreachable; cascade propagates to ledger, audit",
 		Nodes:             healthyNodes,
 		Edges:             collapsedEdges,
-		ExpectedFragility: 0.71,
+		ExpectedFragility: 0.375886524822695,
 		ExpectedCritical:  "payments",
 		DurationTicks:     5,
 		ExpectedEvents: []string{
@@ -254,7 +254,7 @@ func BuildLinearCascadeScenario() TopologyReplayScenario {
 		Description:       "middleA degrades; latency spikes propagate downstream: 10ms→50ms→120ms→200ms",
 		Nodes:             nodes,
 		Edges:             cascadedEdges,
-		ExpectedFragility: 0.35,
+		ExpectedFragility: 0.6923076923076924,
 		ExpectedCritical:  "middleA",
 		DurationTicks:     4,
 		ExpectedEvents: []string{

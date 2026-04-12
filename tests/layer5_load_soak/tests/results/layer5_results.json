@@ -1,0 +1,291 @@
+[
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 5584,
+      "error_messages": [
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-04-12T04:16:32Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 91948,
+      "error_messages": [
+        "runtime_step: requests=9980 status_mismatch=20 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=9984 status_mismatch=16 json_mismatch=0 panics=0",
+        "sim_control: requests=9988 status_mismatch=12 json_mismatch=0 panics=0",
+        "intel_rollout: requests=9992 status_mismatch=8 json_mismatch=0 panics=0",
+        "alerts_ack: requests=9982 status_mismatch=18 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=39 status_mismatch=9961 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=18 status_mismatch=9982 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "runtime_step: requests=9980 status_mismatch=20 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-04-12T04:39:51Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 47882,
+      "error_messages": [
+        "health: requests=9995 status_mismatch=5 json_mismatch=0 panics=0",
+        "snapshot_no_data: requests=9999 status_mismatch=1 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=9993 status_mismatch=7 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "health: requests=9995 status_mismatch=5 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-04-12T04:54:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 16518
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "all correct"
+    },
+    "run_at": "2026-04-12T04:56:17Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 6410
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "all correct"
+    },
+    "run_at": "2026-04-12T04:57:29Z",
+    "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L5-WS-001b",
+    "layer": 5,
+    "name": "Hub max client cap enforced at connection time",
+    "aim": "With maxClients=5, the 6th connection must be rejected (HTTP 503)",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "(*Hub).SetMaxClients",
+      "(*Hub).HandleUpgrade (cap enforcement)"
+    ],
+    "threshold": {
+      "metric": "6th_client_rejected",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "rationale": "Unbounded client acceptance leads to OOM under connection flood"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "rejected",
+      "sample_count": 6,
+      "duration_ms": 107,
+      "error_messages": [
+        "6th rejected=true clients_after=5 max=5"
+      ]
+    },
+    "on_exceed": "Hub accepts unlimited WebSocket connections → attacker or misbehaving dashboard opens thousands of connections → OOM kill",
+    "answered_questions": {
+      "what_was_tested": "Hub.SetMaxClients(5) then attempt 6th connection",
+      "why_this_threshold": "Hard cap prevents resource exhaustion under connection flood",
+      "what_happens_if_it_fails": "Each reconnecting dashboard tab creates a new connection → OOM kill",
+      "how_load_was_generated": "Sequential connection attempts via dialWebSocket helper",
+      "how_metrics_were_measured": "dialWebSocket returns error if server sends 503 instead of 101",
+      "worst_case_description": "correctly rejected"
+    },
+    "run_at": "2026-04-12T04:58:02Z",
+    "go_version": "go1.22.2"
+  }
+]

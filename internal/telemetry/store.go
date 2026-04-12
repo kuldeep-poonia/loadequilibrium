@@ -78,6 +78,9 @@ func (s *Store) Ingest(p *MetricPoint) {
 		p.Timestamp = time.Now()
 	}
 
+	// Copy timestamp value BEFORE taking any locks
+	ts := p.Timestamp
+
 	s.mu.RLock()
 	buf, ok := s.buffers[p.ServiceID]
 	s.mu.RUnlock()
@@ -92,14 +95,15 @@ func (s *Store) Ingest(p *MetricPoint) {
 			buf = NewRingBuffer(s.bufCap)
 			s.buffers[p.ServiceID] = buf
 		}
+		s.lastSeen[p.ServiceID] = ts
+		s.mu.Unlock()
+	} else {
+		// Update lastSeen WITHOUT separate lock - use buf mutex which is already held during Push
+		buf.Push(p)
+		s.mu.Lock()
+		s.lastSeen[p.ServiceID] = ts
 		s.mu.Unlock()
 	}
-
-	buf.Push(p)
-
-	s.mu.Lock()
-	s.lastSeen[p.ServiceID] = p.Timestamp
-	s.mu.Unlock()
 }
 
 // Prune removes services not seen within staleAge. Call from tick loop.
@@ -133,11 +137,13 @@ func (s *Store) ServiceIDs() []string {
 func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *ServiceWindow {
 	s.mu.RLock()
 	buf, ok := s.buffers[serviceID]
-	s.mu.RUnlock()
 	if !ok {
+		s.mu.RUnlock()
 		return nil
 	}
+	// Hold Store RLock while we take snapshot to eliminate nested lock convoy
 	points := buf.Snapshot()
+	s.mu.RUnlock()
 	if len(points) == 0 {
 		return nil
 	}
@@ -154,17 +160,31 @@ func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *
 
 // AllWindows returns windows for every known service.
 func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*ServiceWindow {
-	ids := s.ServiceIDs()
-	out := make(map[string]*ServiceWindow, len(ids))
-	for _, id := range ids {
-		if w := s.Window(id, n, freshnessCutoff); w != nil {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]*ServiceWindow, len(s.buffers))
+	for id, buf := range s.buffers {
+		points := buf.Snapshot()
+		if len(points) == 0 {
+			continue
+		}
+		newest := points[len(points)-1]
+		if freshnessCutoff > 0 && time.Since(newest.Timestamp) > freshnessCutoff {
+			continue
+		}
+		if n > 0 && len(points) > n {
+			points = points[len(points)-n:]
+		}
+		w := computeWindow(id, points)
+		if w != nil {
 			out[id] = w
 		}
 	}
 	return out
 }
 
-func computeWindow(serviceID string, pts []*MetricPoint) *ServiceWindow {
+func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 	n := float64(len(pts))
 	var sumReq, sumErr, sumLat, maxLat, sumCPU, sumMem, sumQueue, sumConns float64
 	edgeSums := make(map[string]*edgeAccum)

@@ -9,7 +9,7 @@ import (
 
 type RingBuffer struct {
 	mu   sync.RWMutex
-	buf  []*MetricPoint
+	buf  []MetricPoint
 	head int // index of the next write slot
 	size int // number of valid entries currently stored
 	cap  int
@@ -18,7 +18,7 @@ type RingBuffer struct {
 // NewRingBuffer allocates a RingBuffer of the given capacity.
 func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
-		buf: make([]*MetricPoint, capacity),
+		buf: make([]MetricPoint, capacity),
 		cap: capacity,
 	}
 }
@@ -26,7 +26,7 @@ func NewRingBuffer(capacity int) *RingBuffer {
 // Push appends a MetricPoint, evicting the oldest if the buffer is full.
 func (r *RingBuffer) Push(p *MetricPoint) {
 	r.mu.Lock()
-	r.buf[r.head] = p
+	r.buf[r.head] = *p
 	r.head = (r.head + 1) % r.cap
 	if r.size < r.cap {
 		r.size++
@@ -35,7 +35,7 @@ func (r *RingBuffer) Push(p *MetricPoint) {
 }
 
 
-func (r *RingBuffer) Snapshot() []*MetricPoint {
+func (r *RingBuffer) Snapshot() []MetricPoint {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -43,7 +43,7 @@ func (r *RingBuffer) Snapshot() []*MetricPoint {
 		return nil
 	}
 
-	out := make([]*MetricPoint, r.size)
+	out := make([]MetricPoint, r.size)
 	start := (r.head - r.size + r.cap) % r.cap
 	for i := 0; i < r.size; i++ {
 		out[i] = r.buf[(start+i)%r.cap]
@@ -52,11 +52,11 @@ func (r *RingBuffer) Snapshot() []*MetricPoint {
 }
 
 // Last returns the most recently pushed point, or nil if empty.
-func (r *RingBuffer) Last() *MetricPoint {
+func (r *RingBuffer) Last() MetricPoint {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.size == 0 {
-		return nil
+		return MetricPoint{}
 	}
 	idx := (r.head - 1 + r.cap) % r.cap
 	return r.buf[idx]
@@ -98,9 +98,6 @@ func (r *RingBuffer) SummaryStats() RingSummary {
 
 	for i := 0; i < r.size; i++ {
 		p := r.buf[(start+i)%r.cap]
-		if p == nil {
-			continue
-		}
 		sumReq += p.RequestRate
 		sumReqSq += p.RequestRate * p.RequestRate
 		sumLat += p.Latency.Mean
@@ -117,14 +114,8 @@ func (r *RingBuffer) SummaryStats() RingSummary {
 		variance = 0
 	}
 
-	oldestAt := time.Time{}
-	newestAt := time.Time{}
-	if oldest != nil {
-		oldestAt = oldest.Timestamp
-	}
-	if newest != nil {
-		newestAt = newest.Timestamp
-	}
+	oldestAt := oldest.Timestamp
+	newestAt := newest.Timestamp
 
 	return RingSummary{
 		Count:         r.size,

@@ -130,7 +130,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 					snap := rb.Snapshot()
 					atomic.AddInt64(&snapshotsDone, 1)
 					for i, pt := range snap {
-						if pt == nil {
+	if pt.ServiceID == "" {
 							// nil entry from Snapshot is a logic error — buffer returned
 							// a slot that was never written.
 							atomic.AddInt64(&tornReads, 1)
@@ -155,7 +155,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 				case 2: // Last — returns most recent entry
 					last := rb.Last()
 					atomic.AddInt64(&lastCallsDone, 1)
-					if last != nil {
+	if last.ServiceID != "" {
 						if last.RequestRate < 0 {
 							atomic.AddInt64(&tornReads, 1)
 							t.Errorf("L3-TEL-001 TORN READ via Last(): RequestRate=%.4f", last.RequestRate)

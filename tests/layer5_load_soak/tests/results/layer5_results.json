@@ -827,5 +827,56 @@
     },
     "run_at": "2026-04-12T08:04:11Z",
     "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-WS-001",
+    "layer": 5,
+    "name": "WebSocket hub 50 clients, 30m0s soak, 1Hz broadcast",
+    "aim": "50 clients for 30m0s receiving 1Hz broadcasts: p95\u003c50ms p99\u003c100ms, zero dropped clients",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "streaming.NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).HandleUpgrade (via /ws route)"
+    ],
+    "threshold": {
+      "metric": "p99_delivery_ms",
+      "operator": "\u003c",
+      "value": 100,
+      "unit": "ms",
+      "rationale": "Dashboard must receive tick payloads within 100ms p99 to show near-real-time metrics"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 7.349,
+      "actual_unit": "p99_delivery_ms",
+      "sample_count": 90000,
+      "percentiles": {
+        "p50_ms": 1.623,
+        "p95_ms": 3.759,
+        "p99_ms": 7.349,
+        "p100_ms": 300.756
+      },
+      "duration_ms": 1805130,
+      "error_messages": [
+        "broadcasts=1800 clients=50 delivered=90000 expected=90000 dropped_clients=0"
+      ]
+    },
+    "on_exceed": "Dashboard operators see stale tick data — metrics lag behind real-time system state by \u003e100ms",
+    "answered_questions": {
+      "what_was_tested": "50 real WebSocket clients connected to real Hub via real api.Server /ws for 30m0s",
+      "why_this_threshold": "p99\u003c100ms: hub uses non-blocking send with drop-oldest; delivery at p99 tests that the happy path is fast",
+      "what_happens_if_it_fails": "Dashboard shows metrics that are multiple seconds behind reality — operators make decisions on stale data",
+      "how_load_was_generated": "1 broadcaster goroutine at 1Hz, 50 concurrent reader goroutines",
+      "how_metrics_were_measured": "Latency = time.Since(payload.Timestamp) measured in each reader goroutine; JSON-parsed from raw WebSocket frame",
+      "worst_case_description": "p99=7.35ms p100=300.76ms dropped=0"
+    },
+    "run_at": "2026-04-12T08:50:33Z",
+    "go_version": "go1.26.0"
   }
 ]

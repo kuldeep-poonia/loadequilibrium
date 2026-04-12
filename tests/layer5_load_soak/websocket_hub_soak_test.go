@@ -532,6 +532,15 @@ func l5ReadWSFrame(conn net.Conn) ([]byte, error) {
 			data[i] = b ^ maskKey[i%4]
 		}
 	}
+	
+	opcode := header[0] & 0x0f
+	if opcode == 0x9 {
+		// Reply with masked Pong (FIN=1, opcode=0xA, MASK=1, payloadLen=0, maskKey=[0,0,0,0])
+		conn.Write([]byte{0x8A, 0x80, 0x00, 0x00, 0x00, 0x00})
+		// Recursively read the next frame
+		return l5ReadWSFrame(conn)
+	}
+
 	return data, nil
 }
 

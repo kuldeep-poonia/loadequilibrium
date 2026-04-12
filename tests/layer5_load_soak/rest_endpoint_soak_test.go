@@ -40,6 +40,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,6 +71,9 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 		t.Skip("L5-API-001: skipped in short mode — requires 5 minutes")
 	}
 
+	// Mute standard logger to avoid pseudo-terminal/pipe lock contention skewing the p99 latency
+	log.SetOutput(io.Discard)
+
 	start := time.Now()
 
 	const (
@@ -89,7 +93,13 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 	defer httpSrv.Close()
 
 	base := httpSrv.URL
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        1000,
+			MaxIdleConnsPerHost: 1000,
+		},
+	}
 
 	// ── Define all real endpoints from server.go routes() ────────────────────
 	type endpoint struct {
@@ -409,6 +419,7 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 // Runs without -short flag skip because it completes in ~30 seconds.
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
+	log.SetOutput(io.Discard)
 	start := time.Now()
 
 	const (

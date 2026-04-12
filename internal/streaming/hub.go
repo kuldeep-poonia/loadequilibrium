@@ -16,24 +16,25 @@ import (
 const (
 	writeTimeout      = 5 * time.Second
 	pingInterval      = 15 * time.Second
-	sendBufferSize    = 16
+	sendBufferSize    = 1024
 	pongWait          = 60 * time.Second
 	defaultMaxClients = 50
 
 	pressureProbeFrames = 1024
 	pressureProbeChunk  = 64
 	pressureProbeAfter  = sendBufferSize
-	pressureProbeWindow = 100 * time.Millisecond
+	pressureProbeWindow = 2 * time.Second
 )
 
 var pressureProbePayload = [125]byte{}
 
 type Hub struct {
-	mu          sync.RWMutex
-	clients     map[*client]struct{}
-	seqNo       atomic.Uint64
-	maxClients  int
-	lastPayload *TickPayload // Cache latest payload for REST endpoints
+	mu              sync.RWMutex
+	clients         map[*client]struct{}
+	seqNo           atomic.Uint64
+	maxClients      int
+	lastPayload     *TickPayload // Cache latest payload for REST endpoints
+	lastPayloadJSON []byte       // Cache serialized payload for fast REST/WS bootstrap
 }
 
 func NewHub() *Hub {
@@ -411,6 +412,7 @@ func (h *Hub) Broadcast(p *TickPayload) {
 
 	h.mu.Lock()
 	h.lastPayload = p // Cache for REST endpoints
+	h.lastPayloadJSON = data
 	cs := make([]*client, 0, len(h.clients))
 	for c := range h.clients {
 		cs = append(cs, c)
@@ -438,13 +440,20 @@ func (h *Hub) GetLastPayload() *TickPayload {
 	return h.lastPayload
 }
 
+// GetLastPayloadJSON returns the cached JSON representation of TickPayload for REST endpoint
+func (h *Hub) GetLastPayloadJSON() []byte {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.lastPayloadJSON
+}
+
 /* ================= UPGRADE ================= */
 
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.RLock()
 	count := len(h.clients)
-	lastPayload := h.lastPayload
+	lastJSON := h.lastPayloadJSON
 	h.mu.RUnlock()
 
 	if count >= h.maxClients {
@@ -477,15 +486,12 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	// Send cached last payload to new client (bootstrap with live data)
-	if lastPayload != nil {
-		data, err := json.Marshal(lastPayload)
-		if err == nil {
-			select {
-			case c.send <- data:
-				log.Printf("[hub] bootstrap payload sent to new client (%d bytes)", len(data))
-			default:
-				log.Printf("[hub] new client backpressured on bootstrap")
-			}
+	if lastJSON != nil {
+		select {
+		case c.send <- lastJSON:
+			log.Printf("[hub] bootstrap payload sent to new client (%d bytes)", len(lastJSON))
+		default:
+			log.Printf("[hub] new client backpressured on bootstrap")
 		}
 	}
 

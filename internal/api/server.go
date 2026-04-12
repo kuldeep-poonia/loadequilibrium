@@ -277,8 +277,8 @@ func (s *Server) handleSnapshot() http.HandlerFunc {
 			return
 		}
 
-		payload := s.hub.GetLastPayload()
-		if payload == nil {
+		data := s.hub.GetLastPayloadJSON()
+		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -289,6 +289,6 @@ func (s *Server) handleSnapshot() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(payload)
+		w.Write(data)
 	}
 }

@@ -120,7 +120,7 @@ export function Sidebar() {
 
                   <div
                     className={clsx(
-                      'flex-shrink-0 transition-colors duration-300',
+                      'shrink-0 transition-colors duration-300',
                       isActive ? 'text-cyan-400' : isAlert ? 'animate-pulse text-amber-500' : 'text-slate-500 group-hover:text-cyan-400/70'
                     )}
                   >

@@ -287,5 +287,545 @@
     },
     "run_at": "2026-04-12T04:58:02Z",
     "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L5-TEL-002",
+    "layer": 5,
+    "name": "Hub.GetLastPayload: 100 readers + 10Hz broadcast for 60s",
+    "aim": "100 concurrent GetLastPayload callers while Broadcast at 10Hz: p99 \u003c 1ms",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "(*Hub).GetLastPayload",
+      "(*Hub).Broadcast"
+    ],
+    "threshold": {
+      "metric": "read_p99_ms",
+      "operator": "\u003c",
+      "value": 1,
+      "unit": "ms",
+      "rationale": "/api/v1/snapshot calls GetLastPayload — must be fast for dashboard first-load"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "p99_ms",
+      "sample_count": 205717654,
+      "percentiles": {
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "p100_ms": 14.373
+      },
+      "duration_ms": 67885,
+      "error_messages": [
+        "reads=205717654 nil=0 panics=0 p50=0.000ms p99=0.000ms p100=14.373ms"
+      ]
+    },
+    "on_exceed": "GetLastPayload blocks → /snapshot HTTP responses pile up → dashboard first-load timeout",
+    "answered_questions": {
+      "what_was_tested": "100 goroutines tight-looping GetLastPayload for 60s while 1 broadcaster at 10Hz",
+      "why_this_threshold": "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
+      "what_happens_if_it_fails": "REST /snapshot endpoint latency \u003e 1ms → dashboard HTTP timeout on initial load",
+      "how_load_was_generated": "100 readers in tight loop + 10Hz broadcaster",
+      "how_metrics_were_measured": "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
+      "worst_case_description": "p99=0.000ms reads=205717654"
+    },
+    "run_at": "2026-04-12T05:21:41Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 489.532,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 203485,
+      "throughput_rps": 677.8675745542733,
+      "error_count": 3407,
+      "error_rate": 0.01674324888812443,
+      "duration_ms": 300184,
+      "error_messages": [
+        "GET /health: FAIL p99=163.77ms (threshold=50ms) unexpected=193",
+        "GET /api/v1/snapshot: FAIL p99=133.82ms (threshold=50ms) unexpected=202",
+        "POST /api/v1/control/toggle: FAIL p99=125.03ms (threshold=50ms) unexpected=200",
+        "POST /api/v1/control/chaos-run: FAIL p99=126.36ms (threshold=50ms) unexpected=151",
+        "POST /api/v1/control/replay-burst: FAIL p99=127.55ms (threshold=50ms) unexpected=246",
+        "POST /api/v1/policy/update: FAIL p99=475.31ms (threshold=50ms) unexpected=607",
+        "POST /api/v1/runtime/step: FAIL p99=489.53ms (threshold=50ms) unexpected=508",
+        "POST /api/v1/sandbox/trigger: FAIL p99=468.65ms (threshold=50ms) unexpected=409",
+        "POST /api/v1/simulation/control: FAIL p99=481.40ms (threshold=50ms) unexpected=350",
+        "POST /api/v1/intelligence/rollout: FAIL p99=485.19ms (threshold=50ms) unexpected=285",
+        "POST /api/v1/alerts/ack: FAIL p99=483.77ms (threshold=50ms) unexpected=256"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=489.53ms across all endpoints"
+    },
+    "run_at": "2026-04-12T05:28:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 29175
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "all correct"
+    },
+    "run_at": "2026-04-12T05:36:10Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 2839.709,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 88850,
+      "throughput_rps": 295.6640378024026,
+      "error_count": 53,
+      "error_rate": 0.0005965109735509285,
+      "duration_ms": 300510,
+      "error_messages": [
+        "GET /health: FAIL p99=177.61ms (threshold=50ms) unexpected=0",
+        "GET /api/v1/snapshot: FAIL p99=204.43ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/control/toggle: FAIL p99=137.23ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/control/chaos-run: FAIL p99=107.01ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/control/replay-burst: FAIL p99=103.61ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/policy/update: FAIL p99=2839.71ms (threshold=50ms) unexpected=16",
+        "POST /api/v1/runtime/step: FAIL p99=2025.03ms (threshold=50ms) unexpected=7",
+        "POST /api/v1/sandbox/trigger: FAIL p99=1882.70ms (threshold=50ms) unexpected=3",
+        "POST /api/v1/simulation/control: FAIL p99=1975.95ms (threshold=50ms) unexpected=16",
+        "POST /api/v1/intelligence/rollout: FAIL p99=2034.55ms (threshold=50ms) unexpected=6",
+        "POST /api/v1/alerts/ack: FAIL p99=2006.30ms (threshold=50ms) unexpected=5"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=2839.71ms across all endpoints"
+    },
+    "run_at": "2026-04-12T05:43:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 197.042,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 817016,
+      "throughput_rps": 2723.150660276109,
+      "duration_ms": 300026,
+      "error_messages": [
+        "POST /api/v1/policy/update: FAIL p99=197.04ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/runtime/step: FAIL p99=162.51ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/sandbox/trigger: FAIL p99=147.10ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/simulation/control: FAIL p99=150.44ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/intelligence/rollout: FAIL p99=146.86ms (threshold=50ms) unexpected=0",
+        "POST /api/v1/alerts/ack: FAIL p99=145.03ms (threshold=50ms) unexpected=0"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=197.04ms across all endpoints"
+    },
+    "run_at": "2026-04-12T05:52:22Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 70.206,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 1895931,
+      "throughput_rps": 6319.727868480876,
+      "duration_ms": 300002,
+      "error_messages": [
+        "POST /api/v1/policy/update: FAIL p99=70.21ms (threshold=50ms) unexpected=0"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=70.21ms across all endpoints"
+    },
+    "run_at": "2026-04-12T06:01:17Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 2.86,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 19396026,
+      "throughput_rps": 64653.20448931838,
+      "duration_ms": 300001,
+      "error_messages": [
+        "total_requests=19396026 total_unexpected=0 worst_p99=2.86ms"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=2.86ms across all endpoints"
+    },
+    "run_at": "2026-04-12T06:11:38Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-TEL-002",
+    "layer": 5,
+    "name": "Hub.GetLastPayload: 100 readers + 10Hz broadcast for 60s",
+    "aim": "100 concurrent GetLastPayload callers while Broadcast at 10Hz: p99 \u003c 1ms",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "(*Hub).GetLastPayload",
+      "(*Hub).Broadcast"
+    ],
+    "threshold": {
+      "metric": "read_p99_ms",
+      "operator": "\u003c",
+      "value": 1,
+      "unit": "ms",
+      "rationale": "/api/v1/snapshot calls GetLastPayload — must be fast for dashboard first-load"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "p99_ms",
+      "sample_count": 293740953,
+      "percentiles": {
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "p100_ms": 9.328
+      },
+      "duration_ms": 63309,
+      "error_messages": [
+        "reads=293740953 nil=0 panics=0 p50=0.000ms p99=0.000ms p100=9.328ms"
+      ]
+    },
+    "on_exceed": "GetLastPayload blocks → /snapshot HTTP responses pile up → dashboard first-load timeout",
+    "answered_questions": {
+      "what_was_tested": "100 goroutines tight-looping GetLastPayload for 60s while 1 broadcaster at 10Hz",
+      "why_this_threshold": "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
+      "what_happens_if_it_fails": "REST /snapshot endpoint latency \u003e 1ms → dashboard HTTP timeout on initial load",
+      "how_load_was_generated": "100 readers in tight loop + 10Hz broadcaster",
+      "how_metrics_were_measured": "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
+      "worst_case_description": "p99=0.000ms reads=293740953"
+    },
+    "run_at": "2026-04-12T06:13:27Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-WS-001",
+    "layer": 5,
+    "name": "WebSocket hub 50 clients, 30m0s soak, 1Hz broadcast",
+    "aim": "50 clients for 30m0s receiving 1Hz broadcasts: p95\u003c50ms p99\u003c100ms, zero dropped clients",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "streaming.NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).HandleUpgrade (via /ws route)"
+    ],
+    "threshold": {
+      "metric": "p99_delivery_ms",
+      "operator": "\u003c",
+      "value": 100,
+      "unit": "ms",
+      "rationale": "Dashboard must receive tick payloads within 100ms p99 to show near-real-time metrics"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 50.336,
+      "actual_unit": "p99_delivery_ms",
+      "sample_count": 2950,
+      "percentiles": {
+        "p50_ms": 1.238,
+        "p95_ms": 6.186,
+        "p99_ms": 50.336,
+        "p100_ms": 93.449
+      },
+      "error_count": 50,
+      "error_rate": 0.0005555555555555556,
+      "duration_ms": 1800024,
+      "error_messages": [
+        "broadcasts=1800 clients=50 delivered=2950 expected=90000 dropped_clients=50"
+      ]
+    },
+    "on_exceed": "Dashboard operators see stale tick data — metrics lag behind real-time system state by \u003e100ms",
+    "answered_questions": {
+      "what_was_tested": "50 real WebSocket clients connected to real Hub via real api.Server /ws for 30m0s",
+      "why_this_threshold": "p99\u003c100ms: hub uses non-blocking send with drop-oldest; delivery at p99 tests that the happy path is fast",
+      "what_happens_if_it_fails": "Dashboard shows metrics that are multiple seconds behind reality — operators make decisions on stale data",
+      "how_load_was_generated": "1 broadcaster goroutine at 1Hz, 50 concurrent reader goroutines",
+      "how_metrics_were_measured": "Latency = time.Since(payload.Timestamp) measured in each reader goroutine; JSON-parsed from raw WebSocket frame",
+      "worst_case_description": "p99=50.34ms p100=93.45ms dropped=50"
+    },
+    "run_at": "2026-04-12T06:45:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-WS-001",
+    "layer": 5,
+    "name": "WebSocket hub 50 clients, 30m0s soak, 1Hz broadcast",
+    "aim": "50 clients for 30m0s receiving 1Hz broadcasts: p95\u003c50ms p99\u003c100ms, zero dropped clients",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "streaming.NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).HandleUpgrade (via /ws route)"
+    ],
+    "threshold": {
+      "metric": "p99_delivery_ms",
+      "operator": "\u003c",
+      "value": 100,
+      "unit": "ms",
+      "rationale": "Dashboard must receive tick payloads within 100ms p99 to show near-real-time metrics"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 3.615,
+      "actual_unit": "p99_delivery_ms",
+      "sample_count": 18650,
+      "percentiles": {
+        "p50_ms": 1.151,
+        "p95_ms": 2.615,
+        "p99_ms": 3.615,
+        "p100_ms": 6.408
+      },
+      "error_count": 50,
+      "error_rate": 0.0020491803278688526,
+      "duration_ms": 1800031,
+      "error_messages": [
+        "broadcasts=488 clients=50 delivered=18650 expected=24400 dropped_clients=50"
+      ]
+    },
+    "on_exceed": "Dashboard operators see stale tick data — metrics lag behind real-time system state by \u003e100ms",
+    "answered_questions": {
+      "what_was_tested": "50 real WebSocket clients connected to real Hub via real api.Server /ws for 30m0s",
+      "why_this_threshold": "p99\u003c100ms: hub uses non-blocking send with drop-oldest; delivery at p99 tests that the happy path is fast",
+      "what_happens_if_it_fails": "Dashboard shows metrics that are multiple seconds behind reality — operators make decisions on stale data",
+      "how_load_was_generated": "1 broadcaster goroutine at 1Hz, 50 concurrent reader goroutines",
+      "how_metrics_were_measured": "Latency = time.Since(payload.Timestamp) measured in each reader goroutine; JSON-parsed from raw WebSocket frame",
+      "worst_case_description": "p99=3.62ms p100=6.41ms dropped=50"
+    },
+    "run_at": "2026-04-12T08:04:11Z",
+    "go_version": "go1.26.0"
   }
 ]

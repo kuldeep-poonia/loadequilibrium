@@ -141,15 +141,22 @@ func TestL6_NET_001_BackendLatencyCoalescingNonBlocking(t *testing.T) {
 
 	var recMs int64
 	var recOK bool
-	select {
-	case res := <-act.Feedback():
-		if res.TickIndex == 999 {
-			recMs = time.Since(rStart).Milliseconds()
-			recOK = res.Success
+	deadline := time.After(10 * time.Second)
+loop:
+	for {
+		select {
+		case res := <-act.Feedback():
+			if res.TickIndex == 999 {
+				recMs = time.Since(rStart).Milliseconds()
+				recOK = res.Success
+				goto loop_done
+			}
+		case <-deadline:
+			t.Log("L6-NET-001: recovery timeout or wrong index")
+			break loop
 		}
-	case <-time.After(10 * time.Second):
-		t.Log("L6-NET-001: recovery timeout")
 	}
+loop_done:
 
 	passed := maxDispMs < 5.0 && ratio >= minCoalesce && recOK && recMs < 100
 

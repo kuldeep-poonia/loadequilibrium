@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
@@ -17,6 +18,7 @@ type CoalescingActuator struct {
 	notify   chan struct{}
 	feedback chan ActuationResult
 	done     chan struct{}
+	closed   uint32
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -42,11 +44,16 @@ func NewCoalescingActuator(feedbackBuf int, backend Backend) *CoalescingActuator
 	return a
 }
 
+// Dispatch updates the map and pokes the worker
 func (a *CoalescingActuator) Dispatch(tickIndex uint64, dirs map[string]optimisation.ControlDirective) {
 	a.mu.Lock()
+	if atomic.LoadUint32(&a.closed) == 1 {
+		a.mu.Unlock()
+		return
+	}
+
 	for id, d := range dirs {
 		if d.Active {
-			// Deep copy to immutable snapshot, overwriting any pending stale directive for this service.
 			a.pending[id] = DirectiveSnapshot{
 				TickIndex:         tickIndex,
 				ServiceID:         id,
@@ -60,7 +67,7 @@ func (a *CoalescingActuator) Dispatch(tickIndex uint64, dirs map[string]optimisa
 	}
 	a.mu.Unlock()
 
-	// Non-blocking wake-up signal to the worker
+	// Non-blocking poke to the worker
 	select {
 	case a.notify <- struct{}{}:
 	default:
@@ -71,17 +78,15 @@ func (a *CoalescingActuator) Feedback() <-chan ActuationResult {
 	return a.feedback
 }
 
+// loop handles the signals and the final drain
 func (a *CoalescingActuator) loop() {
 	defer a.wg.Done()
-	for {
-		select {
-		case <-a.ctx.Done():
-			a.drain()
-			return
-		case <-a.notify:
-			a.processPending()
-		}
+	// Using 'range' on a channel is the cleanest way to drain
+	for range a.notify {
+		a.processPending()
 	}
+	// FINAL DRAIN: One last check after the channel is closed
+	a.processPending()
 }
 
 func (a *CoalescingActuator) processPending() {
@@ -90,37 +95,36 @@ func (a *CoalescingActuator) processPending() {
 		a.mu.Unlock()
 		return
 	}
-	batch := make([]DirectiveSnapshot, 0, len(a.pending))
-	for id, snap := range a.pending {
-		batch = append(batch, snap)
-		delete(a.pending, id)
-	}
+	// Move the pending work to a local variable and clear the map
+	work := a.pending
+	a.pending = make(map[string]DirectiveSnapshot)
 	a.mu.Unlock()
 
-	for _, snap := range batch {
+	// CRITICAL: Execute synchronously. 
+	// Do NOT use 'go a.backend.Execute'. 
+	// If this blocks, the loop blocks, and Close() will wait 
+	// until this is completely finished.
+	for _, snapshot := range work {
 		start := time.Now()
-		execCtx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
-		err := a.backend.Execute(execCtx, snap)
-		cancel()
+		err := a.backend.Execute(a.ctx, snapshot)
 		latency := time.Since(start)
 		success := err == nil
 		if !success {
 			log.Printf("[actuator] FAILED id=%s svc=%s err=%v tick=%d",
-				snap.DirectiveID, snap.ServiceID, err, snap.TickIndex)
+				snapshot.DirectiveID, snapshot.ServiceID, err, snapshot.TickIndex)
 		}
 
 		res := ActuationResult{
-			TickIndex:   snap.TickIndex,
-			ServiceID:   snap.ServiceID,
-			DirectiveID: snap.DirectiveID,
+			TickIndex:   snapshot.TickIndex,
+			ServiceID:   snapshot.ServiceID,
+			DirectiveID: snapshot.DirectiveID,
 			Success:     success,
 			Latency:     latency,
 			Error:       err,
 		}
-		select {
-		case a.feedback <- res:
-		default:
-		}
+		// Always block to send feedback - this channel is created with sufficient buffer
+		// Dropping results violates the actuator contract that all executions are reported
+		a.feedback <- res
 	}
 }
 
@@ -128,18 +132,32 @@ func (a *CoalescingActuator) drain() {
 	a.processPending()
 }
 
+// Close stops the actuator and waits for the worker to drain pending tasks.
 func (a *CoalescingActuator) Close(ctx context.Context) error {
-	a.cancel()
-	c := make(chan struct{})
+	// Ensure we only close once
+	if !atomic.CompareAndSwapUint32(&a.closed, 0, 1) {
+		return nil
+	}
+
+	// 1. Signal the worker loop to terminate via the channel
+	close(a.notify)
+
+	// 2. Create a channel to track the WaitGroup completion
+	done := make(chan struct{})
 	go func() {
 		a.wg.Wait()
-		close(c)
+		close(done)
 	}()
 
+	// 3. Wait for the worker to finish OR the context to timeout
 	select {
-	case <-c:
+	case <-done:
+		// Clean exit: all pending tasks were processed
+		a.cancel()
 		return nil
 	case <-ctx.Done():
+		// Timeout: the test gave up waiting for the drain
+		a.cancel() 
 		return ctx.Err()
 	}
 }

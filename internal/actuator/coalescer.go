@@ -13,16 +13,18 @@ import (
 
 // CoalescingActuator implements a map-coalesced dispatcher with feedback
 type CoalescingActuator struct {
-	mu       sync.Mutex
-	pending  map[string]DirectiveSnapshot
-	notify   chan struct{}
-	feedback chan ActuationResult
-	done     chan struct{}
-	closed   uint32
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
-	backend  Backend
+	mu            sync.Mutex
+	pending       map[string]DirectiveSnapshot
+	notify        chan struct{}
+	feedback      chan ActuationResult
+	done          chan struct{}
+	closed        uint32
+	debugLogging  uint32
+	failureCount  uint64
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
+	backend       Backend
 }
 
 func NewCoalescingActuator(feedbackBuf int, backend Backend) *CoalescingActuator {
@@ -46,7 +48,15 @@ func NewCoalescingActuator(feedbackBuf int, backend Backend) *CoalescingActuator
 
 // Dispatch updates the map and pokes the worker
 func (a *CoalescingActuator) Dispatch(tickIndex uint64, dirs map[string]optimisation.ControlDirective) {
+	// ✅ FAST PATH: atomic check only - no mutex in hot path
+	if atomic.LoadUint32(&a.closed) == 1 {
+		return
+	}
+
 	a.mu.Lock()
+
+	// ✅ DOUBLE CHECK AFTER ACQUIRING LOCK
+	// Handles race where Close() executed between atomic check and mutex acquire
 	if atomic.LoadUint32(&a.closed) == 1 {
 		a.mu.Unlock()
 		return
@@ -65,13 +75,15 @@ func (a *CoalescingActuator) Dispatch(tickIndex uint64, dirs map[string]optimisa
 			}
 		}
 	}
-	a.mu.Unlock()
 
-	// Non-blocking poke to the worker
+	// ✅ PERFORM SEND WHILE STILL HOLDING MUTEX
+	// This guarantees atomicity between closed check and send
 	select {
 	case a.notify <- struct{}{}:
 	default:
 	}
+
+	a.mu.Unlock()
 }
 
 func (a *CoalescingActuator) Feedback() <-chan ActuationResult {
@@ -112,8 +124,13 @@ func (a *CoalescingActuator) processPending() {
 		latency := time.Since(start)
 		success := err == nil
 		if !success {
-			log.Printf("[actuator] FAILED id=%s svc=%s err=%v tick=%d",
-				snapshot.DirectiveID, snapshot.ServiceID, err, snapshot.TickIndex)
+			atomic.AddUint64(&a.failureCount, 1)
+
+			// Verbose debug logging only when explicitly enabled
+			if atomic.LoadUint32(&a.debugLogging) == 1 {
+				log.Printf("[actuator] FAILED id=%s svc=%s err=%v tick=%d",
+					snapshot.DirectiveID, snapshot.ServiceID, err, snapshot.TickIndex)
+			}
 		}
 
 		res := ActuationResult{
@@ -134,14 +151,36 @@ func (a *CoalescingActuator) drain() {
 	a.processPending()
 }
 
+// EnableDebugLogging turns on verbose failure logging. Default OFF.
+func (a *CoalescingActuator) EnableDebugLogging(enable bool) {
+	if enable {
+		atomic.StoreUint32(&a.debugLogging, 1)
+	} else {
+		atomic.StoreUint32(&a.debugLogging, 0)
+	}
+}
+
+// FailureCount returns total actuator failure count.
+func (a *CoalescingActuator) FailureCount() uint64 {
+	return atomic.LoadUint64(&a.failureCount)
+}
+
 // Close stops the actuator and waits for the worker to drain pending tasks.
 func (a *CoalescingActuator) Close(ctx context.Context) error {
-	// Ensure we only close once
+	// ✅ STANDARD FAST RACE-FREE SHUTDOWN PATTERN
+	// 1. Atomic first - exit fast if already closed
 	if !atomic.CompareAndSwapUint32(&a.closed, 0, 1) {
 		return nil
 	}
 
-	// 1. Signal the worker loop to terminate via the channel
+	// ✅ SAFETY POINT: NO NEW DISPATCH() CALLS WILL NOW ENTER CRITICAL SECTION
+	// All Dispatch() calls either already passed the atomic check or will see closed == 1
+
+	// ✅ 2. Take mutex to ensure all in-flight Dispatch() have exited critical section
+	a.mu.Lock()
+	a.mu.Unlock()
+
+	// ✅ ALL SENDERS ARE NOW GONE. 100% SAFE TO CLOSE CHANNEL.
 	close(a.notify)
 
 	// 2. Create a channel to track the WaitGroup completion

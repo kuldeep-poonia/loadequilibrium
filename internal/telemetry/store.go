@@ -83,32 +83,27 @@ func (s *Store) Ingest(p *MetricPoint) {
 		p.Timestamp = time.Now()
 	}
 
-	// Copy timestamp value BEFORE taking any locks
-	ts := p.Timestamp
-
+	// Fast path: RLock just to find the buffer
 	s.mu.RLock()
 	buf, ok := s.buffers[p.ServiceID]
 	s.mu.RUnlock()
 
 	if !ok {
 		s.mu.Lock()
+		// Double-check after acquiring write lock
 		if buf, ok = s.buffers[p.ServiceID]; !ok {
 			if len(s.buffers) >= s.maxSvc {
 				s.mu.Unlock()
-				return // cardinality cap — drop new service
+				return
 			}
 			buf = NewRingBuffer(s.bufCap)
 			s.buffers[p.ServiceID] = buf
 		}
-		s.lastSeen[p.ServiceID] = ts
-		s.mu.Unlock()
-	} else {
-		// Update lastSeen WITHOUT separate lock - use buf mutex which is already held during Push
-		buf.Push(p)
-		s.mu.Lock()
-		s.lastSeen[p.ServiceID] = ts
 		s.mu.Unlock()
 	}
+
+	// Push uses the RingBuffer's internal lock, not the Store's lock
+	buf.Push(p)
 }
 
 // Prune removes services not seen within staleAge. Call from tick loop.
@@ -142,24 +137,24 @@ func (s *Store) ServiceIDs() []string {
 func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *ServiceWindow {
 	s.mu.RLock()
 	buf, ok := s.buffers[serviceID]
+	s.mu.RUnlock()
 	if !ok {
-		s.mu.RUnlock()
 		return nil
 	}
-	// Hold Store RLock while we take snapshot to eliminate nested lock convoy
-	points := buf.Snapshot()
-	s.mu.RUnlock()
+
+	last := buf.Last()
+	if last.Timestamp.IsZero() {
+		return nil
+	}
+	if freshnessCutoff > 0 && time.Since(last.Timestamp) > freshnessCutoff {
+		return nil
+	}
+
+	points := buf.Snapshot(n)
 	if len(points) == 0 {
 		return nil
 	}
-	// Freshness check.
-	newest := points[len(points)-1]
-	if freshnessCutoff > 0 && time.Since(newest.Timestamp) > freshnessCutoff {
-		return nil
-	}
-	if n > 0 && len(points) > n {
-		points = points[len(points)-n:]
-	}
+
 	return computeWindow(serviceID, points)
 }
 
@@ -170,17 +165,19 @@ func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*Ser
 
 	out := make(map[string]*ServiceWindow, len(s.buffers))
 	for id, buf := range s.buffers {
-		points := buf.Snapshot()
+		last := buf.Last()
+		if last.Timestamp.IsZero() {
+			continue
+		}
+		if freshnessCutoff > 0 && time.Since(last.Timestamp) > freshnessCutoff {
+			continue
+		}
+
+		points := buf.Snapshot(n)
 		if len(points) == 0 {
 			continue
 		}
-		newest := points[len(points)-1]
-		if freshnessCutoff > 0 && time.Since(newest.Timestamp) > freshnessCutoff {
-			continue
-		}
-		if n > 0 && len(points) > n {
-			points = points[len(points)-n:]
-		}
+
 		w := computeWindow(id, points)
 		if w != nil {
 			out[id] = w
@@ -192,7 +189,7 @@ func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*Ser
 func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 	n := float64(len(pts))
 	var sumReq, sumErr, sumLat, maxLat, sumCPU, sumMem, sumQueue, sumConns float64
-	edgeSums := make(map[string]*edgeAccum)
+	var edgeSums map[string]*edgeAccum
 
 	for _, p := range pts {
 		sumReq += p.RequestRate
@@ -206,6 +203,9 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		sumQueue += float64(p.QueueDepth)
 		sumConns += float64(p.ActiveConns)
 		for _, uc := range p.UpstreamCalls {
+			if edgeSums == nil {
+				edgeSums = make(map[string]*edgeAccum)
+			}
 			acc, exists := edgeSums[uc.TargetServiceID]
 			if !exists {
 				acc = &edgeAccum{target: uc.TargetServiceID}

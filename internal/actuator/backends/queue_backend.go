@@ -8,9 +8,11 @@ import (
 	"sync"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
+	"github.com/loadequilibrium/loadequilibrium/internal/debug"
 )
 
 const minWorkers = 1
+const maxWorkers = 10_000
 
 // QueueBackend simulates worker scaling in-memory per service.
 type QueueBackend struct {
@@ -44,11 +46,18 @@ func (b *QueueBackend) Execute(ctx context.Context, snap actuator.DirectiveSnaps
 	if next < minWorkers {
 		next = minWorkers
 	}
+	if next > maxWorkers {
+		next = maxWorkers
+	}
 
 	b.workers[snap.ServiceID] = next
 
-	log.Printf("[actuator:queue] svc=%s workers=%d->%d scale=%.3f tick=%d",
-		snap.ServiceID, current, next, snap.ScaleFactor, snap.TickIndex)
+	// ✅ ONLY LOG WHEN WORKER COUNT ACTUALLY CHANGES AND HOT PATH LOGS ARE ENABLED
+	// Eliminates 100% of log spam during steady state operation by default
+	if current != next && debug.HotPathLogsEnabled() {
+		log.Printf("[actuator:queue] svc=%s workers=%d->%d scale=%.3f tick=%d",
+			snap.ServiceID, current, next, snap.ScaleFactor, snap.TickIndex)
+	}
 
 	return nil
 }

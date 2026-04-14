@@ -26,16 +26,38 @@ func NewRingBuffer(capacity int) *RingBuffer {
 // Push appends a MetricPoint, evicting the oldest if the buffer is full.
 func (r *RingBuffer) Push(p *MetricPoint) {
 	r.mu.Lock()
-	r.buf[r.head] = *p
+	defer r.mu.Unlock()
+
+	dst := &r.buf[r.head]
+
+	// 1. CRITICAL: Release the previous slice reference so GC can claim it
+	dst.UpstreamCalls = nil 
+
+	// 2. Copy scalars
+	dst.ServiceID = p.ServiceID
+	dst.Timestamp = p.Timestamp
+	dst.RequestRate = p.RequestRate
+	dst.ErrorRate = p.ErrorRate
+	dst.Latency = p.Latency
+	dst.ActiveConns = p.ActiveConns
+	dst.QueueDepth = p.QueueDepth
+	dst.CPUUsage = p.CPUUsage
+	dst.MemUsage = p.MemUsage
+
+	// 3. Deep copy the new slice
+	if len(p.UpstreamCalls) > 0 {
+		dst.UpstreamCalls = make([]UpstreamCall, len(p.UpstreamCalls))
+		copy(dst.UpstreamCalls, p.UpstreamCalls)
+	}
+
 	r.head = (r.head + 1) % r.cap
 	if r.size < r.cap {
 		r.size++
 	}
-	r.mu.Unlock()
 }
 
 
-func (r *RingBuffer) Snapshot() []MetricPoint {
+func (r *RingBuffer) Snapshot(n ...int) []MetricPoint {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -43,9 +65,14 @@ func (r *RingBuffer) Snapshot() []MetricPoint {
 		return nil
 	}
 
-	out := make([]MetricPoint, r.size)
-	start := (r.head - r.size + r.cap) % r.cap
-	for i := 0; i < r.size; i++ {
+	count := r.size
+	if len(n) > 0 && n[0] > 0 && n[0] < count {
+		count = n[0]
+	}
+
+	out := make([]MetricPoint, count)
+	start := (r.head - count + r.cap) % r.cap
+	for i := 0; i < count; i++ {
 		out[i] = r.buf[(start+i)%r.cap]
 	}
 	return out

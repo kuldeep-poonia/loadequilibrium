@@ -106,7 +106,9 @@ func (a *CoalescingActuator) processPending() {
 	// until this is completely finished.
 	for _, snapshot := range work {
 		start := time.Now()
-		err := a.backend.Execute(a.ctx, snapshot)
+		// Use separate context for execution - never cancel pending work already in flight
+		execCtx := context.Background()
+		err := a.backend.Execute(execCtx, snapshot)
 		latency := time.Since(start)
 		success := err == nil
 		if !success {

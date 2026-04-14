@@ -10220,5 +10220,205 @@
     },
     "run_at": "2026-04-13T03:56:19Z",
     "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L6-ACT-001",
+    "layer": 6,
+    "name": "CoalescingActuator: 51 dispatches for same service → ≤2 executions",
+    "aim": "51 rapid dispatches for svcID=\"svc-coalesce\" must result in ≤2 actual backend executions (map coalescing)",
+    "packages_involved": [
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "functions_tested": [
+      "actuator.NewCoalescingActuator",
+      "(*CoalescingActuator).Dispatch (coalescing by serviceID)",
+      "backends.NewQueueBackend",
+      "(*QueueBackend).WorkerCount"
+    ],
+    "threshold": {
+      "metric": "backend_executions",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "count",
+      "rationale": "pending map keyed by serviceID must overwrite — N dispatches = 1 execution under rapid fire"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "backend_executions",
+      "fault_injected": "51 rapid dispatches for same svcID with no sleep",
+      "time_to_detect_fault_ms": 0,
+      "time_to_recover_ms": 0,
+      "commands_sent": 51,
+      "commands_succeeded": 1,
+      "commands_failed": 0,
+      "commands_coalesced_not_sent": 50,
+      "panics": 0,
+      "duration_ms": 201,
+      "error_messages": [
+        "dispatches=51 executions=1 workers=3"
+      ]
+    },
+    "on_exceed": "CoalescingActuator sends every directive to backend — backend overwhelmed under burst dispatch",
+    "answered_questions": {
+      "what_fault_was_injected": "51 rapid dispatches for same serviceID with no yield between them",
+      "why_this_threshold": "pending map keyed by serviceID must overwrite — this is the stated contract of CoalescingActuator",
+      "what_happens_if_it_fails": "Backend overwhelmed with 50+ requests per control tick → backend latency spikes → actuator timeout cascade",
+      "how_fault_was_injected": "Rapid-fire dispatches with no sleep; pending map should accumulate into one entry",
+      "how_recovery_was_verified": "N/A — coalescing property test",
+      "what_degraded_mode_means": "Only latest ScaleFactor is executed; intermediate values discarded (by design)"
+    },
+    "run_at": "2026-04-13T11:08:35Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L6-ACT-002",
+    "layer": 6,
+    "name": "CoalescingActuator.Close() drains all pending before returning",
+    "aim": "Dispatch 5 services then Close — all 5 must be executed before Close returns",
+    "packages_involved": [
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "functions_tested": [
+      "(*CoalescingActuator).Close",
+      "(*CoalescingActuator).drain"
+    ],
+    "threshold": {
+      "metric": "services_executed_before_close",
+      "operator": "==",
+      "value": 5,
+      "unit": "count",
+      "rationale": "Pending directives must not be lost on graceful shutdown"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 5,
+      "actual_unit": "services_executed",
+      "fault_injected": "Dispatch then immediate Close()",
+      "time_to_detect_fault_ms": 0,
+      "time_to_recover_ms": 0,
+      "commands_sent": 5,
+      "commands_succeeded": 5,
+      "commands_failed": 0,
+      "commands_coalesced_not_sent": 0,
+      "panics": 0,
+      "duration_ms": 0,
+      "error_messages": [
+        "close_err=\u003cnil\u003e executed=5/5"
+      ]
+    },
+    "on_exceed": "Pending directives silently lost on shutdown — last control action before restart never applied",
+    "answered_questions": {
+      "what_fault_was_injected": "Dispatch then immediately call Close(ctx)",
+      "why_this_threshold": "All pending must be flushed — graceful shutdown contract",
+      "what_happens_if_it_fails": "On Kubernetes restart, last directive not applied — system state doesn't match controller's model",
+      "how_fault_was_injected": "Immediate Close() after single Dispatch — races with background execution loop",
+      "how_recovery_was_verified": "QueueBackend.WorkerCount verifies each service's directive was actually executed",
+      "what_degraded_mode_means": "N/A — this is the normal shutdown path"
+    },
+    "run_at": "2026-04-13T11:08:35Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L6-ACT-001",
+    "layer": 6,
+    "name": "CoalescingActuator: 51 dispatches for same service → ≤2 executions",
+    "aim": "51 rapid dispatches for svcID=\"svc-coalesce\" must result in ≤2 actual backend executions (map coalescing)",
+    "packages_involved": [
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "functions_tested": [
+      "actuator.NewCoalescingActuator",
+      "(*CoalescingActuator).Dispatch (coalescing by serviceID)",
+      "backends.NewQueueBackend",
+      "(*QueueBackend).WorkerCount"
+    ],
+    "threshold": {
+      "metric": "backend_executions",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "count",
+      "rationale": "pending map keyed by serviceID must overwrite — N dispatches = 1 execution under rapid fire"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "backend_executions",
+      "fault_injected": "51 rapid dispatches for same svcID with no sleep",
+      "time_to_detect_fault_ms": 0,
+      "time_to_recover_ms": 0,
+      "commands_sent": 51,
+      "commands_succeeded": 1,
+      "commands_failed": 0,
+      "commands_coalesced_not_sent": 50,
+      "panics": 0,
+      "duration_ms": 201,
+      "error_messages": [
+        "dispatches=51 executions=1 workers=3"
+      ]
+    },
+    "on_exceed": "CoalescingActuator sends every directive to backend — backend overwhelmed under burst dispatch",
+    "answered_questions": {
+      "what_fault_was_injected": "51 rapid dispatches for same serviceID with no yield between them",
+      "why_this_threshold": "pending map keyed by serviceID must overwrite — this is the stated contract of CoalescingActuator",
+      "what_happens_if_it_fails": "Backend overwhelmed with 50+ requests per control tick → backend latency spikes → actuator timeout cascade",
+      "how_fault_was_injected": "Rapid-fire dispatches with no sleep; pending map should accumulate into one entry",
+      "how_recovery_was_verified": "N/A — coalescing property test",
+      "what_degraded_mode_means": "Only latest ScaleFactor is executed; intermediate values discarded (by design)"
+    },
+    "run_at": "2026-04-13T11:15:10Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L6-ACT-002",
+    "layer": 6,
+    "name": "CoalescingActuator.Close() drains all pending before returning",
+    "aim": "Dispatch 5 services then Close — all 5 must be executed before Close returns",
+    "packages_involved": [
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "functions_tested": [
+      "(*CoalescingActuator).Close",
+      "(*CoalescingActuator).drain"
+    ],
+    "threshold": {
+      "metric": "services_executed_before_close",
+      "operator": "==",
+      "value": 5,
+      "unit": "count",
+      "rationale": "Pending directives must not be lost on graceful shutdown"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 5,
+      "actual_unit": "services_executed",
+      "fault_injected": "Dispatch then immediate Close()",
+      "time_to_detect_fault_ms": 0,
+      "time_to_recover_ms": 0,
+      "commands_sent": 5,
+      "commands_succeeded": 5,
+      "commands_failed": 0,
+      "commands_coalesced_not_sent": 0,
+      "panics": 0,
+      "duration_ms": 0,
+      "error_messages": [
+        "close_err=\u003cnil\u003e executed=5/5"
+      ]
+    },
+    "on_exceed": "Pending directives silently lost on shutdown — last control action before restart never applied",
+    "answered_questions": {
+      "what_fault_was_injected": "Dispatch then immediately call Close(ctx)",
+      "why_this_threshold": "All pending must be flushed — graceful shutdown contract",
+      "what_happens_if_it_fails": "On Kubernetes restart, last directive not applied — system state doesn't match controller's model",
+      "how_fault_was_injected": "Immediate Close() after single Dispatch — races with background execution loop",
+      "how_recovery_was_verified": "QueueBackend.WorkerCount verifies each service's directive was actually executed",
+      "what_degraded_mode_means": "N/A — this is the normal shutdown path"
+    },
+    "run_at": "2026-04-13T11:15:10Z",
+    "go_version": "go1.26.0"
   }
 ]

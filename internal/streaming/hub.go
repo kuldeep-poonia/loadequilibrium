@@ -33,8 +33,8 @@ type Hub struct {
 	clients         map[*client]struct{}
 	seqNo           atomic.Uint64
 	maxClients      int
-	lastPayload     *TickPayload // Cache latest payload for REST endpoints
-	lastPayloadJSON []byte       // Cache serialized payload for fast REST/WS bootstrap
+	lastPayload     atomic.Pointer[TickPayload] // Atomic retained latest payload
+	lastPayloadJSON atomic.Pointer[[]byte]      // Atomic retained serialized payload
 }
 
 func NewHub() *Hub {
@@ -404,15 +404,20 @@ func (h *Hub) Broadcast(p *TickPayload) {
 		fallbackData, err2 := json.Marshal(minPayload)
 		if err2 != nil {
 			log.Printf("[hub] fallback marshal failed: %v", err2)
+			// ✅ CRITICAL: Even if marshal fails, ALWAYS store the sequence number
+			h.lastPayload.Store(p)
 			return
 		}
 		data = fallbackData // Use fallback data instead
 		log.Printf("[hub] broadcast with minimal fallback payload (%d bytes)", len(fallbackData))
 	}
 
+	// ✅ CRITICAL: Always store latest payload and sequence BEFORE client fanout
+	// This guarantees sequence always advances regardless of connected clients
+	h.lastPayload.Store(p)
+	h.lastPayloadJSON.Store(&data)
+
 	h.mu.Lock()
-	h.lastPayload = p // Cache for REST endpoints
-	h.lastPayloadJSON = data
 	cs := make([]*client, 0, len(h.clients))
 	for c := range h.clients {
 		cs = append(cs, c)
@@ -433,18 +438,46 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	}
 }
 
+// Latest returns the most recently broadcast TickPayload
+// Safe for concurrent access from any goroutine at any time
+func (h *Hub) Latest() *TickPayload {
+	return h.lastPayload.Load()
+}
+
+// SetLastPayload atomically updates the cached latest payload without broadcasting
+// This is used for restart bootstrap to pre-load existing state before Run() starts
+func (h *Hub) SetLastPayload(p *TickPayload) {
+	if p == nil {
+		return
+	}
+
+	// Sanitize all values first - this is mandatory
+	sanitizePayload(p)
+
+	p.SequenceNo = h.seqNo.Load() // Keep existing sequence number, do NOT increment
+	p.Timestamp = time.Now()
+	p.Schema = SchemaVersion
+
+	// Update atomic caches atomically
+	h.lastPayload.Store(p)
+
+	// Pre-marshal JSON so REST endpoints work immediately
+	if data, err := json.Marshal(p); err == nil {
+		h.lastPayloadJSON.Store(&data)
+	}
+}
+
 // GetLastPayload returns the cached TickPayload for REST dashboard queries
 func (h *Hub) GetLastPayload() *TickPayload {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.lastPayload
+	return h.lastPayload.Load()
 }
 
 // GetLastPayloadJSON returns the cached JSON representation of TickPayload for REST endpoint
 func (h *Hub) GetLastPayloadJSON() []byte {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.lastPayloadJSON
+	if ptr := h.lastPayloadJSON.Load(); ptr != nil {
+		return *ptr
+	}
+	return nil
 }
 
 /* ================= UPGRADE ================= */
@@ -453,8 +486,9 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.RLock()
 	count := len(h.clients)
-	lastJSON := h.lastPayloadJSON
 	h.mu.RUnlock()
+
+	lastJSON := h.GetLastPayloadJSON()
 
 	if count >= h.maxClients {
 		http.Error(w, "hub at capacity", http.StatusServiceUnavailable)

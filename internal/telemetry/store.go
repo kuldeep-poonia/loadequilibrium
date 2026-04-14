@@ -26,6 +26,11 @@ func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
 	}
 }
 
+// StaleAge returns the prune threshold configured for this Store.
+func (s *Store) StaleAge() time.Duration {
+	return s.staleAge
+}
+
 func sanitizePoint(p *MetricPoint) bool {
 	if p.ServiceID == "" {
 		return false

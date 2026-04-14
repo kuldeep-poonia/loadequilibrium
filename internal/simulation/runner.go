@@ -653,8 +653,12 @@ func (r *Runner) run(
 	cascadeTriggered := false
 	eventCount := 0
 
+	var staticNfDebug = os.Getenv("NETWORK_FIELD_DEBUG") == "on"
+
 	for {
-		log.Printf("[NF_DEBUG] tick loop entered")
+		if staticNfDebug && eventCount%50 == 0 {
+			log.Printf("[NF_DEBUG] tick loop entered")
+		}
 		if time.Now().After(deadline) {
 			break
 		}
@@ -692,12 +696,14 @@ func (r *Runner) run(
 
 			if r.nf != nil {
 				r.nf.Step()
-				log.Printf(
-					"[network_field] time=%d mass=%f tv=%f",
-					int(e.Time),
-					r.nf.TotalMass(),
-					r.nf.TotalVariation(),
-				)
+				if staticNfDebug && eventCount%50 == 0 {
+					log.Printf(
+						"[network_field] time=%d mass=%f tv=%f",
+						int(e.Time),
+						r.nf.TotalMass(),
+						r.nf.TotalVariation(),
+					)
+				}
 			}
 		}
 

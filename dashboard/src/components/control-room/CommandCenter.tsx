@@ -2,6 +2,16 @@
 
 import { motion } from 'framer-motion';
 import {
+  AreaChart,
+  Area,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer
+} from 'recharts';
+import {
   Activity,
   AlertTriangle,
   Bot,
@@ -432,48 +442,51 @@ export default function CommandCenter() {
       <div className="grid min-h-0 flex-1 gap-2.5 xl:grid-cols-[200px_minmax(0,1fr)_300px] 2xl:grid-cols-[216px_minmax(0,1fr)_320px]">
         <motion.aside initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.28, delay: 0.04 }} className="min-h-0 min-w-0">
           <div className="flex h-full min-h-0 flex-col gap-3">
-            <TacticalBox title="SIM CONTROL" badge={tick?.safety_mode ? 'HOLD' : 'HOT'} status={tick?.safety_mode ? 'critical' : 'nominal'} scan={false}>
-              <div className="flex min-h-0 min-w-0 flex-col gap-3">
-                <div className="grid min-w-0 gap-1.5">
-                  <ActionButton icon={Play} label="Start" detail="simulation/control:start" tone="cyan" onClick={() => { void runDomain('simulation/control', { action: 'start' }, 'simulation start'); }} />
-                  <ActionButton icon={RotateCcw} label="Reset" detail="simulation/control:reset" tone="amber" onClick={() => { void runDomain('simulation/control', { action: 'reset' }, 'simulation reset'); }} />
-                  <ActionButton icon={Activity} label="Replay" detail="control/replay-burst" tone="amber" onClick={() => { void triggerAction('replay-burst'); }} />
-                  <ActionButton icon={AlertTriangle} label="Chaos" detail="control/chaos-run" tone="red" onClick={() => { void triggerAction('chaos-run'); }} />
-                  <ActionButton icon={Bot} label="Rollout" detail="intelligence/rollout" tone="amber" onClick={() => { void runDomain('intelligence/rollout', undefined, 'rl rollout'); }} />
-                  <ActionButton icon={Zap} label="Toggle" detail="control/toggle" tone="cyan" onClick={() => { void triggerAction('toggle'); }} />
+            <TacticalBox title="SYSTEM TELEMETRY" badge="ONLINE" status="nominal" scan={false}>
+              <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
+                <div className="industrial-inset flex flex-col rounded-[16px] p-2.5 flex-1 min-h-[140px]">
+                  <div className="font-hud text-[8px] uppercase tracking-[0.2em] text-cyan-500 mb-1">Throughput (Req/s)</div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={history} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorTp" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#00f2ff" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#00f2ff" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <Area type="monotone" dataKey="throughput" stroke="#00f2ff" fillOpacity={1} fill="url(#colorTp)" isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
 
-                <div className="industrial-inset rounded-[16px] p-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-hud text-[8px] uppercase tracking-[0.2em] text-slate-500">policy presets</div>
-                      <div className="mt-1 break-words font-data text-[10px] leading-4 text-slate-500">existing policy/update backend route</div>
-                    </div>
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-cyan-300/80" />
-                  </div>
-                  <div className="mt-2.5 grid grid-cols-1 gap-1.5">
-                    {[
-                      { value: 'aggressive', label: 'AGGR' },
-                      { value: 'balanced', label: 'BAL' },
-                      { value: 'conservative', label: 'CONS' },
-                      { value: 'defensive', label: 'DEF' },
-                    ].map((preset) => (
-                      <motion.button
-                        key={preset.value}
-                        type="button"
-                        onClick={() => {
-                          void runDomain('policy/update', { preset: preset.value }, `policy ${preset.value}`);
-                        }}
-                        title={preset.value}
-                        whileHover={{ y: -1.5, scale: 1.01 }}
-                        whileTap={{ y: 1, scale: 0.985 }}
-                        transition={interactionSpring}
-                        className="neo-control control-rail-button control-rail-feedback neo-control--cyan min-w-0 rounded-[12px] px-2 py-2 font-hud text-[7px] uppercase tracking-[0.16em] text-slate-300 hover:text-cyan-200"
-                      >
-                        <span className="block break-words">{preset.label}</span>
-                      </motion.button>
-                    ))}
-                  </div>
+                <div className="industrial-inset flex flex-col rounded-[16px] p-2.5 flex-1 min-h-[140px]">
+                  <div className="font-hud text-[8px] uppercase tracking-[0.2em] text-purple-500 mb-1">Queue Depth</div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={history} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorQ" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <Area type="monotone" dataKey="queueDepth" stroke="#a855f7" fillOpacity={1} fill="url(#colorQ)" isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="industrial-inset flex flex-col rounded-[16px] p-2.5 flex-1 min-h-[140px]">
+                  <div className="font-hud text-[8px] uppercase tracking-[0.2em] text-amber-500 mb-1">Active Workers</div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={history} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorWk" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <Area type="stepAfter" dataKey="workers" stroke="#f59e0b" fillOpacity={1} fill="url(#colorWk)" isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             </TacticalBox>
@@ -663,19 +676,7 @@ export default function CommandCenter() {
                     </div>
                   </div>
 
-                  <motion.button
-                    type="button"
-                    onClick={() => {
-                      void triggerAction('replay-burst');
-                    }}
-                    whileHover={{ y: -2, scale: 1.008 }}
-                    whileTap={{ y: 1.5, scale: 0.986 }}
-                    transition={interactionSpring}
-                    className={`neo-control control-rail-button control-rail-feedback neo-control--cyan mt-3 flex w-full min-w-0 items-center justify-center gap-3 rounded-[16px] px-3 py-3 font-hud text-[8px] uppercase tracking-[0.2em] text-cyan-200 ${simulationActive ? 'active-sim-glow' : ''}`}
-                  >
-                    <Sparkles className="h-4 w-4 shrink-0" />
-                    <span className="break-words">replay burst</span>
-                  </motion.button>
+
                 </div>
 
                 <div className="grid h-full min-h-0 min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_280px]">

@@ -24,40 +24,7 @@ import { clsx } from 'clsx';
 import { useTelemetryStore } from '@/store/useTelemetryStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 
-const SIDEBAR_GROUPS = [
-  {
-    name: 'MONITORING',
-    items: [
-      { label: 'COMMAND', short: 'CMD', href: '/', icon: <Radio className="h-4 w-4" /> },
-      { label: 'TELEMETRY', short: 'TEL', href: '/telemetry', icon: <BarChart3 className="h-4 w-4" /> },
-      { label: 'TOPOLOGY', short: 'TOP', href: '/topology', icon: <Network className="h-4 w-4" /> },
-      { label: 'CASCADE', short: 'CAS', href: '/cascade', icon: <Activity className="h-4 w-4" /> },
-    ],
-  },
-  {
-    name: 'INTELLIGENCE',
-    items: [
-      { label: 'AUTONOMY', short: 'AI', href: '/intelligence', icon: <Brain className="h-4 w-4" /> },
-      { label: 'ALERTS', short: 'ALT', href: '/alerts', icon: <AlertTriangle className="h-4 w-4" /> },
-    ],
-  },
-  {
-    name: 'SIMULATION',
-    items: [
-      { label: 'RUNTIME', short: 'RUN', href: '/runtime', icon: <Orbit className="h-4 w-4" /> },
-      { label: 'SANDBOX', short: 'BOX', href: '/sandbox', icon: <Layers className="h-4 w-4" /> },
-      { label: 'SIMULATION', short: 'SIM', href: '/simulation', icon: <Cpu className="h-4 w-4" /> },
-      { label: 'REPLAY', short: 'RPL', href: '/replay', icon: <Power className="h-4 w-4" /> },
-    ],
-  },
-  {
-    name: 'CONTROL',
-    items: [
-      { label: 'ACTUATOR', short: 'ACT', href: '/actuator', icon: <Drill className="h-4 w-4" /> },
-      { label: 'POLICY', short: 'POL', href: '/policy', icon: <ShieldCheck className="h-4 w-4" /> },
-    ],
-  },
-];
+
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -92,72 +59,45 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 px-0.5">
-        {SIDEBAR_GROUPS.map((group) => (
-          <div key={group.name} className="flex flex-col gap-1">
-            {group.items.map((item) => {
-              const isActive = pathname === item.href;
-              const isAlert = item.label === 'ALERTS' && activeAlerts > 0;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.label}
-                  className={clsx(
-                    'group relative flex flex-col items-center gap-1 overflow-hidden rounded-md px-1.5 py-2 transition-all duration-300',
-                    isActive ? 'bg-white/5' : 'hover:bg-white/[0.02]'
-                  )}
-                >
-                  {isActive && (
-                    <motion.div
-                      layoutId="sidebarActiveIndicator"
-                      className="absolute top-0 bottom-0 left-0 w-0.5 bg-cyan-400 shadow-[0_0_10px_#00f2ff]"
-                      initial={false}
-                      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                    />
-                  )}
-
-                  <div
-                    className={clsx(
-                      'shrink-0 transition-colors duration-300',
-                      isActive ? 'text-cyan-400' : isAlert ? 'animate-pulse text-amber-500' : 'text-slate-500 group-hover:text-cyan-400/70'
-                    )}
-                  >
-                    {item.icon}
-                  </div>
-
-                  <span
-                    className={clsx(
-                      'text-[6px] font-hud tracking-[0.12em] transition-colors duration-300',
-                      isActive ? 'font-bold text-cyan-50' : 'text-slate-500 group-hover:text-slate-300'
-                    )}
-                  >
-                    {item.short}
-                  </span>
-
-                  {isAlert && (
-                    <span className="absolute top-1.5 right-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[7px] font-hud text-amber-500">
-                      {activeAlerts}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 px-0.5">
+      <div className="flex flex-1 flex-col gap-3 px-0.5 mt-2">
         <Link
-          href="/settings"
-          title="SETTINGS"
-          className="group flex flex-col items-center gap-1 rounded-md px-1.5 py-2 text-slate-500 transition-all duration-300 hover:bg-white/[0.02] hover:text-cyan-400/70"
+          href="/"
+          title="COMMAND CENTER"
+          className={clsx(
+            'group relative flex flex-col items-center gap-1 overflow-hidden rounded-md px-1.5 py-2 transition-all duration-300',
+            pathname === '/' ? 'bg-white/5' : 'hover:bg-white/[0.02]'
+          )}
         >
-          <Settings className="h-4 w-4 flex-shrink-0" />
-          <span className="text-[6px] font-hud tracking-[0.12em]">CFG</span>
+          {pathname === '/' && (
+            <motion.div
+              layoutId="sidebarActiveIndicator"
+              className="absolute top-0 bottom-0 left-0 w-0.5 bg-cyan-400 shadow-[0_0_10px_#00f2ff]"
+              initial={false}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            />
+          )}
+
+          <div
+            className={clsx(
+              'shrink-0 transition-colors duration-300',
+              pathname === '/' ? 'text-cyan-400' : 'text-slate-500 group-hover:text-cyan-400/70'
+            )}
+          >
+            <Radio className="h-4 w-4" />
+          </div>
+
+          <span
+            className={clsx(
+              'text-[6px] font-hud tracking-[0.12em] transition-colors duration-300',
+              pathname === '/' ? 'font-bold text-cyan-50' : 'text-slate-500 group-hover:text-slate-300'
+            )}
+          >
+            CMD
+          </span>
         </Link>
       </div>
+
+
     </aside>
   );
 }

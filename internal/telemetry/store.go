@@ -121,6 +121,15 @@ func (s *Store) Prune(now time.Time) []string {
 	return pruned
 }
 
+// HasServices returns true if the store has any buffered services.
+// Zero allocation, O(1) — safe to call in hot paths (e.g. adaptInterval).
+func (s *Store) HasServices() bool {
+	s.mu.RLock()
+	n := len(s.buffers)
+	s.mu.RUnlock()
+	return n > 0
+}
+
 func (s *Store) ServiceIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

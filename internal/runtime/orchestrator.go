@@ -12,6 +12,7 @@ import (
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
+	"github.com/loadequilibrium/loadequilibrium/internal/debug"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
@@ -68,14 +69,19 @@ type Orchestrator struct {
 	pw             *persistence.Writer
 	phaseRuntime   *phaseRuntime
 
-	tickCount     uint64
-	lastSimResult *simulation.SimulationResult
+	tickCount       uint64
+	publicTickCount uint64
+	lastSimResult   *simulation.SimulationResult
 	prevTopo      topology.GraphSnapshot
 
 	// Reentrancy verification instrumentation
 	inFlightTicks   uint32
 	reentrantTicks  uint64
 	processedTicks  uint64
+
+	// ✅ PRODUCTION SINGLE-START GUARD
+	// Prevents same orchestrator instance from being run multiple times concurrently.
+	running uint32
 
 	// windowN is the number of samples used per analysis window.
 	windowN int
@@ -217,6 +223,13 @@ func New(
 }
 
 func (o *Orchestrator) Run(ctx context.Context) {
+	// ✅ PRODUCTION SINGLE-START PROTECTION
+	// Never allow same orchestrator instance to run multiple times concurrently.
+	// This prevents double-start race when helper auto-starts Run().
+	if !atomic.CompareAndSwapUint32(&o.running, 0, 1) {
+		return
+	}
+	defer atomic.StoreUint32(&o.running, 0)
 	// Use time.Timer instead of time.Ticker so we can reset to adaptive intervals.
 	// The timer is reset AFTER each tick completes, meaning the interval is always
 	// measured from the END of the previous tick — no cumulative drift under load.
@@ -297,7 +310,10 @@ func (o *Orchestrator) adaptInterval() {
 		o.consecutiveOverruns == 0 &&
 		o.tickCount > 10
 	// Warmup guard: skip proactive stretch for first 10 ticks when no windows exist
-	if len(o.store.AllWindows(o.windowN, o.store.StaleAge())) > 0 {
+	// ✅ FIX: Use O(1) HasServices() instead of AllWindows() which computes full
+	// windows for every service. Under soak (10 svc × 5000 events/s), AllWindows
+	// held the RLock long enough to contend with Ingest's write path.
+	if o.store.HasServices() {
 		proactiveStretch = false
 	}
 
@@ -1129,6 +1145,47 @@ func (o *Orchestrator) tick(now time.Time) {
 			}
 		}
 	}
+
+	// ✅ SINGLE FINAL TICK SUMMARY EMISSION
+	// This is the ONLY hot path log statement in the entire pipeline.
+	// All per-stage logging has been removed and aggregated here.
+	summary := &debug.TickSummary{
+		TickIndex:   o.tickCount,
+		TickAt:      now,
+		Duration:    time.Since(tickStart),
+		Pressure:    o.pressureLevel,
+		SafetyLevel: o.safetyLevel,
+
+		WindowsTotal:     len(observedWindows),
+		WindowsDegraded:  degradedCount,
+
+		PruneMs:     o.stageEWMA[stageIdxPrune],
+		WindowsMs:   o.stageEWMA[stageIdxWindows],
+		TopologyMs:  o.stageEWMA[stageIdxTopology],
+		CouplingMs:  o.stageEWMA[stageIdxCoupling],
+		ModellingMs: o.stageEWMA[stageIdxModelling],
+		OptimiseMs:  o.stageEWMA[stageIdxOptimise],
+		SimMs:       o.stageEWMA[stageIdxSim],
+		ReasoningMs: o.stageEWMA[stageIdxReasoning],
+		BroadcastMs: o.stageEWMA[stageIdxBroadcast],
+
+		SystemRhoMean:      netEquilibrium.SystemRhoMean,
+		SystemFragility:    topoSensitivity.SystemFragility,
+		CollapseRisk:       fpResult.SystemicCollapseProb,
+		ActiveServices:     len(activeIDs),
+		KeystoneServices:   len(sensSnap.KeystoneServices),
+
+		DirectivesTotal:    len(directives),
+
+		Overran:            totalElapsed > o.cfg.TickDeadline,
+		ConsecutiveOverruns: o.consecutiveOverruns,
+		PredictedOverrun:   predictedOverrun,
+	}
+
+	summary.Emit()
+
+	// Expose current tick count atomically to concurrent readers (e.g. tests)
+	atomic.StoreUint64(&o.publicTickCount, o.tickCount)
 }
 
 // ReentrantTickCount returns the number of reentrant ticks detected
@@ -1148,7 +1205,7 @@ func (o *Orchestrator) InFlightTickCount() uint32 {
 
 // TickCount returns total tick counter
 func (o *Orchestrator) TickCount() uint64 {
-	return atomic.LoadUint64(&o.tickCount)
+	return atomic.LoadUint64(&o.publicTickCount)
 }
 
 // pressureToSimMultiplier maps runtime pressure level to a simulation horizon multiplier.

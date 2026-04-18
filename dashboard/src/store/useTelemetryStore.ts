@@ -8,6 +8,9 @@ interface HistoryPoint {
   p99: number;
   rhoMean: number;
   tickMs: number;
+  throughput: number;
+  queueDepth: number;
+  workers: number;
 }
 
 interface TelemetryState {
@@ -38,6 +41,21 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
     if (state.tick?.seq === tick.seq) return state;
 
     const now = Date.now();
+    let throughput = 0;
+    let queueDepth = 0;
+    let workers = 0;
+
+    if (tick.bundles) {
+      for (const serviceId in tick.bundles) {
+        const queue = tick.bundles[serviceId]?.queue;
+        if (queue) {
+          throughput += queue.arrival_rate || 0;
+          queueDepth += queue.mean_queue_len || 0;
+          workers += queue.concurrency || 0;
+        }
+      }
+    }
+
     const newHistory = [...state.history, {
       seq: tick.seq,
       obj: tick.objective?.composite_score ?? 0,
@@ -45,6 +63,9 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       p99: tick.objective?.predicted_p99_latency_ms ?? 0,
       rhoMean: tick.network_equilibrium?.system_rho_mean ?? 0,
       tickMs: tick.tick_health_ms ?? 0,
+      throughput,
+      queueDepth,
+      workers,
     }].slice(-MAX_HISTORY);
 
     return {

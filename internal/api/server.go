@@ -1,9 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
@@ -42,8 +47,8 @@ func NewServer(store *telemetry.Store, hub *streaming.Hub, token string) *Server
 	return s
 }
 
-func (s *Server) SetOrchestrator(orch *runtime.Orchestrator) { s.orch = orch }
-func (s *Server) SetActuator(act *actuator.CoalescingActuator) { s.actuator = act }
+func (s *Server) SetOrchestrator(orch *runtime.Orchestrator)      { s.orch = orch }
+func (s *Server) SetActuator(act *actuator.CoalescingActuator)    { s.actuator = act }
 func (s *Server) SetScenarios(scen *scenario.SuperpositionEngine) { s.scen = scen }
 
 func (s *Server) Handler() http.Handler {
@@ -53,6 +58,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) routes() {
 	// WebSocket
 	s.mux.HandleFunc("/ws", s.hub.HandleUpgrade)
+
+	// Telemetry ingestion
+	s.mux.HandleFunc("/api/v1/ingest", s.handleIngest())
 
 	// Actuator proxy endpoints
 	s.mux.HandleFunc("/api/v1/control/toggle", s.handleControl("toggle"))
@@ -92,13 +100,90 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Ingest-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) handleIngest() http.HandlerFunc {
+	const maxIngestBodyBytes = 4 << 20
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if s.store == nil {
+			http.Error(w, "telemetry store offline", http.StatusServiceUnavailable)
+			return
+		}
+
+		if s.token != "" {
+			headerToken := r.Header.Get("X-Ingest-Token")
+			bearerToken := "Bearer " + s.token
+			if headerToken != s.token && r.Header.Get("Authorization") != bearerToken {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		var raw json.RawMessage
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIngestBodyBytes))
+		if err := decoder.Decode(&raw); err != nil {
+			http.Error(w, "invalid telemetry payload", http.StatusBadRequest)
+			return
+		}
+
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 {
+			http.Error(w, "empty telemetry payload", http.StatusBadRequest)
+			return
+		}
+
+		points := make([]telemetry.MetricPoint, 0, 1)
+		switch raw[0] {
+		case '[':
+			if err := json.Unmarshal(raw, &points); err != nil {
+				http.Error(w, "invalid telemetry point array", http.StatusBadRequest)
+				return
+			}
+		case '{':
+			var point telemetry.MetricPoint
+			if err := json.Unmarshal(raw, &point); err != nil {
+				http.Error(w, "invalid telemetry point", http.StatusBadRequest)
+				return
+			}
+			points = append(points, point)
+		default:
+			http.Error(w, "telemetry payload must be an object or array", http.StatusBadRequest)
+			return
+		}
+
+		if len(points) == 0 {
+			http.Error(w, "telemetry payload contained no points", http.StatusBadRequest)
+			return
+		}
+
+		for i := range points {
+			if points[i].ServiceID == "" {
+				http.Error(w, "telemetry point missing service_id", http.StatusBadRequest)
+				return
+			}
+			s.store.Ingest(&points[i])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "accepted",
+			"points": len(points),
+		})
+	}
 }
 
 func (s *Server) handleControl(action string) http.HandlerFunc {
@@ -108,46 +193,136 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 			return
 		}
 
-		if s.actuator == nil {
-			http.Error(w, "actuator offline", http.StatusServiceUnavailable)
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
 
-		log.Printf("[api] executed remote control action: %s", action)
+		var req struct {
+			Enabled       *bool   `json:"enabled"`
+			ServiceID     string  `json:"service_id"`
+			DurationTicks uint64  `json:"duration_ticks"`
+			Factor        float64 `json:"factor"`
+			RequestFactor float64 `json:"request_factor"`
+			LatencyFactor float64 `json:"latency_factor"`
+		}
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid control payload")
+			return
+		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status": "accepted",
-			"action": action,
-		})
+		switch action {
+		case "toggle":
+			enabled := s.orch.ToggleActuation()
+			if req.Enabled != nil {
+				enabled = s.orch.SetActuationEnabled(*req.Enabled)
+			}
+			log.Printf("[api] actuation enabled=%v", enabled)
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status":              "applied",
+				"action":              action,
+				"actuation_enabled":   enabled,
+				"actuator_configured": s.actuator != nil,
+				"control_plane":       s.orch.ControlState(),
+			})
+		case "chaos-run":
+			if s.scen == nil {
+				writeError(w, http.StatusServiceUnavailable, "scenario engine offline")
+				return
+			}
+			duration := boundedTicks(req.DurationTicks, 30, 1, 600)
+			target := serviceTarget(req.ServiceID)
+			requestFactor := boundedFloat(firstNonZero(req.RequestFactor, req.Factor), 2.5, 1.0, 10.0)
+			latencyFactor := boundedFloat(req.LatencyFactor, 1.6, 1.0, 10.0)
+			start := s.orch.TickCount() + 1
+			until := start + duration
+			s.scen.SetMode("on")
+			s.scen.SetOverlay("api-chaos-run", &scenario.WindowedDisturbance{
+				ScenarioID:    "api-chaos-run",
+				TargetService: target,
+				StartTick:     start,
+				DurationTicks: duration,
+				RequestFactor: requestFactor,
+				LatencyFactor: latencyFactor,
+			}, until)
+			s.orch.ForceSimulation(duration + 1)
+			log.Printf("[api] scenario overlay chaos-run target=%s start=%d until=%d req_factor=%.2f latency_factor=%.2f",
+				target, start, until, requestFactor, latencyFactor)
+			writeJSON(w, http.StatusAccepted, map[string]interface{}{
+				"status":         "scheduled",
+				"action":         action,
+				"target_service": target,
+				"start_tick":     start,
+				"until_tick":     until,
+				"request_factor": requestFactor,
+				"latency_factor": latencyFactor,
+				"scenario_mode":  s.scen.Mode(),
+				"control_plane":  s.orch.ControlState(),
+			})
+		case "replay-burst":
+			if s.scen == nil {
+				writeError(w, http.StatusServiceUnavailable, "scenario engine offline")
+				return
+			}
+			duration := boundedTicks(req.DurationTicks, 20, 1, 600)
+			target := serviceTarget(req.ServiceID)
+			factor := boundedFloat(req.Factor, 2.0, 1.0, 10.0)
+			start := s.orch.TickCount() + 1
+			until := start + duration
+			s.scen.SetMode("on")
+			s.scen.SetOverlay("api-replay-burst", &scenario.ResettableBurst{
+				ScenarioID:    "api-replay-burst",
+				TargetService: target,
+				StartTick:     start,
+				DurationTicks: duration,
+				MaxFactor:     factor,
+			}, until)
+			s.orch.ForceSimulation(duration + 1)
+			log.Printf("[api] scenario overlay replay-burst target=%s start=%d until=%d factor=%.2f",
+				target, start, until, factor)
+			writeJSON(w, http.StatusAccepted, map[string]interface{}{
+				"status":         "scheduled",
+				"action":         action,
+				"target_service": target,
+				"start_tick":     start,
+				"until_tick":     until,
+				"factor":         factor,
+				"scenario_mode":  s.scen.Mode(),
+				"control_plane":  s.orch.ControlState(),
+			})
+		default:
+			writeError(w, http.StatusNotFound, "unknown control action")
+		}
 	}
 }
 
-// handlePolicyUpdate processes policy preset changes. The policy engine runs
-// inline per-tick, so we log the request as an observable event. If the
-// orchestrator exposes SetPolicyPreset in the future, this will call it.
+// handlePolicyUpdate applies policy presets to the runtime policy engine.
 func (s *Server) handlePolicyUpdate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
 		var req struct {
 			Preset string `json:"preset"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			req.Preset = "unknown"
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid policy payload")
+			return
 		}
 
-		log.Printf("[api] policy update requested: preset=%s", req.Preset)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "accepted",
-			"domain": "policy_update",
-			"preset": req.Preset,
-			"note":   "policy engine runs inline per-tick; preset change queued",
+		preset := s.orch.SetPolicyPreset(req.Preset)
+		log.Printf("[api] policy preset applied=%s", preset)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":        "applied",
+			"domain":        "policy_update",
+			"preset":        preset,
+			"control_plane": s.orch.ControlState(),
 		})
 	}
 }
@@ -159,14 +334,32 @@ func (s *Server) handleRuntimeStep() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
-		log.Printf("[api] runtime step requested")
+		tick, err := s.orch.StepOnce(time.Now())
+		if errors.Is(err, runtime.ErrTickInFlight) {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"status":        "busy",
+				"domain":        "runtime_step",
+				"tick":          tick,
+				"control_plane": s.orch.ControlState(),
+			})
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "accepted",
-			"domain": "runtime_step",
-			"note":   "orchestrator runs on autonomous tick loop; step request logged",
+		log.Printf("[api] runtime step executed tick=%d", tick)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":        "executed",
+			"domain":        "runtime_step",
+			"tick":          tick,
+			"control_plane": s.orch.ControlState(),
 		})
 	}
 }
@@ -178,50 +371,98 @@ func (s *Server) handleSandboxTrigger() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
 		var req struct {
-			Type string `json:"type"`
+			Type          string `json:"type"`
+			DurationTicks uint64 `json:"duration_ticks"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			req.Type = "unknown"
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid sandbox payload")
+			return
+		}
+		if strings.TrimSpace(req.Type) == "" {
+			req.Type = "experiment"
 		}
 
-		log.Printf("[api] sandbox trigger: type=%s", req.Type)
+		duration := boundedTicks(req.DurationTicks, 10, 1, 120)
+		until := s.orch.ForceSandbox(duration)
+		log.Printf("[api] sandbox forced type=%s until_tick=%d", req.Type, until)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "accepted",
-			"domain": "sandbox_trigger",
-			"type":   req.Type,
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":         "scheduled",
+			"domain":         "sandbox_trigger",
+			"type":           req.Type,
+			"until_tick":     until,
+			"duration_ticks": duration,
+			"control_plane":  s.orch.ControlState(),
 		})
 	}
 }
 
-// handleSimulationControl starts or resets a simulation scenario via the
-// SuperpositionEngine if available.
+// handleSimulationControl starts, stops, or resets the real simulation runner.
 func (s *Server) handleSimulationControl() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
 		var req struct {
-			Action string `json:"action"`
+			Action        string `json:"action"`
+			DurationTicks uint64 `json:"duration_ticks"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			req.Action = "unknown"
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid simulation payload")
+			return
 		}
 
-		log.Printf("[api] simulation control: action=%s (scenarios_available=%v)", req.Action, s.scen != nil)
+		action := strings.ToLower(strings.TrimSpace(req.Action))
+		if action == "" {
+			action = "run"
+		}
+		duration := boundedTicks(req.DurationTicks, 10, 1, 600)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":             "accepted",
-			"domain":             "simulation_control",
-			"action":             req.Action,
-			"scenarios_available": s.scen != nil,
-		})
+		switch action {
+		case "run", "start", "force":
+			until := s.orch.ForceSimulation(duration)
+			log.Printf("[api] simulation forced until_tick=%d", until)
+			writeJSON(w, http.StatusAccepted, map[string]interface{}{
+				"status":         "scheduled",
+				"domain":         "simulation_control",
+				"action":         action,
+				"until_tick":     until,
+				"duration_ticks": duration,
+				"control_plane":  s.orch.ControlState(),
+			})
+		case "reset":
+			s.orch.RequestSimulationReset()
+			log.Printf("[api] simulation reset requested")
+			writeJSON(w, http.StatusAccepted, map[string]interface{}{
+				"status":        "scheduled",
+				"domain":        "simulation_control",
+				"action":        action,
+				"control_plane": s.orch.ControlState(),
+			})
+		case "stop":
+			s.orch.ForceSimulation(0)
+			log.Printf("[api] simulation force window cleared")
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status":        "applied",
+				"domain":        "simulation_control",
+				"action":        action,
+				"control_plane": s.orch.ControlState(),
+			})
+		default:
+			writeError(w, http.StatusBadRequest, "unknown simulation action")
+		}
 	}
 }
 
@@ -232,13 +473,28 @@ func (s *Server) handleIntelligenceRollout() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
-		log.Printf("[api] intelligence rollout triggered")
+		var req struct {
+			DurationTicks uint64 `json:"duration_ticks"`
+		}
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid intelligence payload")
+			return
+		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "accepted",
-			"domain": "intelligence_rollout",
+		duration := boundedTicks(req.DurationTicks, 10, 1, 120)
+		until := s.orch.ForceIntelligenceRollout(duration)
+		log.Printf("[api] intelligence rollout forced until_tick=%d", until)
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":         "scheduled",
+			"domain":         "intelligence_rollout",
+			"until_tick":     until,
+			"duration_ticks": duration,
+			"control_plane":  s.orch.ControlState(),
 		})
 	}
 }
@@ -250,21 +506,36 @@ func (s *Server) handleAlertAck() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if s.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
+			return
+		}
 
 		var req struct {
 			AlertID string `json:"alert_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			req.AlertID = "unknown"
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid alert payload")
+			return
+		}
+		if strings.TrimSpace(req.AlertID) == "" {
+			writeError(w, http.StatusBadRequest, "alert_id is required")
+			return
 		}
 
+		count, ok := s.orch.AcknowledgeAlert(req.AlertID, time.Now())
+		if !ok {
+			writeError(w, http.StatusBadRequest, "alert_id is required")
+			return
+		}
 		log.Printf("[api] alert acknowledged: %s", req.AlertID)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":   "accepted",
-			"domain":   "alert_ack",
-			"alert_id": req.AlertID,
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":                   "applied",
+			"domain":                   "alert_ack",
+			"alert_id":                 req.AlertID,
+			"acknowledged_alert_count": count,
+			"control_plane":            s.orch.ControlState(),
 		})
 	}
 }
@@ -291,4 +562,68 @@ func (s *Server) handleSnapshot() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(data)
 	}
+}
+
+func decodeOptionalJSON(r *http.Request, dst interface{}) error {
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func boundedTicks(value, fallback, min, max uint64) uint64 {
+	if value == 0 {
+		value = fallback
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func firstNonZero(values ...float64) float64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func boundedFloat(value, fallback, min, max float64) float64 {
+	if value == 0 {
+		value = fallback
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func serviceTarget(serviceID string) string {
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return "*"
+	}
+	return serviceID
 }

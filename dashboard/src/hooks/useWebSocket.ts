@@ -3,8 +3,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTelemetryStore } from '@/store/useTelemetryStore';
 import { normalizeTickPayload } from '@/lib/telemetry';
+import { WS_URL } from '@/lib/config';
 
-const WS_URL = 'ws://localhost:8080/ws';
 const BACKOFF_BASE = 1000;
 const BACKOFF_MAX = 30000;
 const STALE_TIMEOUT = 10000;
@@ -105,7 +105,7 @@ export function useWebSocket() {
     } catch {
       scheduleReconnect();
     }
-  }, [setTick, setConnected, resetStaleTimer]);
+  }, [setTick, setConnected, resetStaleTimer, scheduleReconnect]);
 
   useEffect(() => {
     mountedRef.current = true;

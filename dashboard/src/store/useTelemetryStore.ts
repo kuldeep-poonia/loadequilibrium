@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 import { TickPayload } from '@/types/backend';
+import { API_BASE_URL } from '@/lib/config';
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type DomainPayload = Record<string, JsonValue>;
+type ApiResult = { ok: true; data?: unknown } | { ok: false; error: string };
 
 interface HistoryPoint {
   seq: number;
@@ -24,13 +29,20 @@ interface TelemetryState {
   setConnected: (connected: boolean) => void;
   reset: () => void;
   triggerAction: (action: string) => Promise<void>;
-  triggerDomain: (domain: string, payload?: any) => Promise<{ ok: boolean; data?: any; error?: string }>;
+  triggerDomain: (domain: string, payload?: DomainPayload) => Promise<ApiResult>;
 }
 
 const MAX_HISTORY = 60;
-const API_BASE = 'http://localhost:8080';
 
-export const useTelemetryStore = create<TelemetryState>((set, get) => ({
+function responseError(data: unknown) {
+  if (data && typeof data === 'object' && 'error' in data) {
+    const error = (data as { error?: unknown }).error;
+    if (typeof error === 'string') return error;
+  }
+  return undefined;
+}
+
+export const useTelemetryStore = create<TelemetryState>((set) => ({
   tick: null,
   history: [],
   connected: false,
@@ -82,7 +94,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
 
   triggerAction: async (action: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/control/${action}`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/control/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -92,20 +104,20 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
     }
   },
 
-  triggerDomain: async (domain: string, payload?: any) => {
+  triggerDomain: async (domain: string, payload?: DomainPayload) => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/${domain}`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/${domain}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: payload ? JSON.stringify(payload) : null,
+        body: payload ? JSON.stringify(payload) : undefined,
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        return { ok: false, error: data?.error || `HTTP ${res.status}` };
+        return { ok: false, error: responseError(data) || `HTTP ${res.status}` };
       }
       return { ok: true, data };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || 'Network error' };
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
     }
   },
 }));

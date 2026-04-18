@@ -24,7 +24,6 @@ docker-up:
 	@echo "[Docker] Stack is running. Services:"
 	@echo "  • LoadEquilibrium: http://localhost:8080"
 	@echo "  • Prometheus: http://localhost:9090"
-	@echo "  • Metrics App: http://localhost:8000"
 	@docker-compose ps
 
 docker-down:

@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 type Store struct {
 	mu       sync.RWMutex
 	buffers  map[string]*RingBuffer
@@ -83,24 +82,18 @@ func (s *Store) Ingest(p *MetricPoint) {
 		p.Timestamp = time.Now()
 	}
 
-	// Fast path: RLock just to find the buffer
-	s.mu.RLock()
+	s.mu.Lock()
 	buf, ok := s.buffers[p.ServiceID]
-	s.mu.RUnlock()
-
 	if !ok {
-		s.mu.Lock()
-		// Double-check after acquiring write lock
-		if buf, ok = s.buffers[p.ServiceID]; !ok {
-			if len(s.buffers) >= s.maxSvc {
-				s.mu.Unlock()
-				return
-			}
-			buf = NewRingBuffer(s.bufCap)
-			s.buffers[p.ServiceID] = buf
+		if len(s.buffers) >= s.maxSvc {
+			s.mu.Unlock()
+			return
 		}
-		s.mu.Unlock()
+		buf = NewRingBuffer(s.bufCap)
+		s.buffers[p.ServiceID] = buf
 	}
+	s.lastSeen[p.ServiceID] = p.Timestamp
+	s.mu.Unlock()
 
 	// Push uses the RingBuffer's internal lock, not the Store's lock
 	buf.Push(p)
@@ -241,8 +234,6 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		stdReq = math.Sqrt(sumSqDiff / (n - 1))
 	}
 
-	
-
 	// P99 latency inference: use Last→P95→Mean progression if P99 is absent.
 	lastP99 := last.Latency.P99
 	if lastP99 <= 0 && last.Latency.P95 > 0 {
@@ -343,4 +334,3 @@ type edgeAccum struct {
 	sumLatency  float64
 	count       int
 }
-	

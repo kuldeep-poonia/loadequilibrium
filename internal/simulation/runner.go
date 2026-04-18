@@ -589,14 +589,6 @@ func (r *Runner) run(
 	sched := newSchedulerFromPool()
 	defer sched.returnToPool()
 
-	if len(snaps) == 0 && os.Getenv("FORCE_SIMULATION") == "on" {
-		snaps = []bundleSnap{
-			{id: "frontend", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
-			{id: "payment", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
-			{id: "database", arrivalRate: 1.2, serviceRate: 1.0, concurrency: 4, utilisation: 0.8, slaThresholdMs: 500},
-		}
-	}
-
 	states := make(map[string]*ServiceSimState, len(snaps))
 	cascadeEdges, edgeWeights := buildCascadeEdges(topo)
 

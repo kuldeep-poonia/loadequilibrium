@@ -120,8 +120,9 @@ func TestRuntimeRaceDeadlockTorture(t *testing.T) {
 				cancel = func() {}
 			}
 
-			// Measure goroutines before
-			preGoroutines := countGoroutines()
+			// Transient goroutine counts are intentionally high while this
+			// torture test has 1000 active workers. Final leak checks below are
+			// the meaningful signal for goroutine retention.
 
 			// Try to inject chaos mid-execution
 			if rand.Float64() < 0.1 {
@@ -138,15 +139,6 @@ func TestRuntimeRaceDeadlockTorture(t *testing.T) {
 					blockedChannelCount++
 					mu.Unlock()
 				}
-			}
-
-			// Measure goroutines after
-			postGoroutines := countGoroutines()
-			leakDelta := postGoroutines - preGoroutines
-			if leakDelta > 2 {
-				mu.Lock()
-				contextLeaks += leakDelta
-				mu.Unlock()
 			}
 
 			// Final cancellation
@@ -166,7 +158,7 @@ func TestRuntimeRaceDeadlockTorture(t *testing.T) {
 		// Every 100 cycles, check for goroutine explosion
 		if cycleIdx%100 == 0 && cycleIdx > 0 {
 			currentGoroutines := countGoroutines()
-			expectedMax := startGoroutines + 50
+			expectedMax := startGoroutines + concurrentCycles + 50
 			if currentGoroutines > expectedMax {
 				mu.Lock()
 				raceDetected = true
@@ -185,6 +177,9 @@ func TestRuntimeRaceDeadlockTorture(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	endGoroutines := countGoroutines()
 	leakDelta := endGoroutines - startGoroutines
+	if leakDelta > 0 {
+		contextLeaks = leakDelta
+	}
 
 	// Report results
 	t.Logf("\n========== ELITE TEST 1/5: RUNTIME RACE/DEADLOCK TORTURE ==========")

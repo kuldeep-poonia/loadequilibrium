@@ -43,10 +43,10 @@ type TickPayload struct {
 	SimResult  *simulation.SimulationResult             `json:"sim_result,omitempty"`
 
 	// Control-room intelligence overlay fields.
-	DegradedServices     []string                       `json:"degraded_services,omitempty"`
-	SaturationCountdowns map[string]float64             `json:"sat_countdowns,omitempty"`
-	StabilityZones       map[string]string              `json:"stability_zones,omitempty"`
-	PredictionHorizon    map[string]float64             `json:"prediction_horizon,omitempty"`
+	DegradedServices     []string           `json:"degraded_services,omitempty"`
+	SaturationCountdowns map[string]float64 `json:"sat_countdowns,omitempty"`
+	StabilityZones       map[string]string  `json:"stability_zones,omitempty"`
+	PredictionHorizon    map[string]float64 `json:"prediction_horizon,omitempty"`
 
 	// PredictionTimeline: per-service prediction curves for the next N ticks.
 	PredictionTimeline map[string][]PredictionPoint `json:"prediction_timeline,omitempty"`
@@ -60,7 +60,8 @@ type TickPayload struct {
 	// RuntimeMetrics: per-stage rolling average latencies for the control-room
 	// runtime health panel. Zero-allocation fixed struct — values are EWMA
 	// smoothed over the last ~10 ticks (α=0.1).
-	RuntimeMetrics RuntimeMetrics `json:"runtime_metrics"`
+	RuntimeMetrics RuntimeMetrics    `json:"runtime_metrics"`
+	ControlPlane   ControlPlaneState `json:"control_plane"`
 
 	// NetworkCouplingData: per-service equilibrium coupling data.
 	NetworkCouplingData map[string]NetworkCouplingSnapshot `json:"network_coupling,omitempty"`
@@ -99,6 +100,17 @@ type TickPayload struct {
 	// StabilityEnvelope: stable operating boundary from equilibrium analysis.
 	// Tells operators whether the system is inside or outside its stability region.
 	StabilityEnvelope StabilityEnvelopeSnapshot `json:"stability_envelope,omitempty"`
+}
+
+type ControlPlaneState struct {
+	Tick                    uint64 `json:"tick"`
+	ActuationEnabled        bool   `json:"actuation_enabled"`
+	PolicyPreset            string `json:"policy_preset"`
+	ForcedSandboxUntil      uint64 `json:"forced_sandbox_until"`
+	ForcedSimulationUntil   uint64 `json:"forced_simulation_until"`
+	ForcedIntelligenceUntil uint64 `json:"forced_intelligence_until"`
+	SimulationResetPending  bool   `json:"simulation_reset_pending"`
+	AcknowledgedAlertCount  int    `json:"acknowledged_alert_count"`
 }
 
 // ScenarioComparisonSnapshot represents a lightweight comparison across MC scenarios.
@@ -202,7 +214,7 @@ type RuntimeMetrics struct {
 	PredictedCriticalMs float64 `json:"predicted_critical_ms"`
 	// PredictedOverrun: true when EWMA trend projects critical stages will exceed 80% of deadline.
 	PredictedOverrun bool `json:"predicted_overrun"`
-	SafetyLevel     int  `json:"safety_level"` // graduated 0-3
+	SafetyLevel      int  `json:"safety_level"` // graduated 0-3
 }
 
 // TopologySensitivitySnapshot is the JSON-friendly form of modelling.TopologySensitivity.
@@ -233,8 +245,8 @@ type NetworkCouplingSnapshot struct {
 	PathSaturationHorizonSec float64 `json:"path_sat_horizon_sec"`
 	PathCollapseProb         float64 `json:"path_collapse_prob"`
 	// Steady-state queue distribution at equilibrium ρ.
-	SteadyStateP0         float64 `json:"steady_state_p0"`
-	SteadyStateMeanQueue  float64 `json:"steady_state_mean_queue"`
+	SteadyStateP0        float64 `json:"steady_state_p0"`
+	SteadyStateMeanQueue float64 `json:"steady_state_mean_queue"`
 }
 
 // NetworkEquilibriumSnapshot is the JSON-friendly form of modelling.NetworkEquilibriumState.

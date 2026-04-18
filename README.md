@@ -153,9 +153,9 @@ POST /api/v1/alerts/ack
 
 #### State
 ```http
+POST /api/v1/ingest            # Telemetry MetricPoint or MetricPoint[]
 GET  /api/v1/snapshot          # Last full tick payload
 GET  /health                   # Health check
-GET  /metrics                  # Prometheus metrics
 ```
 
 ---

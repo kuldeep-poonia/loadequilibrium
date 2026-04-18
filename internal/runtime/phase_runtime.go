@@ -5,6 +5,8 @@ import (
 	"hash/fnv"
 	"log"
 	"math"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/autopilot"
@@ -26,14 +28,101 @@ type phaseServiceRuntime struct {
 }
 
 type phaseRuntime struct {
-	cfg      *config.Config
-	services map[string]*phaseServiceRuntime
+	cfg                    *config.Config
+	services               map[string]*phaseServiceRuntime
+	controlMu              sync.RWMutex
+	policyPreset           string
+	forceSandboxUntil      uint64
+	forceIntelligenceUntil uint64
 }
 
 func newPhaseRuntime(cfg *config.Config) *phaseRuntime {
 	return &phaseRuntime{
-		cfg:      cfg,
-		services: make(map[string]*phaseServiceRuntime),
+		cfg:          cfg,
+		services:     make(map[string]*phaseServiceRuntime),
+		policyPreset: "balanced",
+	}
+}
+
+func (p *phaseRuntime) SetPolicyPreset(preset string) string {
+	if p == nil {
+		return "balanced"
+	}
+	normalised := normalisePolicyPreset(preset)
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	p.policyPreset = normalised
+	return normalised
+}
+
+func (p *phaseRuntime) PolicyPreset() string {
+	if p == nil {
+		return "balanced"
+	}
+	p.controlMu.RLock()
+	defer p.controlMu.RUnlock()
+	if p.policyPreset == "" {
+		return "balanced"
+	}
+	return p.policyPreset
+}
+
+func (p *phaseRuntime) ForceSandboxUntil(untilTick uint64) {
+	if p == nil {
+		return
+	}
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	p.forceSandboxUntil = untilTick
+}
+
+func (p *phaseRuntime) ForcedSandboxUntil() uint64 {
+	if p == nil {
+		return 0
+	}
+	p.controlMu.RLock()
+	defer p.controlMu.RUnlock()
+	return p.forceSandboxUntil
+}
+
+func (p *phaseRuntime) ForceIntelligenceUntil(untilTick uint64) {
+	if p == nil {
+		return
+	}
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	p.forceIntelligenceUntil = untilTick
+}
+
+func (p *phaseRuntime) ForcedIntelligenceUntil() uint64 {
+	if p == nil {
+		return 0
+	}
+	p.controlMu.RLock()
+	defer p.controlMu.RUnlock()
+	return p.forceIntelligenceUntil
+}
+
+func (p *phaseRuntime) sandboxForced(tick uint64) bool {
+	return p != nil && p.ForcedSandboxUntil() > 0 && tick <= p.ForcedSandboxUntil()
+}
+
+func (p *phaseRuntime) intelligenceForced(tick uint64) bool {
+	return p != nil && p.ForcedIntelligenceUntil() > 0 && tick <= p.ForcedIntelligenceUntil()
+}
+
+func normalisePolicyPreset(preset string) string {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "latency", "fast":
+		return "latency"
+	case "stability", "conservative", "safe":
+		return "stability"
+	case "cost", "efficient":
+		return "cost"
+	case "aggressive":
+		return "aggressive"
+	default:
+		return "balanced"
 	}
 }
 
@@ -88,6 +177,10 @@ func (p *phaseRuntime) apply(
 			SLASeverity:      p.slaSeverity(bundle, objective),
 			PerfScore:        phaseClamp(1-objective.CompositeScore, 0, 1),
 		}
+		if p.intelligenceForced(tick) {
+			infra.CapacityPressure = phaseMax(infra.CapacityPressure, 1.0)
+			infra.SLASeverity = phaseMax(infra.SLASeverity, 1.0)
+		}
 
 		// STEP 4: Relocate RL execution before Autopilot
 		intel := service.adapter.Step(infra)
@@ -96,7 +189,7 @@ func (p *phaseRuntime) apply(
 		service.autopilotState = autoState
 
 		simAdvice := service.lastSandbox.Advice
-		if tick%10 == 0 && p.shouldRunSandbox(bundle, phase1, phase2, objective) {
+		if p.sandboxForced(tick) || (tick%10 == 0 && p.shouldRunSandbox(bundle, phase1, phase2, objective)) {
 			if outSim, err := p.runSandbox(id, tick, bundle, base, phase1, phase2, autoTel); err == nil {
 				service.lastSandbox = outSim
 				simAdvice = outSim.Advice
@@ -287,6 +380,51 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 	return service
 }
 
+func (p *phaseRuntime) policyWeights() policy.CostWeights {
+	switch p.PolicyPreset() {
+	case "latency":
+		return policy.CostWeights{
+			SlaViolation: 1.45,
+			InfraCost:    0.20,
+			ChangeCost:   0.10,
+			RiskCost:     0.85,
+			FutureCost:   0.35,
+		}
+	case "stability":
+		return policy.CostWeights{
+			SlaViolation: 1.10,
+			InfraCost:    0.20,
+			ChangeCost:   0.25,
+			RiskCost:     1.25,
+			FutureCost:   0.30,
+		}
+	case "cost":
+		return policy.CostWeights{
+			SlaViolation: 0.85,
+			InfraCost:    0.60,
+			ChangeCost:   0.30,
+			RiskCost:     0.55,
+			FutureCost:   0.15,
+		}
+	case "aggressive":
+		return policy.CostWeights{
+			SlaViolation: 1.20,
+			InfraCost:    0.15,
+			ChangeCost:   0.05,
+			RiskCost:     0.95,
+			FutureCost:   0.40,
+		}
+	default:
+		return policy.CostWeights{
+			SlaViolation: 1.0,
+			InfraCost:    0.25,
+			ChangeCost:   0.15,
+			RiskCost:     0.75,
+			FutureCost:   0.20,
+		}
+	}
+}
+
 func (p *phaseRuntime) evaluatePolicy(
 	bundle *modelling.ServiceModelBundle,
 	base optimisation.ControlDirective,
@@ -295,6 +433,7 @@ func (p *phaseRuntime) evaluatePolicy(
 	currentReplicas := p.currentReplicas(bundle)
 	currentRetry := p.currentRetry(bundle)
 	currentQueue := phaseMax(bundle.Queue.MeanQueueLen+1, 1)
+	weights := p.policyWeights()
 
 	input := policy.EngineInput{
 		Scaling: policy.ScalingSignal{
@@ -348,13 +487,7 @@ func (p *phaseRuntime) evaluatePolicy(
 			MaxAggression:          1,
 			BaseStep:               0.1,
 		},
-		CostWeights: policy.CostWeights{
-			SlaViolation: 1.0,
-			InfraCost:    0.25,
-			ChangeCost:   0.15,
-			RiskCost:     0.75,
-			FutureCost:   0.20,
-		},
+		CostWeights: weights,
 	}
 
 	return policy.EvaluatePolicies(input, state)

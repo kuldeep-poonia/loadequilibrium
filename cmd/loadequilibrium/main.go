@@ -12,8 +12,8 @@ import (
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
-	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/api"
+	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
 	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
@@ -61,11 +61,8 @@ func main() {
 
 	act := actuator.NewCoalescingActuator(1024, routerBackend)
 
-	// Initialize scenario engine with connectivity proof baseline
-	scenarios := scenario.NewEngine(
-		scenario.NewConnectivityProof(0), // Start from tick 0
-	)
-	log.Println("[main] initialized connectivity proof scenario (8 services, deterministic baseline)")
+	scenarios := scenario.NewEngine()
+	log.Println("[main] initialized scenario engine (real telemetry windows only)")
 
 	orch := runtime.New(cfg, store, hub, pw, act, scenarios)
 

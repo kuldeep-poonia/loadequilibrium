@@ -126,11 +126,27 @@ export interface ObjectiveScore {
 // ── Directives ───────────────────────────────────────────────────────────────
 
 export interface ControlDirective {
-  target_replicas: number;
-  retry_budget: number;
-  queue_limit: number;
-  cache_ttl_ms: number;
-  reason: string;
+  service_id?: string;
+  computed_at?: string;
+  scale_factor: number;
+  target_utilisation: number;
+  error: number;
+  pid_output: number;
+  active: boolean;
+  stability_margin: number;
+  hysteresis_state?: string;
+  actuation_bound?: number;
+  predictive_target?: number;
+  mpc_predicted_rho?: number;
+  mpc_overshoot_risk?: boolean;
+  mpc_underactuation_risk?: boolean;
+  cost_gradient?: number;
+  trajectory_cost_avg?: number;
+  max_trajectory_cost?: number;
+  planner_scale_factor?: number;
+  planner_convergent?: boolean;
+  planner_convex?: boolean;
+  planner_probabilistic_score?: number;
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
@@ -148,6 +164,7 @@ export interface EventEvidence {
 }
 
 export interface Event {
+  id?: string;
   timestamp: string;
   category: string;
   description: string;
@@ -201,6 +218,17 @@ export interface RuntimeMetrics {
   predicted_critical_ms: number;
   predicted_overrun: boolean;
   safety_level: number;
+}
+
+export interface ControlPlaneState {
+  tick: number;
+  actuation_enabled: boolean;
+  policy_preset: string;
+  forced_sandbox_until: number;
+  forced_simulation_until: number;
+  forced_intelligence_until: number;
+  simulation_reset_pending: boolean;
+  acknowledged_alert_count: number;
 }
 
 // ── Network Coupling & Equilibrium ───────────────────────────────────────────
@@ -334,6 +362,7 @@ export interface TickPayload {
   safety_mode: boolean;
   jitter_ms: number;
   runtime_metrics: RuntimeMetrics;
+  control_plane: ControlPlaneState;
 
   // Network analysis
   network_coupling: Record<string, NetworkCouplingSnapshot>;

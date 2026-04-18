@@ -2,8 +2,6 @@
 
 import React, { useEffect, useRef } from 'react';
 import { useTelemetryStore } from '@/store/useTelemetryStore';
-import { TacticalBox } from '@/components/ui/HUD';
-import { motion } from 'framer-motion';
 import type { Node, Edge } from '@/types/backend';
 
 export function TopologyCanvas() {
@@ -32,13 +30,13 @@ export function TopologyCanvas() {
       ctx.clearRect(0, 0, w, h);
 
       // Grid
-      ctx.strokeStyle = "rgba(0, 242, 255, 0.04)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.025)";
       ctx.lineWidth = 1;
       for (let x = 0; x < w; x += 30) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
       for (let y = 0; y < h; y += 30) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
 
       // Reticle
-      ctx.strokeStyle = "rgba(0, 242, 255, 0.08)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
       ctx.beginPath(); ctx.moveTo(w / 2 - 15, h / 2); ctx.lineTo(w / 2 + 15, h / 2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(w / 2, h / 2 - 15); ctx.lineTo(w / 2, h / 2 + 15); ctx.stroke();
 
@@ -50,7 +48,7 @@ export function TopologyCanvas() {
 
       if (nodes.length === 0) {
         ctx.fillStyle = 'rgba(148,163,184,0.3)';
-        ctx.font = "9px 'Orbitron'";
+        ctx.font = "9px ui-monospace,SF Mono,Menlo,monospace";
         ctx.textAlign = 'center';
         ctx.fillText('AWAITING TOPOLOGY DATA', w / 2, h / 2);
         animationFrameRef.current = requestAnimationFrame(render);
@@ -77,7 +75,7 @@ export function TopologyCanvas() {
         if (!s || !t) return;
         const alpha = 0.05 + Math.min(0.35, (e.weight || 0) * 0.4);
         const isCritEdge = critPath.includes(e.source) && critPath.includes(e.target);
-        ctx.strokeStyle = isCritEdge ? `rgba(255, 51, 102, ${alpha + 0.15})` : `rgba(0, 242, 255, ${alpha})`;
+        ctx.strokeStyle = isCritEdge ? `rgba(255, 69, 58, ${alpha + 0.15})` : `rgba(0, 212, 255, ${alpha})`;
         ctx.lineWidth = isCritEdge ? 2 : 1;
         ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y); ctx.stroke();
 
@@ -86,7 +84,7 @@ export function TopologyCanvas() {
           const t_prog = ((pulsePhaseRef.current + (e.weight || 0) * 3) % (Math.PI * 2)) / (Math.PI * 2);
           const px = s.x + (t.x - s.x) * t_prog;
           const py = s.y + (t.y - s.y) * t_prog;
-          ctx.fillStyle = isCritEdge ? 'rgba(255, 51, 102, 0.6)' : 'rgba(0, 242, 255, 0.5)';
+          ctx.fillStyle = isCritEdge ? 'rgba(255, 69, 58, 0.6)' : 'rgba(0, 212, 255, 0.5)';
           ctx.beginPath();
           ctx.arc(px, py, 1.5, 0, Math.PI * 2);
           ctx.fill();
@@ -108,14 +106,14 @@ export function TopologyCanvas() {
         const radius = baseRadius + load * (maxRadius - baseRadius);
 
         // Color based on pressure
-        const nodeColor = isCrit ? '#ff3366' : pressure > 0.7 ? '#ef4444' : pressure > 0.4 ? '#f59e0b' : '#00f2ff';
+        const nodeColor = isCrit ? '#FF453A' : pressure > 0.7 ? '#ef4444' : pressure > 0.4 ? '#f59e0b' : '#00D4FF';
 
         // Glow
         ctx.shadowBlur = isCrit ? 18 : 6 + load * 12;
         ctx.shadowColor = nodeColor;
 
         // Subtle observatory pulse for active simulations
-        ctx.strokeStyle = isCrit ? 'rgba(255, 51, 102, 0.34)' : `rgba(0, 242, 255, ${0.12 + pulse * 0.12 + load * 0.08})`;
+        ctx.strokeStyle = isCrit ? 'rgba(255, 69, 58, 0.34)' : `rgba(0, 212, 255, ${0.12 + pulse * 0.12 + load * 0.08})`;
         ctx.lineWidth = isCrit ? 1.3 : 1;
         ctx.globalAlpha = solverActive ? 0.18 + pulse * 0.2 + load * 0.08 : 0.12 + load * 0.06;
         ctx.beginPath();
@@ -150,7 +148,7 @@ export function TopologyCanvas() {
 
         // Label
         ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
-        ctx.font = "7px 'Orbitron'";
+        ctx.font = "7px ui-monospace,SF Mono,Menlo,monospace";
         ctx.textAlign = 'center';
         const label = n.service_id.length > 10 ? n.service_id.substring(0, 10) : n.service_id;
         ctx.fillText(label.toUpperCase(), p.x, p.y + radius + 10);
@@ -174,4 +172,3 @@ export function TopologyCanvas() {
 
   return <canvas ref={canvasRef} className="w-full h-full cursor-crosshair" />;
 }
-

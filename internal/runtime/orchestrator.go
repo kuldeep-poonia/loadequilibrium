@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,12 +71,18 @@ type Orchestrator struct {
 	tickCount       uint64
 	publicTickCount uint64
 	lastSimResult   *simulation.SimulationResult
-	prevTopo      topology.GraphSnapshot
+	prevTopo        topology.GraphSnapshot
+
+	actuationEnabled         atomic.Bool
+	forceSimulationUntil     atomic.Uint64
+	resetSimulationRequested atomic.Bool
+	alertMu                  sync.RWMutex
+	ackedAlerts              map[string]time.Time
 
 	// Reentrancy verification instrumentation
-	inFlightTicks   uint32
-	reentrantTicks  uint64
-	processedTicks  uint64
+	inFlightTicks  uint32
+	reentrantTicks uint64
+	processedTicks uint64
 
 	// ✅ PRODUCTION SINGLE-START GUARD
 	// Prevents same orchestrator instance from being run multiple times concurrently.
@@ -208,15 +213,12 @@ func New(
 		phaseRuntime:    newPhaseRuntime(cfg),
 		windowN:         windowN,
 		currentInterval: cfg.TickInterval,
+		ackedAlerts:     make(map[string]time.Time),
 	}
+	o.actuationEnabled.Store(true)
 
 	if scen != nil {
-		scen.ScenarioMode = cfg.ScenarioMode
-	}
-
-	mode := strings.ToLower(strings.TrimSpace(cfg.ScenarioMode))
-	if mode == "off" || mode == "false" || mode == "0" {
-		o.scenarioEngine = nil
+		scen.SetMode(cfg.ScenarioMode)
 	}
 
 	return o
@@ -248,7 +250,7 @@ func (o *Orchestrator) Run(ctx context.Context) {
 			return
 		case scheduled := <-timer.C:
 			o.lastTickScheduledAt = scheduled
-			
+
 			// ✅ SINGLE TICK GUARANTEE: Atomic CAS gate at scheduling point
 			// Correct scheduler edge placement: CAS only guards goroutine launch
 			// Reset happens **exclusively** inside spawned goroutine
@@ -257,12 +259,10 @@ func (o *Orchestrator) Run(ctx context.Context) {
 				continue
 			}
 
-o.tick(scheduled)
-atomic.StoreUint32(&o.inFlightTicks, 0)
-atomic.AddUint64(&o.processedTicks, 1)
+			o.executeTick(scheduled)
+			atomic.StoreUint32(&o.inFlightTicks, 0)
 			// Adapt interval, then reset timer with the (possibly new) interval.
 			// timer.C is drained at this point — Reset is safe per Go timer docs.
-			o.adaptInterval()
 			timer.Reset(o.currentInterval)
 		}
 	}
@@ -370,7 +370,6 @@ func (o *Orchestrator) adaptInterval() {
 func (o *Orchestrator) tick(now time.Time) {
 	tickStart := time.Now()
 	o.tickCount++
-	
 
 	// ── Pre-Stage: Actuator Feedback ─────────────────────────────────────────
 	if o.actuator != nil {
@@ -513,6 +512,12 @@ func (o *Orchestrator) tick(now time.Time) {
 		simulationWindows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
 	}
 
+	if o.consumeSimulationReset() {
+		o.lastSimResult = nil
+		o.simOverlayAge = 0
+		o.simStateOverlay = nil
+	}
+
 	// Update the sim overlay side-channel when a new result arrives.
 	// This is NOT injected into observed windows — it is passed explicitly
 	// to stages that need forward-projected physics state.
@@ -539,8 +544,9 @@ func (o *Orchestrator) tick(now time.Time) {
 	if len(observedWindows) > 0 {
 		systemStaleness = 1.0 - sumConf/float64(len(observedWindows))
 	}
+	forcedSimulation := os.Getenv("FORCE_SIMULATION") == "on" || o.isSimulationForcedAt(o.tickCount)
 	bypassDeepStages := systemStaleness > 0.5
-	if os.Getenv("FORCE_SIMULATION") == "on" {
+	if forcedSimulation {
 		bypassDeepStages = false
 	}
 
@@ -844,7 +850,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	objective := optimisation.ComputeObjective(bundles, topoSnap, now)
 	directives = o.phaseRuntime.apply(o.tickCount, now, bundles, objective, directives)
 
-	if o.actuator != nil {
+	if o.actuator != nil && o.ActuationEnabled() {
 		o.actuator.Dispatch(o.tickCount, directives)
 	}
 
@@ -860,7 +866,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	skipPredDiff := pastDeadline || o.pressureLevel >= 1
 	skipPersist := pastDeadline && o.consecutiveOverruns > 0
 
-	if os.Getenv("FORCE_SIMULATION") == "on" {
+	if forcedSimulation {
 		skipSim = false
 		skipPredDiff = false
 	}
@@ -868,13 +874,13 @@ func (o *Orchestrator) tick(now time.Time) {
 	// OPTIONAL Stage 6: Async simulation
 	s6 := time.Now()
 	// P6: Use named constant simInterval instead of the previous %1 no-op.
-	if !skipSim && o.tickCount%simInterval == 0 {
-		// Build simulation bundles from simulationWindows if scenarios active.
+	if !skipSim && (o.tickCount%simInterval == 0 || forcedSimulation) {
 		// For now, pass the existing bundles (derived from observedWindows) —
-		// scenario effects reach sim via the separate simulationWindows path.
-		_ = simulationWindows
-		o.simRunner.Submit(bundles, topoSnap, o.cfg.SimBudget)
-		// TODO: compute simBundles from simulationWindows for full scenario sim isolation.
+		simBundles := o.buildSimulationBundles(simulationWindows, topoSnap)
+		if len(simBundles) == 0 {
+			simBundles = bundles
+		}
+		o.simRunner.Submit(simBundles, topoSnap, o.cfg.SimBudget)
 	}
 
 	if res := o.simRunner.Latest(); res != nil {
@@ -885,8 +891,12 @@ func (o *Orchestrator) tick(now time.Time) {
 	}
 	// Multi-scenario comparison: run every 10 ticks to produce best/worst/median outcomes.
 	var scenarioComp *streaming.ScenarioComparisonSnapshot
-	if o.tickCount%10 == 0 && !skipSim && o.cfg.SimBudget >= 20*time.Millisecond {
-		msr := o.simRunner.LatestMultiScenario(bundles, topoSnap, o.cfg.SimBudget, 3)
+	if (o.tickCount%10 == 0 || forcedSimulation) && !skipSim && o.cfg.SimBudget >= 20*time.Millisecond {
+		simBundles := o.buildSimulationBundles(simulationWindows, topoSnap)
+		if len(simBundles) == 0 {
+			simBundles = bundles
+		}
+		msr := o.simRunner.LatestMultiScenario(simBundles, topoSnap, o.cfg.SimBudget, 3)
 		if msr != nil {
 			snap := streaming.ScenarioComparisonSnapshot{
 				ScenarioCount:          msr.Comparison.ScenarioCount,
@@ -905,6 +915,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	// ── CRITICAL Stage 7: Reasoning ───────────────────────────────────────────
 	s7 := time.Now()
 	events := o.reasoning.AnalyseWithContext(bundles, topoSnap, objective, netEquilibrium, topoSensitivity, now)
+	events = o.filterAcknowledgedEvents(events)
 	recordStage(stageIdxReasoning, "reasoning", s7)
 
 	// ── Build overlays ────────────────────────────────────────────────────────
@@ -1088,6 +1099,7 @@ func (o *Orchestrator) tick(now time.Time) {
 			PredictedOverrun:    predictedOverrun,
 			SafetyLevel:         o.safetyLevel,
 		},
+		ControlPlane: o.ControlState(),
 	}
 	o.hub.Broadcast(payload)
 	recordStage(stageIdxBroadcast, "broadcast", s8)
@@ -1156,8 +1168,8 @@ func (o *Orchestrator) tick(now time.Time) {
 		Pressure:    o.pressureLevel,
 		SafetyLevel: o.safetyLevel,
 
-		WindowsTotal:     len(observedWindows),
-		WindowsDegraded:  degradedCount,
+		WindowsTotal:    len(observedWindows),
+		WindowsDegraded: degradedCount,
 
 		PruneMs:     o.stageEWMA[stageIdxPrune],
 		WindowsMs:   o.stageEWMA[stageIdxWindows],
@@ -1169,17 +1181,17 @@ func (o *Orchestrator) tick(now time.Time) {
 		ReasoningMs: o.stageEWMA[stageIdxReasoning],
 		BroadcastMs: o.stageEWMA[stageIdxBroadcast],
 
-		SystemRhoMean:      netEquilibrium.SystemRhoMean,
-		SystemFragility:    topoSensitivity.SystemFragility,
-		CollapseRisk:       fpResult.SystemicCollapseProb,
-		ActiveServices:     len(activeIDs),
-		KeystoneServices:   len(sensSnap.KeystoneServices),
+		SystemRhoMean:    netEquilibrium.SystemRhoMean,
+		SystemFragility:  topoSensitivity.SystemFragility,
+		CollapseRisk:     fpResult.SystemicCollapseProb,
+		ActiveServices:   len(activeIDs),
+		KeystoneServices: len(sensSnap.KeystoneServices),
 
-		DirectivesTotal:    len(directives),
+		DirectivesTotal: len(directives),
 
-		Overran:            totalElapsed > o.cfg.TickDeadline,
+		Overran:             totalElapsed > o.cfg.TickDeadline,
 		ConsecutiveOverruns: o.consecutiveOverruns,
-		PredictedOverrun:   predictedOverrun,
+		PredictedOverrun:    predictedOverrun,
 	}
 
 	summary.Emit()

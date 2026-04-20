@@ -3,7 +3,8 @@
 
 ![License](https://img.shields.io/badge/license-commercial-informational)
 ![Go](https://img.shields.io/badge/go-1.21%2B-blue)
-![Next.js](https://img.shields.io/badge/next.js-14-blue)
+![Vite](https://img.shields.io/badge/vite-5.4-blue)
+![React](https://img.shields.io/badge/react-18-blue)
 ![Status](https://img.shields.io/badge/status-production_ready-brightgreen)
 
 ---
@@ -22,10 +23,10 @@ This is production grade infrastructure software.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  DASHBOARD (Next.js / React)                               │
-│  • 12 module command center                                │
-│  • Realtime WebSocket UI                                   │
-│  • 60fps topology visualisation                            │
+│  DASHBOARD (Vite + React)                                  │
+│  • Real-time WebSocket data stream (10 Hz)                │
+│  • REST API control plane (toggle, chaos, policy)         │
+│  • Type-safe TypeScript (SchemaV3 contract)               │
 └───────────────┬─────────────────────────────────────────────┘
                 │
 ┌───────────────▼─────────────────────────────────────────────┐
@@ -82,13 +83,17 @@ completeproject/
 │   ├── persistence/               # Persistence layer
 │   ├── config/                    # Configuration
 │   └── ws/                        # WebSocket primitives
-├── dashboard/                     # Next.js frontend
-│   ├── src/app/                   # App router pages
-│   ├── src/components/            # Control room modules
-│   ├── src/hooks/                 # React hooks
-│   ├── src/store/                 # Zustand state
-│   ├── src/lib/                   # Telemetry normalisation
-│   └── src/types/                 # TypeScript definitions
+├── dashboard/                     # Vite + React frontend
+│   ├── src/components/            # UI panels + layout
+│   │   ├── panels/                # Dashboard panels (status, services, topology)
+│   │   ├── layout/                # Page layout components
+│   │   └── ui/                    # Minimal UI component library
+│   ├── src/hooks/                 # useWebSocket + utility hooks
+│   ├── src/store/                 # Zustand telemetry store
+│   ├── src/lib/                   # Formatting + API client
+│   ├── src/types/                 # Backend contract (SchemaV3)
+│   ├── vite.config.ts             # Vite configuration
+│   └── index.html                 # Entry point
 └── bin/                           # Build artifacts
 ```
 
@@ -130,25 +135,50 @@ completeproject/
 ws://localhost:8080/ws
 ```
 
-Full binary telemetry stream. Streams complete system state at tick rate. Authenticated connection with automatic reconnection.
+**Message Format**: JSON TickPayload (SchemaV3)  
+**Frequency**: 10 Hz (100ms intervals)  
+**Size**: 50-150 KB per message  
+**Auto-reconnect**: Exponential backoff (2s → 4s → 8s → 16s → 32s → 60s)
+
+**Payload Structure**:
+```json
+{
+  "type": "tick",
+  "seq": 12345,
+  "ts": "2024-04-19T12:34:56Z",
+  "bundles": {
+    "service-id": {
+      "queue": { "utilisation": 0.67, "saturation_horizon": 120 },
+      "stability": { "collapse_risk": 0.25, "collapse_zone": "warning" },
+      "signal": { "fast_ewma": 1234.2, "spike_detected": false },
+      "stochastic": { "burst_amplification": 1.8, "arrival_co_v": 0.35 }
+    }
+  },
+  "topology": { "nodes": [...], "edges": [...], "critical_path": {...} },
+  "directives": { "service-id": { "scale_factor": 1.05, "target_utilisation": 0.70 } },
+  "events": [...],
+  "objective": { "composite_score": 0.75, "cascade_failure_probability": 0.18 },
+  "control_plane": { "tick": 12345, "actuation_enabled": true, "policy_preset": "balanced" }
+}
+```
 
 ### REST Endpoints
 
-#### Control Actions
+#### Control Endpoints (Used by Dashboard)
 ```http
-POST /api/v1/control/toggle
-POST /api/v1/control/chaos-run
-POST /api/v1/control/replay-burst
+POST /api/v1/control/toggle              # Toggle actuation on/off
+POST /api/v1/control/chaos-run           # Inject chaos scenario
+POST /api/v1/policy/update               # Change policy preset (balanced/conservative/aggressive)
+POST /api/v1/alerts/ack                  # Acknowledge alert by ID
 ```
 
-#### Domain Endpoints
+#### Other Endpoints
 ```http
-POST /api/v1/policy/update
+POST /api/v1/control/replay-burst
 POST /api/v1/runtime/step
 POST /api/v1/sandbox/trigger
 POST /api/v1/simulation/control
 POST /api/v1/intelligence/rollout
-POST /api/v1/alerts/ack
 ```
 
 #### State
@@ -216,18 +246,21 @@ npm run dev
 
 Expected output:
 ```
-▲ Next.js 16.2.2 (Turbopack)
-- Local:         http://localhost:3000
-✓ Ready in 1512ms
+VITE v5.4.19  ready in 354 ms
+
+➜  Local:   http://localhost:8080/
+➜  Network: http://172.28.80.1:8080/
 ```
 
-**Open Dashboard**: http://localhost:3000
+**Open Dashboard**: http://localhost:8080
 
 You should see:
-- ✅ `CONNECTED` indicator (top right)
-- 🟢 Green health timeline
-- 📊 Service metrics updating at 10Hz
-- 🚨 Real-time alerts (if scenario mode triggers events)
+- ✅ Green LED indicator (top-left, "Awaiting telemetry uplink" → "CONNECTED")
+- 📊 Service Matrix with utilisation and collapse risk
+- 🟢 System Overview health gauge
+- 📈 Real-time topology graph
+- 🚨 Active alerts with recommendations
+- ⚙️ Command Console for policy/actuation control
 
 ---
 
@@ -259,9 +292,17 @@ PROMETHEUS_ADDR=:9090                       # Prometheus metrics endpoint
 
 Create `.env.local` in `dashboard/`:
 ```bash
-NEXT_PUBLIC_BACKEND_WS=ws://localhost:8080/ws
-NEXT_PUBLIC_BACKEND_API=http://localhost:8080/api/v1
+# WebSocket connection (auto-converts http://localhost:8080 → ws://localhost:8080/ws)
+VITE_WS_URL=http://localhost:8080
+
+# REST API base URL
+VITE_API_URL=http://localhost:8080
+
+# Optional authentication
+VITE_INGEST_TOKEN=your-optional-token
 ```
+
+**Note**: The dashboard automatically appends `/ws` to the WebSocket URL and converts `http://` → `ws://` or `https://` → `wss://`.
 
 ---
 
@@ -502,30 +543,35 @@ Response: 200 OK
 
 ### Connection
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
+const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:8080';
+const protocol = wsUrl.startsWith('https') ? 'wss' : 'ws';
+const base = wsUrl.replace(/^https?/, protocol);
+const ws = new WebSocket(`${base}/ws`);
 
 ws.onmessage = (event) => {
   const tick = JSON.parse(event.data);
-  // tick.seq
-  // tick.objective
-  // tick.bundles
-  // tick.topology
-  // tick.predictions
-  console.log(tick);
+  if (tick.type === 'tick') {
+    console.log('Sequence:', tick.seq);
+    console.log('Services:', Object.keys(tick.bundles));
+    console.log('Health:', tick.objective.composite_score);
+    console.log('Cascade Risk:', tick.objective.cascade_failure_probability);
+  }
 };
 ```
 
 ### Message Rate
 - **Frequency**: 10 Hz (every 100ms)
-- **Size**: 50-150 KB per message
-- **Bandwidth**: ~500 KB/s per client
-- **Format**: JSON TickPayload
+- **Size**: 50-150 KB per message (gzipped: 12-30 KB)
+- **Bandwidth**: ~500 KB/s per client (uncompressed)
+- **Format**: JSON TickPayload (SchemaV3)
+- **Compression**: Transparent via WebSocket (modern browsers)
 
-### Auto-Reconnect
-Dashboard implements exponential backoff:
-- Initial: 1 second
-- Max: 30 seconds
-- Attempts: 5 retries before offline
+### Auto-Reconnect (Built into Dashboard)
+Dashboard hook (`useWebSocket.ts`) implements exponential backoff:
+- Initial: 2 seconds
+- Multiplier: 2x
+- Max: 60 seconds
+- No maximum retry attempts
 
 ---
 
@@ -548,6 +594,17 @@ docker run \
   loadequilibrium:latest
 ```
 
+**Build & Run Dashboard** (in separate container or host)
+```bash
+# In dashboard/ directory
+docker build -t loadequilibrium-dashboard:latest .
+docker run \
+  -e VITE_WS_URL=http://backend:8080 \
+  -e VITE_API_URL=http://backend:8080 \
+  -p 3000:8080 \
+  loadequilibrium-dashboard:latest
+```
+
 ### Docker Compose
 
 **Full Stack**
@@ -557,7 +614,7 @@ docker-compose up
 
 Services:
 - `loadequilibrium`: Backend (port 8080)
-- `dashboard`: Frontend (port 3000)
+- `dashboard`: Frontend (port 3000, Vite dev server)
 - `prometheus`: Metrics (port 9090, optional)
 
 ### Kubernetes
@@ -629,23 +686,22 @@ loadequilibrium_tick_duration_ms           # Tick execution time
 ```bash
 # Build
 make build                         # Compile backend binary
-cd dashboard && npm run build      # Next.js production build
+cd dashboard && npm run build      # Vite production build
 
 # Run
 make run                           # Start backend
-cd dashboard && npm run dev        # Dev server with hot reload
+cd dashboard && npm run dev        # Vite dev server with HMR
 
 # Test
 make test                          # Unit tests (Go)
-cd dashboard && npm test           # Jest tests (React)
+cd dashboard && npm run test       # Vitest tests (React)
 
 # Lint
 make lint                          # Go lint + fmt
 cd dashboard && npm run lint       # ESLint
 
-# Clean
-make clean                         # Remove artifacts
-cd dashboard && npm run clean      # Remove node_modules/.next
+# Preview
+cd dashboard && npm run preview    # Preview production build locally
 ```
 
 ---
@@ -654,12 +710,13 @@ cd dashboard && npm run clean      # Remove node_modules/.next
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| Dashboard shows DISCONNECTED | Backend not running or WebSocket failed | Run `go run cmd/loadequilibrium/main.go` |
-| No service data | Scenario mode off, no telemetry submitted | Set `SCENARIO_MODE=on` or POST telemetry |
-| Cascade probability always 0 | Services healthy, no risk | Trigger chaos test: `POST /api/v1/control/chaos-run` |
+| "Awaiting telemetry uplink" indicator | Backend not running or WebSocket failed | Run `go run cmd/loadequilibrium/main.go` and check VITE_WS_URL |
+| No services in Service Matrix | Scenario mode off, no telemetry submitted | Set `SCENARIO_MODE=on` or POST telemetry to /api/v1/ingest |
+| Dashboard fails to start | Port 8080 already in use or VITE_WS_URL not set | Change port in vite.config.ts or set VITE_WS_URL=http://localhost:8080 |
+| WebSocket connection fails | CORS or port mismatch | Verify backend port matches VITE_WS_URL |
+| Control buttons don't work | VITE_API_URL not set or API not responding | Set VITE_API_URL=http://localhost:8080 in .env.local |
 | High memory usage | Too many services tracked | Reduce `MAX_SERVICES` or increase `STALE_SERVICE_AGE` |
-| WebSocket timeouts | Connection idle too long | Ensure client auto-reconnect is enabled |
-| 404 on /api/v1/* | Wrong port or API not mounted | Verify `PORT=8080` and backend running |
+| TypeScript errors | Type mismatch with backend | Ensure backend is running SchemaV3 (check ARCHITECTURE.md) |
 
 ---
 

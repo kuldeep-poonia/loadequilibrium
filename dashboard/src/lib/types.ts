@@ -1,5 +1,6 @@
 // =============================================================================
-// backend.ts — Full TickPayload contract matching streaming/types.go SchemaV3
+// lib/types.ts — Full TickPayload contract matching backend SchemaV3
+// Re-exported from dashboard/src/types/backend.ts for convenience
 // =============================================================================
 
 export type MessageType = "tick" | "ping";
@@ -384,3 +385,12 @@ export interface TickPayload {
   risk_timeline: Record<string, RiskTimelinePoint[]>;
   stability_envelope: StabilityEnvelope;
 }
+
+// ── Connection status ────────────────────────────────────────────────────────
+
+export type ConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "open"
+  | "closed"
+  | "error";

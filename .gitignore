@@ -25,3 +25,12 @@ bin/
 /le_runtime.exe
 /le_sweep
 /le_test
+
+
+# Internal analysis / docs (do not push)
+
+BACKEND_ANALYSIS.md
+BACKEND_DEEP_ANALYSIS.md
+DASHBOARD_CHANGES.md
+DASHBOARD_INTEGRATION.md
+INTERNAL_INTERFACE_MAP.md

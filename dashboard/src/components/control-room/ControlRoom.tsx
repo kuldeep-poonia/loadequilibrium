@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import CommandCenter from './CommandCenter';
+import MinimalDashboard from './MinimalDashboard';
 
 export default function ControlRoom() {
-  return <CommandCenter />;
+  return <MinimalDashboard />;
 }

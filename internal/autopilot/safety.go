@@ -155,7 +155,7 @@ func (s *SafetyEngine) InstabilityGrowth(
 				(e0 + 1)
 	}
 
-	return rate > s.AccelThreshold
+	return rate > 0.5
 }
 
 /*
@@ -254,11 +254,12 @@ func (s *SafetyEngine) fallbackCapacity(
 		x.ArrivalMean /
 			(x.ServiceRate + 1e-6)
 
-	return math.Min(
-		required*1.3,
-		x.CapacityTarget+
-			s.MaxCapacityRamp,
-	)
+	base := math.Max(x.CapacityActive, x.CapacityTarget)
+
+return math.Min(
+	required*1.3,
+	base + s.MaxCapacityRamp,
+)
 }
 
 /*

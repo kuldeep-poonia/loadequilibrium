@@ -147,19 +147,8 @@ func (p *Predictor) retryCascade(x CongestionState) float64 {
 Capacity evolution with stochastic jitter
 */
 func (p *Predictor) capacityNext(x CongestionState) float64 {
-
-	base :=
-		x.CapacityActive +
-			(x.CapacityTarget-x.CapacityActive)*
-				(1-math.Exp(-p.Dt/x.CapacityTauUp))
-
-	jitter :=
-		p.CapacityJitterSigma *
-			math.Sin(base*3.17) // pseudo-random bounded oscillation
-
-	return base + jitter
+	return x.CapacityTarget
 }
-
 /*
 Latency dynamics with service recovery coupling
 */
@@ -292,15 +281,27 @@ func (p *Predictor) Step(x CongestionState) CongestionState {
 	next.ArrivalMean = m
 	next.ArrivalVar = v
 
+	maxArrival := 1000.0
+	minArrival := 0.0
+
+	if next.ArrivalMean > maxArrival {
+		next.ArrivalMean = maxArrival
+	}
+	if next.ArrivalMean < minArrival {
+		next.ArrivalMean = minArrival
+	}
+
 	retry :=
 		p.retryCascade(x)
 
 	cap :=
 		p.capacityNext(x)
 
-	service :=
-		x.ServiceRate * cap *
-			(1 - x.CacheRelief)
+	effectiveRelief := math.Min(0.5, math.Max(0.0, x.CacheRelief))
+
+service :=
+    x.ServiceRate * cap *
+        (1 - effectiveRelief)
 
 	next.TopologyAmplification =
 		p.topologyNext(x)

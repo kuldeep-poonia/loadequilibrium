@@ -57,7 +57,8 @@ func (s *Supervisor) arrivalEnvelope(x PlantState, step int) float64 {
 		x.ArrivalRegimeShift *
 			math.Min(1, float64(step)/5.0)
 
-	return math.Max(
+
+return math.Max(
 		x.ArrivalMean+regimeBoost,
 		x.ArrivalP95,
 	)
@@ -66,9 +67,9 @@ func (s *Supervisor) arrivalEnvelope(x PlantState, step int) float64 {
 /*
 Retry load
 */
-func (s *Supervisor) retryLoad(x PlantState) float64 {
+     func (s *Supervisor) retryLoad(x PlantState) float64 {
 
-	return x.RetryFactor *
+	   return x.RetryFactor *
 		(1 + x.LatencyPressure) *
 		math.Sqrt(x.Backlog+1)
 }

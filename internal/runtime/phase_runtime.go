@@ -780,14 +780,17 @@ func computePrecisionFusedScale(
 	// Each maps a confidence/risk proxy to [eps, 1.0+eps].
 	sigPID := eps + collapseRisk
 	sigPolicy := eps + phaseClamp(1.0-policyConf, eps, 1.0)
-	sigMPC := eps + phaseClamp(1.0-mpcConf, eps, 1.0)
+	sigMPC := eps + phaseClamp(1.0/(mpcConf+eps), eps, 10.0)
 	sigSandbox := eps + phaseClamp(sandboxRisk, eps, 1.0)
 	sigIntel := eps + 0.75 // RL: fixed high uncertainty - it is always learning
 
 	// Precision = 1/sigma^2 (higher precision = more authority)
 	precPID := 1.0 / (sigPID * sigPID)
 	precPolicy := 1.0 / (sigPolicy * sigPolicy)
-	precMPC := 1.0 / (sigMPC * sigMPC)
+	precMPC := 1.0 / (sigMPC)
+	precMPC = math.Max(precMPC, 0.2)
+	log.Printf("[DEBUG MPC] conf=%.3f sigma=%.3f precision=%.3f",
+		mpcConf, sigMPC, precMPC)
 	precSandbox := 1.0 / (sigSandbox * sigSandbox)
 	precIntel := 1.0 / (sigIntel * sigIntel)
 
@@ -798,6 +801,8 @@ func computePrecisionFusedScale(
 
 	u := (precPID*uPID + precPolicy*uPolicy + precMPC*uMPC +
 		precSandbox*uSandbox + precIntel*uIntel) / totalPrec
+
+	log.Printf("[DEBUG FINAL] MPC influence applied - final scale=%.3f", u)
 
 	return phaseClamp(u, 0.45, 3.0)
 }

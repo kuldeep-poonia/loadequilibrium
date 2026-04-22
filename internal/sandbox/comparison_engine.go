@@ -1,51 +1,29 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 )
 
-/*
-PHASE-4 — COMPARISON ENGINE (REV-5 HORIZON-ROBUST / RISK-SEPARATED)
-
-Sequence position:
-5️⃣ after baseline_snapshot.go
-
-This revision fixes deep scoring integrity issues:
-
-✔ collapse risk and interaction risk accumulated independently
-✔ no double-counting in global score
-✔ multi-signal temporal robustness norm (latency + backlog + throughput + collapse)
-✔ proper metric standardisation layer (mean-scale invariant transform)
-✔ exponential horizon weighting (recency + terminal emphasis)
-✔ safety margin computed as WORST-CASE across horizon
-
-Conceptual direction:
-
-score ≈ discounted risk-aware utility functional
-safety ≈ min-margin trajectory constraint
-
-Human infra style intentionally uneven.
-*/
-
 type ComparisonResult struct {
-
 	CostScore    float64
 	UtilityScore float64
 
-	CollapseEnergy   float64
-	InteractionRisk  float64
+	CollapseEnergy  float64
+	InteractionRisk float64
 
 	GlobalScore float64
 
-	Stable      bool
-	SafetyMarg  float64
-	Confidence  float64
+	Stable     bool
+	SafetyMarg float64
+	Confidence float64
 
 	TemporalRobustness float64
 }
 
 type ComparisonWeights struct {
-
 	LatencyW float64
 	TailW    float64
 	BacklogW float64
@@ -67,7 +45,6 @@ type ComparisonWeights struct {
 }
 
 type SnapshotUncertainty struct {
-
 	LatencyVar    float64
 	TailVar       float64
 	ThroughputVar float64
@@ -290,8 +267,6 @@ func utilImproveStd(base, cand float64) float64 {
 	return math.Log(cand / base)
 }
 
-
-
 /*
 stdDiff returns a scale-invariant normalised absolute difference.
 Used for temporal robustness accumulation across the horizon.
@@ -312,4 +287,129 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+/*
+----- PHASE 1: BASELINE VS ENGINE COMPARISON -----
+*/
+
+type Metrics struct {
+	Failures     int
+	RecoveryTime float64
+	Throughput   float64
+	TotalCost    float64
+}
+
+type Phase1ComparisonResult struct {
+	Baseline    Metrics            `json:"baseline"`
+	Engine      Metrics            `json:"engine"`
+	Improvement map[string]float64 `json:"improvement"`
+}
+
+func ExtractMetrics(trace *PlantTrace) Metrics {
+	if trace == nil || len(trace.Points) == 0 {
+		return Metrics{}
+	}
+
+	n := len(trace.Points)
+	var failureCount int
+	var recoveryTime float64
+	var totalThroughput float64
+	var totalLatency float64
+
+	inCollapse := false
+	collapseStart := 0.0
+
+	for _, p := range trace.Points {
+		// Count failures
+		if p.Collapsed && !inCollapse {
+    failureCount++
+    inCollapse = true
+    collapseStart = p.Time.Seconds()
+}
+
+if !p.Collapsed && inCollapse {
+    recoveryTime += p.Time.Seconds() - collapseStart
+    inCollapse = false
+}
+
+		totalThroughput += p.Throughput
+		totalLatency += p.Latency
+	}
+
+	var avgRecoveryTime float64
+if failureCount > 0 {
+    avgRecoveryTime = recoveryTime / float64(failureCount)
+}
+
+	meanThroughput := totalThroughput / float64(n)
+	meanLatency := totalLatency / float64(n)
+
+	// Cost: composite of latency + tail effects (higher latency = higher cost)
+	totalCost := meanLatency + 0.5*float64(failureCount)
+
+	return Metrics{
+    Failures:     failureCount,
+    RecoveryTime: avgRecoveryTime,
+    Throughput:   meanThroughput,
+    TotalCost:    totalCost,
+}
+}
+
+func ComparePhase1Metrics(baseline, engine Metrics) map[string]float64 {
+	improvement := make(map[string]float64)
+
+	// Failures reduction (lower is better)
+if baseline.Failures > 0 {
+    improvement["failures_reduction"] =
+        float64(baseline.Failures-engine.Failures) / float64(baseline.Failures)
+} else {
+    improvement["failures_reduction"] = 0
+}
+	// Recovery speed (baseline_time / engine_time, > 1 means improvement)
+	if engine.RecoveryTime > 1e-6 {
+		improvement["recovery_speed"] =
+			baseline.RecoveryTime / engine.RecoveryTime
+	} else {
+		improvement["recovery_speed"] = 1.0
+	}
+
+	// Throughput improvement (engine / baseline, > 1 means improvement)
+	if baseline.Throughput > 1e-6 {
+		improvement["throughput_improvement"] =
+			engine.Throughput / baseline.Throughput
+	} else {
+		improvement["throughput_improvement"] = 1.0
+	}
+
+	// Cost reduction (baseline_cost - engine_cost) / baseline_cost
+	if baseline.TotalCost > 1e-6 {
+		improvement["cost_reduction"] =
+			(baseline.TotalCost - engine.TotalCost) / baseline.TotalCost
+	} else {
+		improvement["cost_reduction"] = 0
+	}
+
+	return improvement
+}
+
+func SavePhase1Result(result Phase1ComparisonResult, outputPath string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Marshal to JSON with indentation
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Write to file
+	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+		return err
+	}
+
+	return nil
 }

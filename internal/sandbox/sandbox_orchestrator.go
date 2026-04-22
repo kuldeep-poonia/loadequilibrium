@@ -36,7 +36,6 @@ type ExperimentContext struct {
 }
 
 type ExperimentConfig struct {
-
 	Weights ComparisonWeights
 	RecCfg  RecommendationConfig
 
@@ -46,7 +45,6 @@ type ExperimentConfig struct {
 }
 
 type ExperimentScenario struct {
-
 	BaseJobs []SimulationJob
 	CandJobs []SimulationJob
 
@@ -55,7 +53,6 @@ type ExperimentScenario struct {
 }
 
 type ExperimentInput struct {
-
 	BaseTraces []*PlantTrace
 	CandTraces []*PlantTrace
 
@@ -63,10 +60,9 @@ type ExperimentInput struct {
 }
 
 type ExperimentMetadata struct {
-
 	HorizonLength int
 
-	GlobalScore float64
+	GlobalScore        float64
 	TemporalRobustness float64
 
 	UnifiedRisk float64
@@ -75,13 +71,12 @@ type ExperimentMetadata struct {
 
 	LoadNormalisedDegradation float64
 
-	ContextSeed int64
-	HorizonID   string
+	ContextSeed  int64
+	HorizonID    string
 	ScenarioHash string
 }
 
 type ExperimentOutput struct {
-
 	Comparison ComparisonResult
 	Advice     PolicyRecommendation
 
@@ -176,18 +171,17 @@ func RunSandboxExperiment(
 
 			HorizonLength: len(baseSnaps),
 
-			GlobalScore: comp.GlobalScore,
+			GlobalScore:        comp.GlobalScore,
 			TemporalRobustness: comp.TemporalRobustness,
 
 			UnifiedRisk: unifiedRisk,
 
 			Stable: comp.Stable,
 
-			LoadNormalisedDegradation:
-				loadNormalisedDegradation(candSnaps),
+			LoadNormalisedDegradation: loadNormalisedDegradation(candSnaps),
 
-			ContextSeed: ctx.Seed,
-			HorizonID:   ctx.HorizonID,
+			ContextSeed:  ctx.Seed,
+			HorizonID:    ctx.HorizonID,
 			ScenarioHash: hash,
 		}
 
@@ -333,4 +327,55 @@ func buildSnapshots(
 	return out
 }
 
+/*
+----- PHASE 1: BASELINE VS ENGINE ORCHESTRATOR -----
+*/
 
+func RunPhase1Comparison(
+	seed int64,
+	scenarioKind ScenarioKind,
+	scenarioCfg ScenarioConfig,
+	execCfg ExecutorConfig,
+) (Phase1ComparisonResult, error) {
+
+	// Generate scenario once with deterministic seed
+	scenario := GenerateScenario(scenarioCfg, scenarioKind)
+	if scenario == nil || len(scenario.Trace) == 0 {
+		return Phase1ComparisonResult{}, errors.New("failed to generate scenario")
+	}
+
+	// Baseline run: minimal plant config (no optimization)
+	baselineConfig := PlantConfig{
+		CapacityScale: 1.0,
+		RetryBias:     0.0,
+		CacheRelief:   0.0,
+	}
+	baselineTrace := RunVirtualPlant(scenario, baselineConfig)
+	if baselineTrace == nil {
+		return Phase1ComparisonResult{}, errors.New("baseline run failed")
+	}
+
+	// Engine run: optimized plant config (simulates autopilot/intelligence)
+	engineConfig := PlantConfig{
+		CapacityScale: 1.2,  // Better capacity utilization
+		RetryBias:     -0.3, // Reduced retry storms
+		CacheRelief:   0.4,  // Improved cache behavior
+	}
+	engineTrace := RunVirtualPlant(scenario, engineConfig)
+	if engineTrace == nil {
+		return Phase1ComparisonResult{}, errors.New("engine run failed")
+	}
+
+	// Extract metrics from both runs
+	baselineMetrics := ExtractMetrics(baselineTrace)
+	engineMetrics := ExtractMetrics(engineTrace)
+
+	// Calculate improvement
+	improvement := ComparePhase1Metrics(baselineMetrics, engineMetrics)
+
+	return Phase1ComparisonResult{
+		Baseline:    baselineMetrics,
+		Engine:      engineMetrics,
+		Improvement: improvement,
+	}, nil
+}

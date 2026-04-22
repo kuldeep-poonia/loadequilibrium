@@ -88,11 +88,13 @@ func (r *RuntimeOrchestrator) forecastBacklog(
 		u := plan[i]
 
 		sim.CapacityTarget = u.CapacityTarget
+sim.CapacityActive = u.CapacityTarget   // align model
+sim = r.Predictor.Step(sim)
 		sim.RetryFactor = u.RetryFactor
 		sim.CacheRelief = u.CacheRelief
 		sim.ArrivalMean = arrival
 
-		sim = r.Predictor.Step(sim)
+		
 	}
 
 	return sim.Backlog
@@ -293,8 +295,8 @@ func (r *RuntimeOrchestrator) Tick(
 
 	// ---------- plant ----------
 	plantIn := s.Plant
-	plantIn.CapacityActive = newRollout.CapacityActive
-	plantIn.CapacityTarget = newRollout.CapacityActive
+plantIn.CapacityActive = newRollout.CapacityActive
+plantIn.CapacityTarget = control.CapacityTarget   // ✅ FIX
 	plantIn.RetryFactor = newRollout.RetryActive
 	plantIn.CacheRelief = newRollout.CacheActive
 	plantIn.ArrivalMean = measuredArrival

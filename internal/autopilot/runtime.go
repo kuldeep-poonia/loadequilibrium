@@ -32,6 +32,14 @@ type RuntimeState struct {
 	SafetyTight     float64
 
 	MetaPersistence float64
+	Engine          EngineState
+}
+
+type EngineState struct {
+	memory      *RegimeMemory
+	prevBacklog float64
+	prevLatency float64
+	confState   ConfidenceState
 }
 
 type RuntimeTelemetry struct {
@@ -182,7 +190,35 @@ func (r *RuntimeOrchestrator) Tick(
 
 	next := s
 
+	if next.Engine.memory == nil {
+		next.Engine.memory = NewRegimeMemory(128)
+	}
+
+	// 1. Feature extraction
+	backlogGrowth := s.Plant.Backlog - s.Engine.prevBacklog
+	latencyTrend := s.Plant.Latency - s.Engine.prevLatency
+	retryPressure := s.Rollout.RetryActive
+
+	// 2. Instability computation
+	instInput := InstabilityInput{
+		Backlog:     s.Plant.Backlog,
+		BacklogRate: backlogGrowth,
+		Latency:     s.Plant.Latency,
+		LatencyRate: latencyTrend,
+		RetryRate:   retryPressure,
+		Oscillation: next.Engine.memory.GetOscillationScore(),
+		Utilization: measuredArrival / (s.Plant.ServiceRate * s.Rollout.CapacityActive + 1e-6),
+	}
+	instabilityScore, _ := ComputeInstability(instInput)
+
+	// 3. Memory READ
+	trend := next.Engine.memory.GetTrend()
+	eff := next.Engine.memory.GetEffectiveness()
+	oscScore := next.Engine.memory.GetOscillationScore()
+	stabScore := next.Engine.memory.GetStabilityScore()
+
 	// ---------- MPC ----------
+	// Compute MPC FIRST so we have target capacity for decision logic
 	seq, mpcConf :=
 		r.MPC.Optimise(
 			r.mpcState(s),
@@ -191,6 +227,61 @@ func (r *RuntimeOrchestrator) Tick(
 
 	// ALWAYS use latest MPC decision, NO fallback
 	control := seq[0]
+
+	// 4. Confidence computation (with memory)
+	confInput := ConfidenceInput{
+		TrendConsistency:     1.0 - math.Abs(trend.Instability),
+		SignalAgreement:      stabScore,
+		ControlEffectiveness: eff,
+		Oscillation:          oscScore,
+	}
+	confidenceScore, newConfState := ComputeConfidence(next.Engine.confState, confInput)
+	next.Engine.confState = newConfState
+	confidenceScore *= (0.5 + 0.5*stabScore)
+
+	// 5. Anomaly classification (with memory)
+	anomalyType := Classify(AnomalyInput{
+		Instability:   instabilityScore,
+		Confidence:    confidenceScore,
+		BacklogGrowth: backlogGrowth,
+		LatencyTrend:  latencyTrend,
+		RetryPressure: retryPressure,
+		Oscillation:   oscScore,
+	})
+
+	// 6. Decision policy
+	decision := Decide(DecisionInput{
+		Instability:    instabilityScore,
+		Confidence:     confidenceScore,
+		Anomaly:        anomalyType,
+		Backlog:        s.Plant.Backlog,
+		Workers:        s.Rollout.CapacityActive,
+		TargetCapacity: control.CapacityTarget,
+		Effectiveness:  eff,
+		Oscillation:    oscScore,
+		Trend:          trend.Instability,
+	})
+
+	// 7. Supervisor (final clamp)
+	sup := Supervisor{Dt: r.Dt}
+	decision.ScaleDelta = sup.ClampDecision(decision.ScaleDelta, oscScore, confidenceScore)
+
+	// 8. Memory WRITE (after decision)
+	next.Engine.memory.Add(MemoryEntry{
+		Instability: instabilityScore,
+		Confidence:  confidenceScore,
+		Anomaly:     anomalyType,
+		Backlog:     s.Plant.Backlog,
+		Workers:     s.Rollout.CapacityActive,
+		Action:      decision.Action,
+		ScaleDelta:  decision.ScaleDelta,
+	})
+
+	// 9. Update previous state
+	next.Engine.prevBacklog = s.Plant.Backlog
+	next.Engine.prevLatency = s.Plant.Latency
+
+
 
 	// ---------- predictor-based forecast ----------
 	fBacklog :=
@@ -290,8 +381,12 @@ func (r *RuntimeOrchestrator) Tick(
 
 	// ---------- plant ----------
 	plantIn := s.Plant
-plantIn.CapacityActive = newRollout.CapacityActive
-plantIn.CapacityTarget = control.CapacityTarget   // ✅ FIX
+	plantIn.CapacityActive = newRollout.CapacityActive
+
+	plantIn.CapacityTarget = control.CapacityTarget
+	if plantIn.CapacityTarget < 1.0 {
+		plantIn.CapacityTarget = 1.0
+	}
 	plantIn.RetryFactor = newRollout.RetryActive
 	plantIn.CacheRelief = newRollout.CacheActive
 	plantIn.ArrivalMean = measuredArrival

@@ -222,3 +222,12 @@ func (s *Supervisor) ShouldRecompute(x PlantState) bool {
 
 	return h <= 2
 }
+
+// Clamp final scaling decision
+func (s *Supervisor) ClampDecision(delta float64, osc float64, conf float64) float64 {
+	d := delta
+	// FIX 6: Continuous smooth damping without thresholds
+	d *= 1.0 / (1.0 + 2.0*osc)
+	d *= (0.3 + 0.7*conf)
+	return d
+}

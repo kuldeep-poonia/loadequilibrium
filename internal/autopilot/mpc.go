@@ -493,14 +493,16 @@ func (m *MPCOptimiser) Optimise(
 	// -------------------------------
 	// 1) WARM START
 	// -------------------------------
+	warmRequired := initial.ArrivalMean / math.Max(initial.ServiceRate, 1)
 	for i := 0; i < m.Horizon; i++ {
 		if i >= len(prevSeq) {
-			required := initial.ArrivalMean / math.Max(initial.ServiceRate, 1)
-			seq[i].CapacityTarget = required
+			seq[i].CapacityTarget = warmRequired
 		} else {
+			// 20% anchor to required prevents stale spike plans from drifting
 			seq[i].CapacityTarget =
-				0.8*seq[i].CapacityTarget +
-					0.2*initial.CapacityActive
+				0.6*seq[i].CapacityTarget +
+					0.2*initial.CapacityActive +
+					0.2*warmRequired
 		}
 	}
 

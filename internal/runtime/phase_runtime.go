@@ -288,7 +288,7 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 
 	rollout := &autopilot.RolloutController{
 		Dt:                    tickSec,
-		CapRampUpNormal:       0.5,
+		CapRampUpNormal:       2.0,
 		CapRampUpEmergency:    0.9,
 		CapRampDown:           0.4,
 		RetryEnableRamp:       0.5,
@@ -778,25 +778,25 @@ func computePrecisionFusedScale(
 
 	// sigmai derived from system-state signals, not hardcoded.
 	// Each maps a confidence/risk proxy to [eps, 1.0+eps].
-	sigPID := eps + collapseRisk
+	sigPID := 0.5 + collapseRisk
 	sigPolicy := eps + phaseClamp(1.0-policyConf, eps, 1.0)
 	sigMPC := eps + phaseClamp(1.0/(mpcConf+eps), eps, 10.0)
 	sigSandbox := eps + phaseClamp(sandboxRisk, eps, 1.0)
 	sigIntel := eps + 0.75 // RL: fixed high uncertainty - it is always learning
 
 	// Precision = 1/sigma^2 (higher precision = more authority)
-	precPID := 1.0 / (sigPID * sigPID)
-	precPolicy := 1.0 / (sigPolicy * sigPolicy)
-	precMPC := 1.0 / (sigMPC)
-	precMPC = math.Max(precMPC, 0.2)
+	precPID := 1.0 / sigPID
+	precPolicy := 1.0 / sigPolicy
+	precMPC := 1.0 / sigMPC
+	//precMPC = math.Max(precMPC, 0.2)
 	log.Printf("[DEBUG MPC] conf=%.3f sigma=%.3f precision=%.3f",
 		mpcConf, sigMPC, precMPC)
-	precSandbox := 1.0 / (sigSandbox * sigSandbox)
-	precIntel := 1.0 / (sigIntel * sigIntel)
+	precSandbox := 1.0 / sigSandbox
+	precIntel := 1.0 / sigIntel
 
 	totalPrec := precPID + precPolicy + precMPC + precSandbox + precIntel
 	if totalPrec < eps {
-		return phaseClamp(uPID, 0.45, 3.0) // degenerate guard: fallback to PID
+		return phaseClamp(uPID, 0.45, 10.0) // degenerate guard: fallback to PID
 	}
 
 	u := (precPID*uPID + precPolicy*uPolicy + precMPC*uMPC +
@@ -804,7 +804,7 @@ func computePrecisionFusedScale(
 
 	log.Printf("[DEBUG FINAL] MPC influence applied - final scale=%.3f", u)
 
-	return phaseClamp(u, 0.45, 3.0)
+	return phaseClamp(u, 0.45, 10.0)
 }
 
 func (p *phaseRuntime) mergeDirective(
@@ -819,9 +819,12 @@ func (p *phaseRuntime) mergeDirective(
 ) optimisation.ControlDirective {
 	currentReplicas := p.currentReplicas(bundle)
 	scaleFromPolicy := float64(phase1.Scaling.DesiredReplicas) / float64(currentReplicas)
-	uPID := phaseClamp(base.ScaleFactor, 0.45, 3.0)
-	uPolicy := phaseClamp(scaleFromPolicy, 0.45, 3.0)
-	uMPC := phaseClamp(auto.Capacity, 0.45, 3.0)
+	uPID := phaseClamp(base.ScaleFactor, 0.45, 10.0)
+	uPolicy := phaseClamp(scaleFromPolicy, 0.45, 10.0)
+	mappedScale := mapCapacityToScale(auto.Capacity, 1.0, 0.45, 10.0)
+
+
+uMPC := mappedScale
 	uSandbox := phaseClamp(1+phase2.CapacityDelta+sim.CapacityDelta, 0.45, 3.0)
 	uIntel := phaseClamp(1, 0.45, 3.0) // RL Scale Action deactivated (Phase 4), now cost-tuned
 
@@ -852,7 +855,7 @@ func (p *phaseRuntime) mergeDirective(
 	if merged.ServiceID == "" {
 		merged.ServiceID = bundle.Queue.ServiceID
 	}
-	merged.ScaleFactor = phaseClamp(scale, 0.45, 3.0)
+	merged.ScaleFactor = phaseClamp(scale, 0.45, 10.0)
 	merged.TargetUtilisation = targetUtil
 	merged.Active = true
 	merged.CostGradient = phaseMax(
@@ -906,6 +909,25 @@ func phaseClamp(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+
+func mapCapacityToScale(
+    capacity float64,
+    baseUnit float64,
+    minScale float64,
+    maxScale float64,
+) float64 {
+
+    raw := capacity / baseUnit
+
+    if raw < minScale {
+        return minScale
+    }
+    if raw > maxScale {
+        return maxScale
+    }
+    return raw
 }
 
 func phaseMax(a, b float64) float64 {

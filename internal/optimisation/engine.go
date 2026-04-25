@@ -215,8 +215,7 @@ func (e *Engine) RunControl(
 				scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
 			}
 		}
-		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 3.0))
-
+		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 6.0))
 		// E. Anti-Stiction Mechanism: Detect stuck limits and inject exploratory bump.
 		// Compares final scale against prevScaleForStiction (the PID-bounded value
 		// before MPC and planner) to detect when the whole optimizer chain has left

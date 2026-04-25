@@ -23,6 +23,8 @@ func (c *Controller) Tick(
 	errorRate float64,
 	memPressure float64,
 	dt float64,
+
+	autoScale float64,
 ) {
 
 	if c.ActState == nil {
@@ -135,23 +137,31 @@ func (c *Controller) Tick(
 		)
 
 	// ===== MODEL-BASED EMERGENCY LAW =====
-	if energy > 0.85 {
+	if energy > 0.92 {
 
-		requiredCapacity :=
-			sys.PredictedArrival * 1.4
+    requiredCapacity :=
+        sys.PredictedArrival * 1.4
 
-		targetReplicas :=
-			int(
-				requiredCapacity /
-					math.Max(sys.ServiceRate, 0.1),
-			)
+    targetReplicas :=
+        int(
+            requiredCapacity /
+                math.Max(sys.ServiceRate, 0.1),
+        )
 
-		best.Replicas =
-			maxInt(best.Replicas, targetReplicas)
+    // autopilot-derived replicas (ensure this is set earlier in Tick)
+    autoReplicas := int(autoScale)
 
-		best.RetryLimit =
-			maxInt(1, best.RetryLimit-1)
-	}
+    // 🔥 COMBINE (override नहीं)
+    best.Replicas =
+        maxInt(
+            maxInt(best.Replicas, targetReplicas),
+            autoReplicas,
+        )
+
+    // RetryLimit logic same रहेगा (ये scaling से independent है)
+    best.RetryLimit =
+        maxInt(1, best.RetryLimit-1)
+}
 
 	c.LastDecision = best
 

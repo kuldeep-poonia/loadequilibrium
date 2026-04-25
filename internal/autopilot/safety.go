@@ -2,28 +2,24 @@ package autopilot
 
 import "math"
 
-
-
 type SafetyState struct {
-
 	Backlog float64
 	Latency float64
 
 	CapacityActive float64
 	CapacityTarget float64
-	ServiceRate float64
+	ServiceRate    float64
 
 	ArrivalMean float64
 	ArrivalVar  float64
 
-	Disturbance float64
+	Disturbance      float64
 	TopologyPressure float64
 
 	RetryPressure float64
 }
 
 type SafetyEngine struct {
-
 	BaseMaxBacklog float64
 	BaseMaxLatency float64
 
@@ -40,7 +36,7 @@ type SafetyEngine struct {
 	AccelBaseWindow int
 	AccelThreshold  float64
 
-	MaxCapacityRamp float64
+	MaxCapacityRamp   float64
 	CapacityEffectTau float64
 	TopologyDelayTau  float64
 
@@ -193,7 +189,7 @@ func (s *SafetyEngine) terminalSafe(
 
 	return s.energy(x) <
 		s.TerminalEnergyBase*
-			(1 + 0.5*math.Abs(x.Disturbance)) &&
+			(1+0.5*math.Abs(x.Disturbance)) &&
 		x.Backlog < limit
 }
 
@@ -256,10 +252,10 @@ func (s *SafetyEngine) fallbackCapacity(
 
 	base := math.Max(x.CapacityActive, x.CapacityTarget)
 
-return math.Min(
-	required*1.3,
-	base + s.MaxCapacityRamp,
-)
+	return math.Min(
+		required*1.3,
+		base+s.MaxCapacityRamp,
+	)
 }
 
 /*
@@ -331,6 +327,7 @@ func (s *SafetyEngine) EmergencyOverride(
 
 	return false, 0
 }
+
 /*
 SetAdaptiveTightness — called by RuntimeOrchestrator each tick to
 tighten safety margins under sustained stress. tightness ∈ [0,1].
@@ -379,8 +376,15 @@ func (s *SafetyEngine) ShouldOverrideProb(
 
 	for i, u := range plan {
 		// first-order capacity lag toward MPC target
-		cur.CapacityActive +=
-			(u.CapacityTarget - cur.CapacityActive) * 0.3
+		delta := u.CapacityTarget - cur.CapacityActive
+
+// 🚀 fast path when system stressed
+if cur.Backlog > 100 {
+    cur.CapacityActive = u.CapacityTarget
+} else {
+    // normal smoothing
+    cur.CapacityActive += delta * 0.3
+}
 
 		// retain retry pressure from MPC retry knob
 		cur.RetryPressure = u.RetryFactor

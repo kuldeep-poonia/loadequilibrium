@@ -182,12 +182,13 @@ func ApplyActuatorDynamics(
 
 	// ===== WRITEBACK =====
 
-	sys.Replicas =
-		hysteresisRound(
-			sys.Replicas,
-			act.ReplicaWarm,
-			0.3,
-		)
+	// 🔥 FIX: remove deadband for scaling
+sys.Replicas =
+    hysteresisRound(
+        sys.Replicas,
+        act.ReplicaActual,
+        0.3,
+    )
 
 	sys.QueueLimit =
 		hysteresisRound(

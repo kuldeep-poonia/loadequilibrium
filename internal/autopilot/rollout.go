@@ -111,7 +111,7 @@ func (r *RolloutController) enqueue(
 			) < 0.05 {
 
 			x.IntentQueue[k] = intent
-			return x
+continue   // 🔥 NOT return
 		}
 	}
 
@@ -232,6 +232,7 @@ func (r *RolloutController) rampCap(
 	target float64,
 	mode GovernanceMode,
 	queuePressure float64,
+	backlog float64,
 ) float64 {
 
 	err := target - active
@@ -246,17 +247,17 @@ func (r *RolloutController) rampCap(
 		rate = r.CapRampDown
 	}
 
-	rate *=
-		1 + r.QueuePressureRampGain*
-			queuePressure
+	rate *= 1 + r.QueuePressureRampGain*queuePressure
+
+	// 🚀 adaptive behavior
+	if backlog > 100 {
+    rate *= 2.0
+}
 
 	step :=
 		math.Max(
 			-rate*r.Dt,
-			math.Min(
-				rate*r.Dt,
-				err,
-			),
+			math.Min(rate*r.Dt, err),
 		)
 
 	return active + step
@@ -298,7 +299,10 @@ func (r *RolloutController) Step(
 		return next
 	}
 
-	i := next.IntentQueue[0]
+	i := next.IntentQueue[len(next.IntentQueue)-1]
+
+	// Clear entire queue after picking latest intent
+	next.IntentQueue = next.IntentQueue[:0]
 
 	newCap :=
 		r.rampCap(
@@ -306,6 +310,7 @@ func (r *RolloutController) Step(
 			i.Cap,
 			next.Mode,
 			queuePressure,
+			backlog,
 		)
 
 	delta :=
@@ -420,9 +425,15 @@ func (r *RolloutController) StepAdaptive(
 		savedEmg := r.CapRampUpEmergency
 		savedDown := r.CapRampDown
 
-		r.CapRampUpNormal = savedUp / r.PaceModifier
-		r.CapRampUpEmergency = savedEmg / r.PaceModifier
-		r.CapRampDown = savedDown / r.PaceModifier
+		//scale := 1.0
+
+//if r.PaceModifier > 0 {
+   // scale = 1.0 / (1.0 + r.PaceModifier)  // bounded slow-down
+//}
+
+//r.CapRampUpNormal = savedUp * scale
+//r.CapRampUpEmergency = savedEmg * scale
+//r.CapRampDown = savedDown * scale
 
 		result := r.Step(x, intent, backlog, stabilityPressure, infraLoad)
 

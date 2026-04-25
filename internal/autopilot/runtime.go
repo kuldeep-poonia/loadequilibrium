@@ -88,7 +88,7 @@ func (r *RuntimeOrchestrator) forecastBacklog(
 		u := plan[i]
 
 		sim.CapacityTarget = u.CapacityTarget
-sim.CapacityActive = u.CapacityTarget   // align model
+//sim.CapacityActive = u.CapacityTarget   // align model
 sim = r.Predictor.Step(sim)
 		sim.RetryFactor = u.RetryFactor
 		sim.CacheRelief = u.CacheRelief
@@ -189,14 +189,8 @@ func (r *RuntimeOrchestrator) Tick(
 			s.LastPlan,
 		)
 
-	control := MPCControl{
-		CapacityTarget: s.Plant.CapacityTarget,
-		RetryFactor:    s.Rollout.RetryActive,
-		CacheRelief:    s.Rollout.CacheActive,
-	}
-	if len(seq) > 0 {
-		control = seq[0]
-	}
+	// ALWAYS use latest MPC decision, NO fallback
+	control := seq[0]
 
 	// ---------- predictor-based forecast ----------
 	fBacklog :=
@@ -282,11 +276,12 @@ func (r *RuntimeOrchestrator) Tick(
 		)
 
 	// ---------- multidimensional failure ----------
-	if randUnit() < r.FailureScaleProb {
+	// if randUnit() < r.FailureScaleProb {
+//     newRollout.CapacityActive = s.Rollout.CapacityActive
+// }
 
-		newRollout.CapacityActive =
-			s.Rollout.CapacityActive
-	}
+
+
 
 	if randUnit() < r.FailureConfigProb {
 

@@ -84,9 +84,11 @@ func (s *SafetyConstraintProjector) Project(in SafetyInput) SafetyOutput {
 
 	cost := vecNorm(s.constraintVector(x, in))
 
+	cleanIn := sanitizeVec(in.Action)
+
 	return SafetyOutput{
 		Action:         x,
-		ViolationNorm:  vecNorm(diff(x, in.Action)),
+		ViolationNorm:  vecNorm(diff(x, cleanIn)),
 		ConstraintCost: cost,
 	}
 }
@@ -107,10 +109,12 @@ func (s *SafetyConstraintProjector) totalGrad(
 
 	for i := range x {
 
-		up :=
-			2.8 +
-				0.6*math.Tanh(load) -
-				0.9*in.Risk
+		// RELAXED: Increase the upper ceiling for action
+        // RELAXED: Increase the ceiling to allow scaling during high risk
+        up :=
+            4.0 +                  // INCREASED: Was 2.8
+                0.6*math.Tanh(load) - 
+                0.3*in.Risk        // REDUCED PENALTY: Was 0.9
 
 		lo :=
 			-2.3 -
@@ -186,14 +190,16 @@ func (s *SafetyConstraintProjector) totalGrad(
 
 	/* hazard aligned risk economics */
 
-	h := sigmoid(
-		in.SLAWeight *
-			(in.HazardProxy - in.Risk),
-	)
+    h := sigmoid(in.SLAWeight * (in.HazardProxy - in.Risk))
 
-	for i := range x {
-		g[i] += h * x[i]
-	}
+    for i := range x {
+        // FIX: If the backlog (HazardProxy) is significantly higher than risk,
+        // stop penalizing positive scaling actions.
+        if in.HazardProxy > 0.7 && x[i] > 0 {
+             continue 
+        }
+        g[i] += h * x[i]
+    }
 
 	/* dual contribution */
 
@@ -295,4 +301,16 @@ func unitNormalize(x []float64) []float64 {
 	}
 
 	return v
+}
+
+func sanitizeVec(v []float64) []float64 {
+	out := make([]float64, len(v))
+	for i, x := range v {
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			out[i] = 0.0
+		} else {
+			out[i] = x
+		}
+	}
+	return out
 }

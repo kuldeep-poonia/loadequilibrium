@@ -16,14 +16,14 @@ import (
 const (
 	writeTimeout      = 5 * time.Second
 	pingInterval      = 15 * time.Second
-	sendBufferSize    = 1024
+	sendBufferSize    = 16
 	pongWait          = 60 * time.Second
 	defaultMaxClients = 50
 
 	pressureProbeFrames = 1024
 	pressureProbeChunk  = 64
 	pressureProbeAfter  = sendBufferSize
-	pressureProbeWindow = 2 * time.Second
+	pressureProbeWindow = 250 * time.Millisecond
 )
 
 var pressureProbePayload = [125]byte{}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/loadequilibrium/loadequilibrium/internal/autopilot"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
+	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
 	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
@@ -24,6 +25,7 @@ type phaseServiceRuntime struct {
 	autopilotState autopilot.RuntimeState
 	pgPolicy       *intelligence.PGRuntimePolicy
 	adapter        *intelligence.AutonomyControlAdapter
+	control        *ctrl.Authority
 	lastSandbox    sandbox.ExperimentOutput
 }
 
@@ -131,32 +133,25 @@ func (p *phaseRuntime) apply(
 	now time.Time,
 	bundles map[string]*modelling.ServiceModelBundle,
 	objective optimisation.ObjectiveScore,
-	directives map[string]optimisation.ControlDirective,
+	optimizerCandidates map[string][]optimisation.ControlCandidate,
 ) map[string]optimisation.ControlDirective {
 	if p == nil {
-		return directives
+		return map[string]optimisation.ControlDirective{}
 	}
 
 	out := make(map[string]optimisation.ControlDirective, len(bundles))
-	for id, directive := range directives {
-		out[id] = directive
-	}
-
 	active := make(map[string]struct{}, len(bundles))
 
 	for id, bundle := range bundles {
 		active[id] = struct{}{}
 
 		service := p.ensureService(id)
-		base := out[id]
-		if base.ServiceID == "" {
-			base = optimisation.ControlDirective{
-				ServiceID:         id,
-				ComputedAt:        now,
-				ScaleFactor:       1,
-				TargetUtilisation: p.cfg.UtilisationSetpoint,
-				Active:            true,
-			}
+		base := optimisation.ControlDirective{
+			ServiceID:         id,
+			ComputedAt:        now,
+			ScaleFactor:       1,
+			TargetUtilisation: p.cfg.UtilisationSetpoint,
+			Active:            true,
 		}
 
 		phase1 := p.evaluatePolicy(bundle, base, &service.policyState)
@@ -169,7 +164,7 @@ func (p *phaseRuntime) apply(
 		}
 
 		infra := intelligence.InfraState{
-			QueueDepth:       bundle.Queue.MeanQueueLen,
+			QueueDepth: bundle.Queue.MeanQueueLen,
 			LatencyP95:       bundle.Queue.AdjustedWaitMs,
 			CPUUsage:         phaseClamp(bundle.Queue.Utilisation, 0, 1.5),
 			RetryRate:        phaseClamp(float64(phase1.Retry.RetryLimit)/phaseMax(float64(p.currentRetry(bundle)), 1), 0, 4),
@@ -198,7 +193,20 @@ func (p *phaseRuntime) apply(
 			}
 		}
 
-		out[id] = p.mergeDirective(base, bundle, phase1, phase2, simAdvice, autoTel, intel, objective)
+		out[id] = p.selectControlDirective(
+			service,
+			id,
+			tick,
+			now,
+			bundle,
+			phase1,
+			phase2,
+			simAdvice,
+			autoTel,
+			intel,
+			objective,
+			optimizerCandidates[id],
+		)
 	}
 
 	for id := range p.services {
@@ -289,7 +297,7 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 	rollout := &autopilot.RolloutController{
 		Dt:                    tickSec,
 		CapRampUpNormal:       2.0,
-		CapRampUpEmergency:    0.9,
+		CapRampUpEmergency:    8.0,
 		CapRampDown:           0.4,
 		RetryEnableRamp:       0.5,
 		RetryDisableRamp:      0.3,
@@ -375,6 +383,7 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		autopilot: autoRuntime,
 		pgPolicy:  pgPolicy,
 		adapter:   adapter,
+		control:   ctrl.NewAuthority(),
 	}
 	p.services[id] = service
 	return service
@@ -432,7 +441,10 @@ func (p *phaseRuntime) evaluatePolicy(
 ) policy.EngineDecision {
 	currentReplicas := p.currentReplicas(bundle)
 	currentRetry := p.currentRetry(bundle)
-	currentQueue := phaseMax(bundle.Queue.MeanQueueLen+1, 1)
+	currentQueue := phaseMax(
+		phaseMax(bundle.Queue.MeanQueueLen*2, 10),
+		1,
+	)
 	weights := p.policyWeights()
 
 	input := policy.EngineInput{
@@ -442,7 +454,7 @@ func (p *phaseRuntime) evaluatePolicy(
 			TargetLatency:     500,
 			ObservedLatency:   phaseMax(bundle.Queue.AdjustedWaitMs, 1),
 			MinReplicas:       1,
-			MaxReplicas:       phaseMaxInt(currentReplicas+4, 4),
+			MaxReplicas: phaseMaxInt(currentReplicas*3, currentReplicas+2),
 			ScaleCooldownCost: 0.1,
 			InstanceCost:      1.0,
 			SlaPenaltyWeight:  1.0,
@@ -585,7 +597,7 @@ func (p *phaseRuntime) runAutopilot(
 		CapacityActive:        phaseMax(state.Rollout.CapacityActive, 0.5),
 		CapacityTarget:        phaseMax(base.ScaleFactor+0.15*phase2.CapacityDelta, 0.5),
 		CapacityTauUp:         1.0,
-		CapacityTauDown:       1.0,
+		CapacityTauDown:       4.0,
 		RetryFactor:           phaseClamp(float64(phase1.Retry.RetryLimit)/phaseMax(float64(p.currentRetry(bundle)), 1), 0, 3),
 		Latency:               phaseMax(bundle.Queue.AdjustedWaitMs/100.0, 0),
 		CPUPressure:           phaseClamp(bundle.Queue.Utilisation, 0, 1.5),
@@ -755,60 +767,11 @@ func (p *phaseRuntime) runSandbox(
 	)
 }
 
-// computePrecisionFusedScale implements a MAP estimator that fuses
-// multiple optimizer preferences into a single action with
-// mathematically grounded authority assignment.
-//
-// Each optimizer i contributes:
-//   - ui: preferred scale factor
-//   - sigmai: uncertainty in that preference (state-derived, not fixed)
-//
-// The result u* = (sum ui*preci) / (sum preci) is the minimum-variance
-// unbiased estimator when each optimizer's preference is modeled as a
-// Gaussian measurement of the true optimal scale.
-//
-// Authority is earned by confidence, not assigned by hard-coded weight.
-// At collapse risk=0: PID dominates (sigma_pid~=0). As risk->1: policy and
-// sandbox gain authority because PID becomes uncertain.
-func computePrecisionFusedScale(
-	uPID, uPolicy, uMPC, uSandbox, uIntel float64,
-	collapseRisk, policyConf, mpcConf, sandboxRisk float64,
-) float64 {
-	const eps = 1e-4 // numerical floor prevents division by zero
-
-	// sigmai derived from system-state signals, not hardcoded.
-	// Each maps a confidence/risk proxy to [eps, 1.0+eps].
-	sigPID := 0.5 + collapseRisk
-	sigPolicy := eps + phaseClamp(1.0-policyConf, eps, 1.0)
-	sigMPC := eps + phaseClamp(1.0/(mpcConf+eps), eps, 10.0)
-	sigSandbox := eps + phaseClamp(sandboxRisk, eps, 1.0)
-	sigIntel := eps + 0.75 // RL: fixed high uncertainty - it is always learning
-
-	// Precision = 1/sigma^2 (higher precision = more authority)
-	precPID := 1.0 / sigPID
-	precPolicy := 1.0 / sigPolicy
-	precMPC := 1.0 / sigMPC
-	//precMPC = math.Max(precMPC, 0.2)
-	log.Printf("[DEBUG MPC] conf=%.3f sigma=%.3f precision=%.3f",
-		mpcConf, sigMPC, precMPC)
-	precSandbox := 1.0 / sigSandbox
-	precIntel := 1.0 / sigIntel
-
-	totalPrec := precPID + precPolicy + precMPC + precSandbox + precIntel
-	if totalPrec < eps {
-		return phaseClamp(uPID, 0.45, 10.0) // degenerate guard: fallback to PID
-	}
-
-	u := (precPID*uPID + precPolicy*uPolicy + precMPC*uMPC +
-		precSandbox*uSandbox + precIntel*uIntel) / totalPrec
-
-	log.Printf("[DEBUG FINAL] MPC influence applied - final scale=%.3f", u)
-
-	return phaseClamp(u, 0.45, 10.0)
-}
-
-func (p *phaseRuntime) mergeDirective(
-	base optimisation.ControlDirective,
+func (p *phaseRuntime) selectControlDirective(
+	service *phaseServiceRuntime,
+	serviceID string,
+	tick uint64,
+	now time.Time,
 	bundle *modelling.ServiceModelBundle,
 	phase1 policy.EngineDecision,
 	phase2 sandbox.PolicyRecommendation,
@@ -816,68 +779,150 @@ func (p *phaseRuntime) mergeDirective(
 	auto autopilot.RuntimeTelemetry,
 	intel intelligence.MPCWeighting,
 	objective optimisation.ObjectiveScore,
+	optimizerCandidates []optimisation.ControlCandidate,
 ) optimisation.ControlDirective {
-	currentReplicas := p.currentReplicas(bundle)
-	scaleFromPolicy := float64(phase1.Scaling.DesiredReplicas) / float64(currentReplicas)
-	uPID := phaseClamp(base.ScaleFactor, 0.45, 10.0)
-	uPolicy := phaseClamp(scaleFromPolicy, 0.45, 10.0)
-	mappedScale := mapCapacityToScale(auto.Capacity, 1.0, 0.45, 10.0)
-
-
-uMPC := mappedScale
-	uSandbox := phaseClamp(1+phase2.CapacityDelta+sim.CapacityDelta, 0.45, 3.0)
-	uIntel := phaseClamp(1, 0.45, 3.0) // RL Scale Action deactivated (Phase 4), now cost-tuned
-
-	// MPC confidence proxy: lower OverrideRate -> MPC is not fighting the plant -> higher confidence.
-	mpcConf := phaseClamp(1.0-auto.OverrideRate, 0, 1.0)
-	// Sandbox risk: worst of the two sandbox passes.
-	sandboxRisk := phaseMax(phase2.RiskScore, sim.RiskScore)
-
-	scale := computePrecisionFusedScale(
-		uPID, uPolicy, uMPC, uSandbox, uIntel,
-		bundle.Stability.CollapseRisk,
-		phase1.Confidence,
-		mpcConf,
-		sandboxRisk,
-	)
-
-	targetUtil := phaseClamp(
-		p.cfg.UtilisationSetpoint-
-			0.03*phase2.BrownoutDelta-
-			0.02*sim.BrownoutDelta,
-		0.45,
-		0.90,
-	)
-
-	merged := base
-	merged.ComputedAt = time.Now()
-	merged.ServiceID = base.ServiceID
-	if merged.ServiceID == "" {
-		merged.ServiceID = bundle.Queue.ServiceID
+	if service.control == nil {
+		service.control = ctrl.NewAuthority()
 	}
-	merged.ScaleFactor = phaseClamp(scale, 0.45, 10.0)
-	merged.TargetUtilisation = targetUtil
-	merged.Active = true
-	merged.CostGradient = phaseMax(
-		base.CostGradient,
-		phase1.GlobalRisk+phase2.RiskScore+sim.RiskScore,
+
+	autopilotReplicas := phaseMaxInt(int(math.Round(auto.Capacity)), 1)
+	// Use raw per-worker service rate (not divided) so util = arrival/(replicas*rate)
+	// is meaningful. bundle.Queue.ServiceRate is the per-unit throughput.
+	rawServiceRate := phaseMax(bundle.Queue.ServiceRate, 0.1)
+	// QueueLimit: use a stable minimum of 10 or actual observed queue depth headroom.
+	// Never set it to MeanQueueLen+1 — that collapses to 1 when backlog is zero
+	// and makes ANY non-zero backlog look like 150% saturation.
+	configuredQueueLimit := phaseMaxInt(
+		int(phaseMax(bundle.Queue.MeanQueueLen*2, 10)),
+		10,
 	)
-	merged.PredictiveTarget = phaseClamp(
-		base.PredictiveTarget+0.10*objective.CompositeScore+0.05*auto.OverrideRate,
-		0,
-		1.5,
-	)
-	merged.PlannerScaleFactor = merged.ScaleFactor
-	merged.PlannerProbabilisticScore = phaseClamp(
-		phaseMax(phase2.RiskScore, sim.RiskScore),
+	currentRetry := p.currentRetry(bundle)
+
+	state := ctrl.SystemState{
+		Replicas:         autopilotReplicas,
+		QueueLimit:       configuredQueueLimit,
+		RetryLimit:       currentRetry,
+		CacheAggression:  phaseClamp(phase1.Cache.CacheAggression, 0, 1),
+		QueueDepth:       bundle.Queue.MeanQueueLen,
+		PredictedArrival: phaseMax(bundle.Queue.ArrivalRate, 0.1),
+		ArrivalRate:      phaseMax(bundle.Queue.ArrivalRate, 0.1),
+		ServiceRate:      rawServiceRate,
+		Latency:          phaseMax(bundle.Queue.AdjustedWaitMs, 1),
+		Risk:             phaseMax(bundle.Stability.CollapseRisk, objective.CompositeScore),
+		Utilisation:      phaseClamp(bundle.Queue.Utilisation, 0, 2),
+		SLATarget:        phaseMax(objective.ReferenceLatencyMs, 500),
+		MinReplicas:      1,
+		MaxReplicas: phaseMaxInt(autopilotReplicas*3, autopilotReplicas+2),
+		MinRetry:         1,
+		MaxRetry:         phaseMaxInt(currentRetry+3, 3),
+	}
+
+	sandboxAdvice := mergeSandboxAdvice(phase2, sim)
+	autoRisk := phaseClamp(
+		0.40*(1-auto.Confidence)+
+			0.35*float64(auto.Mode)/3.0,
 		0,
 		1,
 	)
-	return merged
+	if auto.Backlog > bundle.Queue.MeanQueueLen*1.5 {
+		autoRisk = phaseMax(autoRisk, 0.55)
+	}
+	decision := service.control.Decide(ctrl.AuthorityInput{
+		ServiceID: serviceID,
+		Tick:      tick,
+		Now:       now,
+		State:     state,
+		Config: ctrl.AuthorityConfig{
+			TargetUtilisation: p.cfg.UtilisationSetpoint,
+			TickSeconds:       phaseMax(p.cfg.TickInterval.Seconds(), 0.1),
+			MaxScaleDelta:     controlScaleDelta(p.pressureLevelFromRisk(objective.CompositeScore)),
+		},
+		Advisory: ctrl.AdvisoryBundle{
+			Autopilot: ctrl.AutopilotAdvice{
+				MinReplicas:      phase1.Scaling.MinReplicas,
+				MaxReplicas:      phase1.Scaling.MaxReplicas,
+				PredictedBacklog: auto.Backlog,
+				PredictedLatency: auto.Latency,
+				InstabilityRisk:  autoRisk,
+				Confidence:       auto.Confidence,
+				OverrideRate:     auto.OverrideRate,
+				Mode:             auto.Mode,
+				Damping:          auto.Damping,
+				Warning:          auto.Mode >= int(autopilot.ModeCritical) && auto.Confidence < 0.5,
+			},
+			Intelligence: ctrl.IntelligenceAdvice{
+				Regime:       intel.Regime,
+				RiskEWMA:     intel.RiskEWMA,
+				AnomalyScore: intel.AnomalyScore,
+				RiskWeight:   intel.RiskWeight,
+				SmoothCost:   intel.SmoothCost,
+				CostBias:     intel.CostBias,
+			},
+			Policy: ctrl.PolicyAdvice{
+				DesiredReplicas: phase1.Scaling.DesiredReplicas,
+				MinReplicas:     phase1.Scaling.MinReplicas,
+				MaxReplicas:     phase1.Scaling.MaxReplicas,
+				RetryLimit:      phase1.Retry.RetryLimit,
+				QueueLimit:      phase1.Queue.QueueLimit,
+				CacheAggression: phase1.Cache.CacheAggression,
+				Risk:            phase1.GlobalRisk,
+				Confidence:      phase1.Confidence,
+			},
+			Sandbox: sandboxAdvice,
+		},
+		OptimizerCandidates: optimizerCandidates,
+	})
+
+	return decision.Directive
+}
+
+func mergeSandboxAdvice(primary, sim sandbox.PolicyRecommendation) ctrl.SandboxAdvice {
+	return ctrl.SandboxAdvice{
+		CapacityDelta:      primary.CapacityDelta + sim.CapacityDelta,
+		EfficiencyDelta:    phaseMax(primary.EfficiencyDelta, sim.EfficiencyDelta),
+		DampingDelta:       phaseMax(primary.DampingDelta, sim.DampingDelta),
+		RetryPressureDelta: phaseMax(primary.RetryPressureDelta, sim.RetryPressureDelta),
+		BrownoutDelta:      phaseMax(primary.BrownoutDelta, sim.BrownoutDelta),
+		RiskScore:          phaseMax(primary.RiskScore, sim.RiskScore),
+		Urgency:            phaseMax(primary.UrgencyMag, sim.UrgencyMag),
+		Confidence:         phaseMax(primary.Confidence, sim.Confidence),
+		RiskUp:             primary.RiskUp || sim.RiskUp,
+	}
+}
+
+func controlScaleDelta(level int) float64 {
+	switch level {
+	case 2:
+		return 0.50
+	case 3:
+		return 0.75
+	default:
+		return 0.30
+	}
+}
+
+func (p *phaseRuntime) pressureLevelFromRisk(risk float64) int {
+	switch {
+	case risk >= 0.85:
+		return 3
+	case risk >= 0.65:
+		return 2
+	case risk >= 0.45:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (p *phaseRuntime) currentReplicas(bundle *modelling.ServiceModelBundle) int {
-	return phaseMaxInt(int(math.Round(phaseMax(bundle.Queue.ServiceRate, 1))), 1)
+	// Derive replica count as ceil(ArrivalRate / ServiceRate), with floor=1.
+	// This is the steady-state required capacity at current load — a reasonable
+	// proxy for "current replica count" when the actual pod count is unavailable.
+	// ServiceRate is per-replica throughput (req/s); ArrivalRate is total demand.
+	sr := phaseMax(bundle.Queue.ServiceRate, 0.1)
+	ar := phaseMax(bundle.Queue.ArrivalRate, 0.1)
+	estimated := int(math.Ceil(ar / sr))
+	return phaseMaxInt(estimated, 1)
 }
 
 func (p *phaseRuntime) currentRetry(bundle *modelling.ServiceModelBundle) int {
@@ -911,23 +956,22 @@ func phaseClamp(v, lo, hi float64) float64 {
 	return v
 }
 
-
 func mapCapacityToScale(
-    capacity float64,
-    baseUnit float64,
-    minScale float64,
-    maxScale float64,
+	capacity float64,
+	baseUnit float64,
+	minScale float64,
+	maxScale float64,
 ) float64 {
 
-    raw := capacity / baseUnit
+	raw := capacity / baseUnit
 
-    if raw < minScale {
-        return minScale
-    }
-    if raw > maxScale {
-        return maxScale
-    }
-    return raw
+	if raw < minScale {
+		return minScale
+	}
+	if raw > maxScale {
+		return maxScale
+	}
+	return raw
 }
 
 func phaseMax(a, b float64) float64 {

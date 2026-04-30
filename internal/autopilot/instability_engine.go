@@ -20,6 +20,8 @@ func ComputeInstability(in InstabilityInput) (float64, string) {
 	// ---------- normalization (scale-robust, resolution-preserving) ----------
 	b  := pos(in.Backlog)
 	br := pos(in.BacklogRate)
+
+	
 	l  := pos(in.Latency)
 	lr := pos(in.LatencyRate)
 	r  := clamp01(in.RetryRate)

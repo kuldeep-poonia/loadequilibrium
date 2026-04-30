@@ -11,20 +11,22 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 )
 
+const coalescingWindow = 2 * time.Millisecond
+
 // CoalescingActuator implements a map-coalesced dispatcher with feedback
 type CoalescingActuator struct {
-	mu            sync.Mutex
-	pending       map[string]DirectiveSnapshot
-	notify        chan struct{}
-	feedback      chan ActuationResult
-	done          chan struct{}
-	closed        uint32
-	debugLogging  uint32
-	failureCount  uint64
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
-	backend       Backend
+	mu           sync.Mutex
+	pending      map[string]DirectiveSnapshot
+	notify       chan struct{}
+	feedback     chan ActuationResult
+	done         chan struct{}
+	closed       uint32
+	debugLogging uint32
+	failureCount uint64
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	backend      Backend
 }
 
 func NewCoalescingActuator(feedbackBuf int, backend Backend) *CoalescingActuator {
@@ -93,8 +95,20 @@ func (a *CoalescingActuator) Feedback() <-chan ActuationResult {
 // loop handles the signals and the final drain
 func (a *CoalescingActuator) loop() {
 	defer a.wg.Done()
-	// Using 'range' on a channel is the cleanest way to drain
 	for range a.notify {
+		time.Sleep(coalescingWindow)
+		for {
+			select {
+			case _, ok := <-a.notify:
+				if !ok {
+					a.processPending()
+					return
+				}
+			default:
+				goto process
+			}
+		}
+	process:
 		a.processPending()
 	}
 	// FINAL DRAIN: One last check after the channel is closed
@@ -112,9 +126,9 @@ func (a *CoalescingActuator) processPending() {
 	a.pending = make(map[string]DirectiveSnapshot)
 	a.mu.Unlock()
 
-	// CRITICAL: Execute synchronously. 
-	// Do NOT use 'go a.backend.Execute'. 
-	// If this blocks, the loop blocks, and Close() will wait 
+	// CRITICAL: Execute synchronously.
+	// Do NOT use 'go a.backend.Execute'.
+	// If this blocks, the loop blocks, and Close() will wait
 	// until this is completely finished.
 	for _, snapshot := range work {
 		start := time.Now()
@@ -141,9 +155,14 @@ func (a *CoalescingActuator) processPending() {
 			Latency:     latency,
 			Error:       err,
 		}
-		// Always block to send feedback - this channel is created with sufficient buffer
-		// Dropping results violates the actuator contract that all executions are reported
-		a.feedback <- res
+		select {
+		case a.feedback <- res:
+		default:
+			if atomic.LoadUint32(&a.debugLogging) == 1 {
+				log.Printf("[actuator] feedback dropped id=%s svc=%s tick=%d",
+					snapshot.DirectiveID, snapshot.ServiceID, snapshot.TickIndex)
+			}
+		}
 	}
 }
 
@@ -198,7 +217,7 @@ func (a *CoalescingActuator) Close(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		// Timeout: the test gave up waiting for the drain
-		a.cancel() 
+		a.cancel()
 		return ctx.Err()
 	}
 }

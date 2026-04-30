@@ -8,9 +8,9 @@ type ActuatorState struct {
 	ReplicaWarm   float64
 	ScaleCooldown float64
 
-	QueueTarget int
-	QueueActual float64
-	QueueLag    float64
+	QueueTarget   int
+	QueueActual   float64
+	QueueLag      float64
 	QueueCooldown float64
 
 	RetryTarget int
@@ -21,24 +21,24 @@ type ActuatorState struct {
 }
 
 type ActuatorConfig struct {
-	MinReplicas int
-	MaxReplicas int
-	MaxScaleRate float64
+	MinReplicas      int
+	MaxReplicas      int
+	MaxScaleRate     float64
 	ScaleCooldownSec float64
-	WarmupRate float64
+	WarmupRate       float64
 
-	MinQueue int
-	MaxQueue int
-	MaxQueueRate float64
-	QueueLagTau float64
+	MinQueue         int
+	MaxQueue         int
+	MaxQueueRate     float64
+	QueueLagTau      float64
 	QueueCooldownSec float64
 
-	RetryRate float64
+	RetryRate            float64
 	RetryDisturbanceGain float64
-	MinRetry int
-	MaxRetry int
+	MinRetry             int
+	MaxRetry             int
 
-	CacheRate float64
+	CacheRate            float64
 	CacheMemPressureGain float64
 }
 
@@ -52,15 +52,11 @@ func ApplyActuatorDynamics(
 	memPressure float64,
 	dt float64,
 ) {
+	cfg = normalizeActuatorConfig(*sys, cmd, cfg)
 
 	// ===== SCALING WITH WARMUP EFFECTIVENESS =====
 
-	if act.ScaleCooldown <= 0 {
-		act.ReplicaTarget =
-			clampInt(cmd.Replicas,
-				cfg.MinReplicas,
-				cfg.MaxReplicas)
-	}
+	act.ReplicaTarget = clampInt(cmd.Replicas, cfg.MinReplicas, cfg.MaxReplicas)
 
 	diff :=
 		float64(act.ReplicaTarget) - act.ReplicaActual
@@ -182,14 +178,10 @@ func ApplyActuatorDynamics(
 
 	// ===== WRITEBACK =====
 
-	// 🔥 FIX: remove deadband for scaling
-sys.Replicas =
-    hysteresisRound(
-        sys.Replicas,
-        act.ReplicaActual,
-        0.3,
-    )
+	act.ReplicaActual = math.Max(1, act.ReplicaActual)
 
+	// 🔥 FIX: remove deadband for scaling
+	sys.Replicas = maxInt(1, int(math.Round(act.ReplicaActual)))
 	sys.QueueLimit =
 		hysteresisRound(
 			sys.QueueLimit,
@@ -206,6 +198,46 @@ sys.Replicas =
 
 	sys.CacheAggression =
 		act.CacheActual
+}
+
+func normalizeActuatorConfig(sys SystemState, cmd Bundle, cfg ActuatorConfig) ActuatorConfig {
+	if cfg.MinReplicas <= 0 {
+		cfg.MinReplicas = maxInt(1, sys.MinReplicas)
+	}
+	if cfg.MaxReplicas < cfg.MinReplicas {
+		cfg.MaxReplicas = maxInt(maxInt(sys.MaxReplicas, cmd.Replicas), cfg.MinReplicas)
+	}
+	if cfg.MaxScaleRate <= 0 {
+		cfg.MaxScaleRate = math.Max(1, float64(cfg.MaxReplicas-cfg.MinReplicas))
+	}
+	if cfg.WarmupRate <= 0 {
+		cfg.WarmupRate = 1
+	}
+	if cfg.MinQueue <= 0 {
+		cfg.MinQueue = 1
+	}
+	if cfg.MaxQueue < cfg.MinQueue {
+		cfg.MaxQueue = maxInt(maxInt(sys.QueueLimit*2, int(math.Round(cmd.QueueLimit))), cfg.MinQueue)
+	}
+	if cfg.MaxQueueRate <= 0 {
+		cfg.MaxQueueRate = math.Max(1, float64(cfg.MaxQueue-cfg.MinQueue))
+	}
+	if cfg.QueueLagTau <= 0 {
+		cfg.QueueLagTau = 1
+	}
+	if cfg.MinRetry <= 0 {
+		cfg.MinRetry = 1
+	}
+	if cfg.MaxRetry < cfg.MinRetry {
+		cfg.MaxRetry = maxInt(maxInt(sys.MaxRetry, cmd.RetryLimit), cfg.MinRetry)
+	}
+	if cfg.RetryRate <= 0 {
+		cfg.RetryRate = 1
+	}
+	if cfg.CacheRate <= 0 {
+		cfg.CacheRate = 1
+	}
+	return cfg
 }
 
 func clampFloat(v, lo, hi float64) float64 {

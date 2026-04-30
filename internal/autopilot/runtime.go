@@ -5,8 +5,6 @@ import (
 	"math/rand"
 )
 
-
-
 type AutonomyMode int
 
 const (
@@ -17,24 +15,31 @@ const (
 )
 
 type RuntimeState struct {
-	Plant   CongestionState
-	Rollout RolloutState
-	ID      IdentificationState
+    Plant   CongestionState
+    Rollout RolloutState
+    ID      IdentificationState
 
-	LastPlan []MPCControl
+    LastPlan []MPCControl
 
-	ForecastBacklog float64
+    ForecastBacklog float64
 
-	Time float64
-	Mode AutonomyMode
+    // PhysicalBacklog tracks the real queue depth using measured arrival minus
+    // actual service throughput. This is the ground truth signal; it avoids the
+    // predictor's virtual-capacity / CacheRelief damping that causes model-vs-
+    // reality divergence in heavy-burst scenarios.
+    PhysicalBacklog float64
 
-	OverrideHistory []float64
-	SafetyTight     float64
+    Time float64
+    Mode AutonomyMode
 
-	MetaPersistence float64
-	Engine          EngineState
+    OverrideHistory     []float64
+    LastFallbackCap     float64
+    SafetyTight         float64
+    ModeStableCount     int
+
+    MetaPersistence float64
+    Engine          EngineState
 }
-
 type EngineState struct {
 	memory      *RegimeMemory
 	prevBacklog float64
@@ -43,6 +48,10 @@ type EngineState struct {
 }
 
 type RuntimeTelemetry struct {
+	// PhysicalBacklog is the ground-truth queue depth: measured arrival minus
+	// actual service throughput, accumulated per tick. Use this for SLA
+	// evaluation, authority decisions, and summary metrics.
+	PhysicalBacklog float64
 	Backlog  float64
 	Latency  float64
 	Capacity float64
@@ -56,6 +65,9 @@ type RuntimeTelemetry struct {
 	VarianceScale float64
 	SafetyScale   float64
 	Damping       float64
+
+	DecisionDelta  float64
+	DecisionAction string
 }
 
 type RuntimeOrchestrator struct {
@@ -96,13 +108,12 @@ func (r *RuntimeOrchestrator) forecastBacklog(
 		u := plan[i]
 
 		sim.CapacityTarget = u.CapacityTarget
-//sim.CapacityActive = u.CapacityTarget   // align model
-sim = r.Predictor.Step(sim)
+		//sim.CapacityActive = u.CapacityTarget   // align model
+		sim = r.Predictor.Step(sim)
 		sim.RetryFactor = u.RetryFactor
 		sim.CacheRelief = u.CacheRelief
 		sim.ArrivalMean = arrival
 
-		
 	}
 
 	return sim.Backlog
@@ -112,31 +123,39 @@ sim = r.Predictor.Step(sim)
 probabilistic autonomy mode
 */
 func (r *RuntimeOrchestrator) modeProb(
-	backlog float64,
-	conf float64,
-	overrideRate float64,
+    backlog float64,
+    conf float64,
+    overrideRate float64,
 ) AutonomyMode {
 
-	risk :=
-		math.Tanh(
-			backlog/r.SLA_Backlog +
-				(1 - conf) +
-				overrideRate,
-		)
+    risk :=
+        math.Tanh(
+            backlog/r.SLA_Backlog +
+                (1 - conf) +
+                overrideRate,
+        )
 
-	if risk > 0.8 {
-		return ModeCritical
-	}
+    // Hysteresis bands: require risk to exceed threshold by a margin
+    // before escalating, and drop below by a margin before de-escalating.
+    // Prevents mode thrashing when risk oscillates near a boundary.
+    const (
+        criticalEntry  = 0.80
+        criticalExit   = 0.70
+        guardedEntry   = 0.55
+        guardedExit    = 0.45
+        stableEntry    = 0.30
+    )
 
-	if risk > 0.55 {
-		return ModeGuarded
-	}
-
-	if risk < 0.3 {
-		return ModeStable
-	}
-
-	return ModeRecovery
+    if risk > criticalEntry {
+        return ModeCritical
+    }
+    if risk > guardedEntry {
+        return ModeGuarded
+    }
+    if risk < stableEntry {
+        return ModeStable
+    }
+    return ModeRecovery
 }
 
 /*
@@ -152,12 +171,8 @@ func (r *RuntimeOrchestrator) delay(
 			-r.Dt / r.TelemetryTau,
 		)
 
-	noise :=
-		(rand.Float64()*2 - 1) * 0.05
-
 	return alpha*prev +
-		(1-alpha)*value +
-		noise
+		(1-alpha)*value
 }
 
 /*
@@ -176,7 +191,14 @@ func (r *RuntimeOrchestrator) overrideRate(
 		sum += v
 	}
 
-	return sum / float64(len(h))
+	v := sum / float64(len(h))
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 /*
@@ -190,9 +212,25 @@ func (r *RuntimeOrchestrator) Tick(
 
 	next := s
 
-	if next.Engine.memory == nil {
-		next.Engine.memory = NewRegimeMemory(128)
-	}
+    if next.Engine.memory == nil {
+        next.Engine.memory = NewRegimeMemory(128)
+    }
+
+    // ── ARRIVAL SANITY GATE ──────────────────────────────────────────────
+    // Reject sensor faults: arrivals > 10× EWMA estimate are anomalous.
+    // Floor negative arrivals to zero.
+    // This prevents extreme inputs from escaping into the predictor and
+    // accumulating unrecoverable backlog (F003).
+    if measuredArrival < 0 {
+        measuredArrival = 0
+    }
+    if s.ID.ArrivalEstimate > 1.0 {
+        anomalyThreshold := s.ID.ArrivalEstimate * 10.0
+        if measuredArrival > anomalyThreshold {
+            // Clamp to 3× estimate and flag anomaly via instability
+            measuredArrival = s.ID.ArrivalEstimate * 3.0
+        }
+    }
 
 	// 1. Feature extraction
 	backlogGrowth := s.Plant.Backlog - s.Engine.prevBacklog
@@ -207,7 +245,7 @@ func (r *RuntimeOrchestrator) Tick(
 		LatencyRate: latencyTrend,
 		RetryRate:   retryPressure,
 		Oscillation: next.Engine.memory.GetOscillationScore(),
-		Utilization: measuredArrival / (s.Plant.ServiceRate * s.Rollout.CapacityActive + 1e-6),
+		Utilization: measuredArrival / (s.Plant.ServiceRate*s.Rollout.CapacityActive + 1e-6),
 	}
 	instabilityScore, _ := ComputeInstability(instInput)
 
@@ -219,11 +257,19 @@ func (r *RuntimeOrchestrator) Tick(
 
 	// ---------- MPC ----------
 	// Compute MPC FIRST so we have target capacity for decision logic
-	seq, mpcConf :=
-		r.MPC.Optimise(
-			r.mpcState(s),
-			s.LastPlan,
-		)
+	mpcInput := r.mpcState(s)
+    mpcPrevPlan := s.LastPlan
+    if midCap := next.Engine.memory.GetMidRangeCap(); midCap > 0 {
+        // Blend current capacity toward mid-range; MPC will correct from there.
+        mpcInput.CapacityActive = 0.7*mpcInput.CapacityActive + 0.3*midCap
+    }
+
+    seq, mpcConf :=
+        r.MPC.Optimise(
+            mpcInput,
+            mpcPrevPlan,
+        )
+
 
 	// ALWAYS use latest MPC decision, NO fallback
 	control := seq[0]
@@ -237,7 +283,9 @@ func (r *RuntimeOrchestrator) Tick(
 	}
 	confidenceScore, newConfState := ComputeConfidence(next.Engine.confState, confInput)
 	next.Engine.confState = newConfState
-	confidenceScore *= (0.5 + 0.5*stabScore)
+	// REMOVED: confidenceScore *= (0.5 + 0.5*stabScore)
+	// This was permanently halving confidence, causing irreversible fallback mode.
+	// stabScore is already incorporated inside ComputeConfidence via SignalAgreement.
 
 	// 5. Anomaly classification (with memory)
 	anomalyType := Classify(AnomalyInput{
@@ -281,8 +329,6 @@ func (r *RuntimeOrchestrator) Tick(
 	next.Engine.prevBacklog = s.Plant.Backlog
 	next.Engine.prevLatency = s.Plant.Latency
 
-
-
 	// ---------- predictor-based forecast ----------
 	fBacklog :=
 		r.forecastBacklog(
@@ -305,19 +351,13 @@ func (r *RuntimeOrchestrator) Tick(
 			s.ID.ArrivalUpper,
 		)
 
-	if override {
-		next.OverrideHistory =
-			append(
-				next.OverrideHistory,
-				severity,
-			)
-	} else {
-		next.OverrideHistory =
-			append(
-				next.OverrideHistory,
-				0,
-			)
-	}
+	overrideFlag := 0.0
+    if override {
+        overrideFlag = 1.0
+        // Preserve fallback capacity separately — NOT mixed into rate signal
+        next.LastFallbackCap = severity
+    }
+    next.OverrideHistory = append(next.OverrideHistory, overrideFlag)
 
 	if len(next.OverrideHistory) >
 		r.OverrideWindow {
@@ -354,33 +394,53 @@ func (r *RuntimeOrchestrator) Tick(
 	)
 
 	// ---------- rollout ----------
-	newRollout :=
-		r.Rollout.StepAdaptive(
-			s.Rollout,
-			control,
-			s.ID.ModelConfidence,
-			override,
-			s.Plant.Backlog,
-			s.ID.StabilityPressure,
-			infraLoad,
-			s.Time,
-		)
+	effectiveControl := control
+    if override && next.LastFallbackCap > effectiveControl.CapacityTarget {
+        effectiveControl.CapacityTarget = next.LastFallbackCap
+    }
+
+    newRollout :=
+        r.Rollout.StepAdaptive(
+            s.Rollout,
+            effectiveControl,
+            s.ID.ModelConfidence,
+            override,
+            s.Plant.Backlog,
+            s.ID.StabilityPressure,
+            infraLoad,
+            s.Time,
+        )
+
 
 	// ---------- multidimensional failure ----------
 	// if randUnit() < r.FailureScaleProb {
-//     newRollout.CapacityActive = s.Rollout.CapacityActive
-// }
-
-
-
+	//     newRollout.CapacityActive = s.Rollout.CapacityActive
+	// }
 
 	if randUnit() < r.FailureConfigProb {
 
 		newRollout.ConfigLag += 0.3
 	}
 
-	// ---------- plant ----------
+	// ---------- physical backlog reconciliation ----------
+	// The predictor's internal CapacityActive is the MPC's virtual rollout model
+	// (ramps at +4/tick toward target, reaching ~108 in 25 ticks). This far
+	// exceeds actual deployed replicas (authority decisions put replicas at 19–26).
+	// Combined with CacheRelief=0.25 reducing effective arrival by 25%, the
+	// predictor's dQ goes negative even during live bursts, draining model backlog
+	// to the 1.0 floor while the real queue grows to 1257+.
+	//
+	// Fix: maintain PhysicalBacklog as ground truth using measured arrival minus
+	// actual service throughput (serviceRate × actual deployed capacity). Feed this
+	// back into plantIn.Backlog so the predictor's optimization is anchored to
+	// physical reality, not its own virtual model divergence.
+	physicalService := s.Plant.ServiceRate * newRollout.CapacityActive
+	newPhysicalBacklog := math.Max(0, s.PhysicalBacklog+measuredArrival-physicalService)
+
 	plantIn := s.Plant
+	// Anchor predictor to physical queue state — prevents predictor divergence from
+	// masking real overload conditions in all downstream telemetry.
+	plantIn.Backlog = newPhysicalBacklog
 	plantIn.CapacityActive = newRollout.CapacityActive
 
 	plantIn.CapacityTarget = control.CapacityTarget
@@ -392,11 +452,8 @@ func (r *RuntimeOrchestrator) Tick(
 	plantIn.ArrivalMean = measuredArrival
 	newPlant := r.Predictor.Step(plantIn)
 
-	newPlant.Backlog =
-		r.delay(
-			newPlant.Backlog,
-			s.Plant.Backlog,
-		)
+	// Persist physical backlog into next state for accumulation across ticks.
+	next.PhysicalBacklog = newPhysicalBacklog
 
 	// ---------- identification ----------
 	idState, sig :=
@@ -444,6 +501,7 @@ func (r *RuntimeOrchestrator) Tick(
 	next.Time += r.Dt
 
 	tel := RuntimeTelemetry{
+		PhysicalBacklog: newPhysicalBacklog,
 		Backlog:  newPlant.Backlog,
 		Latency:  newPlant.Latency,
 		Capacity: newRollout.CapacityActive,
@@ -457,6 +515,9 @@ func (r *RuntimeOrchestrator) Tick(
 		VarianceScale: sig.MPCVarianceScale,
 		SafetyScale:   sig.SafetyMarginScale,
 		Damping:       d,
+
+		DecisionDelta:  decision.ScaleDelta,
+		DecisionAction: decision.Action,
 	}
 
 	return next, tel

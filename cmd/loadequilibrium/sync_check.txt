@@ -1,3 +1,0 @@
-VER_2.2_SYNC_CHECK
-This file was created by the AI assistant at 11:58 on 22-03-2026.
-If you see this, the filesystem is synchronized.

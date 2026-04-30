@@ -32,7 +32,11 @@ func GenerateLocalBundles(
 	cacheRadius := int(float64(cfg.CacheRadius) * (1 + 0.7*risk))
 	retryRadius := 1 + int(1.0*risk)
 
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	seed := cfg.Seed
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+	rng := rand.New(rand.NewSource(seed))
 
 	var bundles []Bundle
 
@@ -106,8 +110,8 @@ func GenerateLocalBundles(
 
 					cacheRelief :=
 						math.Exp(
-							-1.1*
-								(cache-current.CacheAggression),
+							-1.1 *
+								(cache - current.CacheAggression),
 						)
 
 					effectiveArrival :=
@@ -172,7 +176,7 @@ func GenerateLocalBundles(
 
 					cacheDelta :=
 						math.Abs(
-							cache-current.CacheAggression,
+							cache - current.CacheAggression,
 						)
 
 					// unified infra proxy

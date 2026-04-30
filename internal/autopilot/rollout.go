@@ -2,8 +2,6 @@ package autopilot
 
 import "math"
 
-
-
 type GovernanceMode int
 
 const (
@@ -17,13 +15,12 @@ type RolloutIntent struct {
 	Retry float64
 	Cache float64
 
-	SLAWeight float64
+	SLAWeight  float64
 	CostWeight float64
 	TopoImpact float64
 }
 
 type RolloutState struct {
-
 	CapacityActive float64
 	RetryActive    float64
 	CacheActive    float64
@@ -40,12 +37,11 @@ type RolloutState struct {
 }
 
 type RolloutController struct {
-
 	Dt float64
 
-	CapRampUpNormal float64
+	CapRampUpNormal    float64
 	CapRampUpEmergency float64
-	CapRampDown float64
+	CapRampDown        float64
 
 	RetryEnableRamp  float64
 	RetryDisableRamp float64
@@ -65,9 +61,9 @@ type RolloutController struct {
 	DegradedBacklog  float64
 
 	RolloutTimeout float64
-	MaxRetries int
+	MaxRetries     int
 
-	SuccessProbBase float64
+	SuccessProbBase  float64
 	InfraFailureGain float64
 
 	// runtime-adjustable pacing modifier — set by damping signal
@@ -111,7 +107,7 @@ func (r *RolloutController) enqueue(
 			) < 0.05 {
 
 			x.IntentQueue[k] = intent
-continue   // 🔥 NOT return
+			continue // 🔥 NOT return
 		}
 	}
 
@@ -228,41 +224,51 @@ func (r *RolloutController) successProb(
 capacity ramp
 */
 func (r *RolloutController) rampCap(
-	active float64,
-	target float64,
-	mode GovernanceMode,
-	queuePressure float64,
-	backlog float64,
+    active float64,
+    target float64,
+    mode GovernanceMode,
+    queuePressure float64,
+    backlog float64,
 ) float64 {
 
-	err := target - active
+    err := target - active
 
-	rate := r.CapRampUpNormal
+    // ── CRITICAL DEFICIT STEP-RESPONSE ──────────────────────────────────
+    // When backlog exceeds 1.5× emergency threshold AND the capacity gap
+    // is large (err > 10 workers), allow a larger single-tick step to
+    // initiate fast convergence. This avoids the slow-ramp problem where
+    // CapRampUpEmergency is still insufficient to close a 100+ worker gap.
+    // Bounded at 50% of gap per tick to prevent overshoot.
+    if mode == ModeEmergency && backlog > r.EmergencyBacklog*1.5 && err > 10.0 {
+        stepResponse := math.Min(err*0.50, err)
+        return active + stepResponse
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
-	if mode == ModeEmergency {
-		rate = r.CapRampUpEmergency
-	}
+    rate := r.CapRampUpNormal
 
-	if err < 0 {
-		rate = r.CapRampDown
-	}
+    if mode == ModeEmergency {
+        rate = r.CapRampUpEmergency
+    }
 
-	rate *= 1 + r.QueuePressureRampGain*queuePressure
+    if err < 0 {
+        rate = r.CapRampDown
+    }
 
-	// 🚀 adaptive behavior
-	if backlog > 100 {
-    rate *= 2.0
+    rate *= 1 + r.QueuePressureRampGain*queuePressure
+
+    if backlog > 100 {
+        rate *= 2.0
+    }
+
+    step :=
+        math.Max(
+            -rate*r.Dt,
+            math.Min(rate*r.Dt, err),
+        )
+
+    return active + step
 }
-
-	step :=
-		math.Max(
-			-rate*r.Dt,
-			math.Min(rate*r.Dt, err),
-		)
-
-	return active + step
-}
-
 /*
 main step
 */
@@ -363,8 +369,10 @@ func (r *RolloutController) Step(
 
 		} else {
 
-			next.IntentQueue =
-				next.IntentQueue[1:]
+			if len(next.IntentQueue) > 0 {
+				next.IntentQueue =
+					next.IntentQueue[1:]
+			}
 
 			next.RolloutTimer = 0
 			next.RetryCount = 0
@@ -373,6 +381,7 @@ func (r *RolloutController) Step(
 
 	return next
 }
+
 /*
 SetPacingModifier — wires damping factor from identification engine into
 ramp rate scaling. Higher damping (instability) → slower pacing.
@@ -427,13 +436,13 @@ func (r *RolloutController) StepAdaptive(
 
 		//scale := 1.0
 
-//if r.PaceModifier > 0 {
-   // scale = 1.0 / (1.0 + r.PaceModifier)  // bounded slow-down
-//}
+		//if r.PaceModifier > 0 {
+		// scale = 1.0 / (1.0 + r.PaceModifier)  // bounded slow-down
+		//}
 
-//r.CapRampUpNormal = savedUp * scale
-//r.CapRampUpEmergency = savedEmg * scale
-//r.CapRampDown = savedDown * scale
+		//r.CapRampUpNormal = savedUp * scale
+		//r.CapRampUpEmergency = savedEmg * scale
+		//r.CapRampDown = savedDown * scale
 
 		result := r.Step(x, intent, backlog, stabilityPressure, infraLoad)
 

@@ -35,7 +35,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 60126,
+      "duration_ms": 61249,
       "error_messages": [
         "20 runs × 6 scenarios = 120 checks all identical"
       ]
@@ -49,286 +49,8 @@
       "is_golden_file_frozen": "Written on first run if absent; never overwritten automatically",
       "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/replay_all_scenarios.json and re-run"
     },
-    "run_at": "2026-04-12T03:38:48Z",
-    "go_version": "go1.22.2"
-  },
-  {
-    "test_id": "L4-REP-002",
-    "layer": 4,
-    "name": "Topology sensitivity golden file comparison — 6 scenarios",
-    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
-    "packages_involved": [
-      "internal/integration",
-      "internal/modelling",
-      "internal/topology"
-    ],
-    "functions_tested": [
-      "integration.BuildKeystoneCollapseScenario",
-      "integration.BuildDiamondStressScenario",
-      "integration.BuildLinearCascadeScenario",
-      "integration.BuildTriangleRecoveryScenario",
-      "modelling.ComputeTopologySensitivity"
-    ],
-    "golden_file": "./golden/topology_fragility_*.json",
-    "threshold": {
-      "metric": "max_field_relative_delta_pct",
-      "operator": "\u003c=",
-      "value": 0.001,
-      "unit": "percent",
-      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0,
-      "actual_unit": "relative_delta_pct",
-      "runs_attempted": 1,
-      "runs_identical": 0,
-      "fields_checked": 0,
-      "fields_in_tolerance": 0,
-      "fields_outside_tolerance": 0,
-      "worst_relative_delta_pct": 0,
-      "output_sha256": "",
-      "duration_ms": 58,
-      "error_messages": [
-        "keystone_collapse: GOLDEN_WRITTEN (first run)",
-        "diamond_stress: GOLDEN_WRITTEN (first run)",
-        "linear_cascade: GOLDEN_WRITTEN (first run)",
-        "recovery_step_1: GOLDEN_WRITTEN (first run)",
-        "recovery_step_2: GOLDEN_WRITTEN (first run)",
-        "recovery_step_3: GOLDEN_WRITTEN (first run)"
-      ]
-    },
-    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
-    "answered_questions": {
-      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
-      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
-      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
-      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
-      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
-      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
-    },
-    "run_at": "2026-04-12T03:40:26Z",
-    "go_version": "go1.22.2"
-  },
-  {
-    "test_id": "L4-REP-002b",
-    "layer": 4,
-    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
-    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
-    "packages_involved": [
-      "internal/integration",
-      "internal/modelling"
-    ],
-    "functions_tested": [
-      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
-      "modelling.ComputeTopologySensitivity (SystemFragility output)"
-    ],
-    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
-    "threshold": {
-      "metric": "fragility_delta_pct",
-      "operator": "\u003c=",
-      "value": 5,
-      "unit": "percent",
-      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
-    },
-    "result": {
-      "status": "FAIL",
-      "actual_value": 97.80219780219784,
-      "actual_unit": "worst_delta_pct",
-      "runs_attempted": 1,
-      "runs_identical": 0,
-      "fields_checked": 6,
-      "fields_in_tolerance": 0,
-      "fields_outside_tolerance": 0,
-      "worst_relative_delta_pct": 97.80219780219784,
-      "output_sha256": "",
-      "duration_ms": 0,
-      "error_messages": [
-        "keystone_collapse: expected=0.7100 actual=0.375887 delta=47.06% (threshold 5.0%)",
-        "diamond_stress: OK delta=0.00%",
-        "linear_cascade: expected=0.3500 actual=0.692308 delta=97.80% (threshold 5.0%)",
-        "recovery_step_1: OK delta=0.00%",
-        "recovery_step_2: OK delta=0.00%",
-        "recovery_step_3: OK delta=0.00%"
-      ]
-    },
-    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
-    "answered_questions": {
-      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
-      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
-      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
-      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
-      "is_golden_file_frozen": "N/A",
-      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
-    },
-    "run_at": "2026-04-12T03:40:26Z",
-    "go_version": "go1.22.2"
-  },
-  {
-    "test_id": "L4-REP-002",
-    "layer": 4,
-    "name": "Topology sensitivity golden file comparison — 6 scenarios",
-    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
-    "packages_involved": [
-      "internal/integration",
-      "internal/modelling",
-      "internal/topology"
-    ],
-    "functions_tested": [
-      "integration.BuildKeystoneCollapseScenario",
-      "integration.BuildDiamondStressScenario",
-      "integration.BuildLinearCascadeScenario",
-      "integration.BuildTriangleRecoveryScenario",
-      "modelling.ComputeTopologySensitivity"
-    ],
-    "golden_file": "./golden/topology_fragility_*.json",
-    "threshold": {
-      "metric": "max_field_relative_delta_pct",
-      "operator": "\u003c=",
-      "value": 0.001,
-      "unit": "percent",
-      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0,
-      "actual_unit": "relative_delta_pct",
-      "runs_attempted": 1,
-      "runs_identical": 0,
-      "fields_checked": 0,
-      "fields_in_tolerance": 0,
-      "fields_outside_tolerance": 0,
-      "worst_relative_delta_pct": 0,
-      "output_sha256": "",
-      "duration_ms": 44,
-      "error_messages": [
-        "keystone_collapse: PASS fields=23 all within 0.0010%",
-        "diamond_stress: PASS fields=17 all within 0.0010%",
-        "linear_cascade: PASS fields=14 all within 0.0010%",
-        "recovery_step_1: PASS fields=11 all within 0.0010%",
-        "recovery_step_2: PASS fields=11 all within 0.0010%",
-        "recovery_step_3: PASS fields=11 all within 0.0010%"
-      ]
-    },
-    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
-    "answered_questions": {
-      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
-      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
-      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
-      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
-      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
-      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
-    },
-    "run_at": "2026-04-12T03:48:03Z",
-    "go_version": "go1.22.2"
-  },
-  {
-    "test_id": "L4-REP-002b",
-    "layer": 4,
-    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
-    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
-    "packages_involved": [
-      "internal/integration",
-      "internal/modelling"
-    ],
-    "functions_tested": [
-      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
-      "modelling.ComputeTopologySensitivity (SystemFragility output)"
-    ],
-    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
-    "threshold": {
-      "metric": "fragility_delta_pct",
-      "operator": "\u003c=",
-      "value": 5,
-      "unit": "percent",
-      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0.0047847172904142456,
-      "actual_unit": "worst_delta_pct",
-      "runs_attempted": 1,
-      "runs_identical": 0,
-      "fields_checked": 6,
-      "fields_in_tolerance": 0,
-      "fields_outside_tolerance": 0,
-      "worst_relative_delta_pct": 0.0047847172904142456,
-      "output_sha256": "",
-      "duration_ms": 0,
-      "error_messages": [
-        "keystone_collapse: OK delta=0.00%",
-        "diamond_stress: OK delta=0.00%",
-        "linear_cascade: OK delta=0.00%",
-        "recovery_step_1: OK delta=0.00%",
-        "recovery_step_2: OK delta=0.00%",
-        "recovery_step_3: OK delta=0.00%"
-      ]
-    },
-    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
-    "answered_questions": {
-      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
-      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
-      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
-      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
-      "is_golden_file_frozen": "N/A",
-      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
-    },
-    "run_at": "2026-04-12T03:48:03Z",
-    "go_version": "go1.22.2"
-  },
-  {
-    "test_id": "L4-REP-002b",
-    "layer": 4,
-    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
-    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
-    "packages_involved": [
-      "internal/integration",
-      "internal/modelling"
-    ],
-    "functions_tested": [
-      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
-      "modelling.ComputeTopologySensitivity (SystemFragility output)"
-    ],
-    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
-    "threshold": {
-      "metric": "fragility_delta_pct",
-      "operator": "\u003c=",
-      "value": 5,
-      "unit": "percent",
-      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0.0047847172904142456,
-      "actual_unit": "worst_delta_pct",
-      "runs_attempted": 1,
-      "runs_identical": 0,
-      "fields_checked": 6,
-      "fields_in_tolerance": 0,
-      "fields_outside_tolerance": 0,
-      "worst_relative_delta_pct": 0.0047847172904142456,
-      "output_sha256": "",
-      "duration_ms": 0,
-      "error_messages": [
-        "keystone_collapse: OK delta=0.00%",
-        "diamond_stress: OK delta=0.00%",
-        "linear_cascade: OK delta=0.00%",
-        "recovery_step_1: OK delta=0.00%",
-        "recovery_step_2: OK delta=0.00%",
-        "recovery_step_3: OK delta=0.00%"
-      ]
-    },
-    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
-    "answered_questions": {
-      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
-      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
-      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
-      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
-      "is_golden_file_frozen": "N/A",
-      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
-    },
-    "run_at": "2026-04-12T03:48:44Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:01Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-003",
@@ -361,7 +83,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 0,
+      "duration_ms": 1,
       "error_messages": [
         "100 calls all produced identical output (worst_delta=0)"
       ]
@@ -375,8 +97,8 @@
       "is_golden_file_frozen": "N/A",
       "how_to_update_golden_file": "N/A"
     },
-    "run_at": "2026-04-12T03:48:59Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:01Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-003b",
@@ -426,8 +148,120 @@
       "is_golden_file_frozen": "N/A",
       "how_to_update_golden_file": "N/A"
     },
-    "run_at": "2026-04-12T03:49:07Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:01Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002",
+    "layer": 4,
+    "name": "Topology sensitivity golden file comparison — 6 scenarios",
+    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling",
+      "internal/topology"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_relative_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.001,
+      "unit": "percent",
+      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 393,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 all within 0.0010%",
+        "diamond_stress: PASS fields=17 all within 0.0010%",
+        "linear_cascade: PASS fields=14 all within 0.0010%",
+        "recovery_step_1: PASS fields=11 all within 0.0010%",
+        "recovery_step_2: PASS fields=11 all within 0.0010%",
+        "recovery_step_3: PASS fields=11 all within 0.0010%"
+      ]
+    },
+    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
+      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
+      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
+      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
+      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
+    },
+    "run_at": "2026-04-26T06:52:02Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002b",
+    "layer": 4,
+    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
+    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
+      "modelling.ComputeTopologySensitivity (SystemFragility output)"
+    ],
+    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
+    "threshold": {
+      "metric": "fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "percent",
+      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.0047847172904142456,
+      "actual_unit": "worst_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.0047847172904142456,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "keystone_collapse: OK delta=0.00%",
+        "diamond_stress: OK delta=0.00%",
+        "linear_cascade: OK delta=0.00%",
+        "recovery_step_1: OK delta=0.00%",
+        "recovery_step_2: OK delta=0.00%",
+        "recovery_step_3: OK delta=0.00%"
+      ]
+    },
+    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
+    "answered_questions": {
+      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
+      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
+      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
+      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
+    },
+    "run_at": "2026-04-26T06:52:02Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004",
@@ -461,7 +295,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 58,
+      "duration_ms": 2,
       "error_messages": [
         "keystone_collapse: PASS fields=23 worst=0.000000%",
         "diamond_stress: PASS fields=17 worst=0.000000%",
@@ -480,8 +314,8 @@
       "is_golden_file_frozen": "Yes — update ONLY when algorithm change is intentional and reviewed",
       "how_to_update_golden_file": "Delete golden files and re-run L4-REP-002, then confirm all scenarios produce expected outputs"
     },
-    "run_at": "2026-04-12T03:49:16Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:02Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004b",
@@ -515,7 +349,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0.011258091753443805,
       "output_sha256": "",
-      "duration_ms": 10,
+      "duration_ms": 15,
       "error_messages": [
         "baseline=0.994764 step1=0.600000 step2=1.000000 step3=0.994652",
         "convergence_delta=0.0113% (threshold=1.0%)",
@@ -531,8 +365,8 @@
       "is_golden_file_frozen": "Written on first run",
       "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/recovery_convergence.json and re-run"
     },
-    "run_at": "2026-04-12T03:49:30Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:02Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004c",
@@ -567,7 +401,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 3019,
+      "duration_ms": 3096,
       "error_messages": [
         "6 scenarios all within 0.0100% of golden"
       ]
@@ -581,8 +415,8 @@
       "is_golden_file_frozen": "Written by L4-REP-001",
       "how_to_update_golden_file": "Re-run L4-REP-001 to regenerate"
     },
-    "run_at": "2026-04-12T03:49:41Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T06:52:05Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-001",
@@ -620,7 +454,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 60132,
+      "duration_ms": 61964,
       "error_messages": [
         "20 runs × 6 scenarios = 120 checks all identical"
       ]
@@ -634,8 +468,8 @@
       "is_golden_file_frozen": "Written on first run if absent; never overwritten automatically",
       "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/replay_all_scenarios.json and re-run"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:02Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-003",
@@ -668,7 +502,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 0,
+      "duration_ms": 1,
       "error_messages": [
         "100 calls all produced identical output (worst_delta=0)"
       ]
@@ -682,8 +516,8 @@
       "is_golden_file_frozen": "N/A",
       "how_to_update_golden_file": "N/A"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-003b",
@@ -733,8 +567,8 @@
       "is_golden_file_frozen": "N/A",
       "how_to_update_golden_file": "N/A"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-002",
@@ -772,7 +606,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 61,
+      "duration_ms": 257,
       "error_messages": [
         "keystone_collapse: PASS fields=23 all within 0.0010%",
         "diamond_stress: PASS fields=17 all within 0.0010%",
@@ -791,8 +625,8 @@
       "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
       "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-002b",
@@ -845,8 +679,8 @@
       "is_golden_file_frozen": "N/A",
       "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004",
@@ -880,7 +714,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 55,
+      "duration_ms": 2,
       "error_messages": [
         "keystone_collapse: PASS fields=23 worst=0.000000%",
         "diamond_stress: PASS fields=17 worst=0.000000%",
@@ -899,8 +733,8 @@
       "is_golden_file_frozen": "Yes — update ONLY when algorithm change is intentional and reviewed",
       "how_to_update_golden_file": "Delete golden files and re-run L4-REP-002, then confirm all scenarios produce expected outputs"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004b",
@@ -934,7 +768,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0.011258091753443805,
       "output_sha256": "",
-      "duration_ms": 6,
+      "duration_ms": 149,
       "error_messages": [
         "baseline=0.994764 step1=0.600000 step2=1.000000 step3=0.994652",
         "convergence_delta=0.0113% (threshold=1.0%)",
@@ -950,8 +784,8 @@
       "is_golden_file_frozen": "Written on first run",
       "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/recovery_convergence.json and re-run"
     },
-    "run_at": "2026-04-12T03:50:53Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:03Z",
+    "go_version": "go1.26.0"
   },
   {
     "test_id": "L4-REP-004c",
@@ -986,7 +820,7 @@
       "fields_outside_tolerance": 0,
       "worst_relative_delta_pct": 0,
       "output_sha256": "",
-      "duration_ms": 3022,
+      "duration_ms": 3206,
       "error_messages": [
         "6 scenarios all within 0.0100% of golden"
       ]
@@ -1000,7 +834,1264 @@
       "is_golden_file_frozen": "Written by L4-REP-001",
       "how_to_update_golden_file": "Re-run L4-REP-001 to regenerate"
     },
-    "run_at": "2026-04-12T03:50:56Z",
-    "go_version": "go1.22.2"
+    "run_at": "2026-04-26T07:07:07Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-001",
+    "layer": 4,
+    "name": "ExecuteAllScenarios determinism across 20 runs",
+    "aim": "ReplayEngine.ExecuteAllScenarios() must produce identical FinalFragility for all 6 scenarios across 20 runs",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_deviation",
+      "operator": "\u003c=",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity is a pure function of GraphSnapshot — any deviation indicates non-determinism"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 20,
+      "runs_identical": 20,
+      "fields_checked": 120,
+      "fields_in_tolerance": 120,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 60195,
+      "error_messages": [
+        "20 runs × 6 scenarios = 120 checks all identical"
+      ]
+    },
+    "on_exceed": "Non-deterministic sensitivity computation means replay golden files cannot be trusted — CI will produce random pass/fail results for the same commit",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() called 20 times; FinalFragility and PressureHeatmap checksum compared per scenario per run",
+      "why_this_threshold": "1e-9 is float64 arithmetic noise floor — any larger deviation is a real non-determinism bug, not precision",
+      "what_happens_if_it_fails": "Golden file written from run 0 will mismatch run 1 — regression tests produce false alarms every CI build",
+      "how_determinism_was_verified": "SHA256 of (fragility, pressure_heatmap) per scenario compared across all runs",
+      "is_golden_file_frozen": "Written on first run if absent; never overwritten automatically",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/replay_all_scenarios.json and re-run"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003",
+    "layer": 4,
+    "name": "ComputeTopologySensitivity stability across 100 identical calls",
+    "aim": "ComputeTopologySensitivity called 100 times on identical GraphSnapshot must produce zero deviations",
+    "packages_involved": [
+      "internal/modelling",
+      "internal/integration"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "N/A — comparison is internal across runs",
+    "threshold": {
+      "metric": "max_output_deviation",
+      "operator": "==",
+      "value": 0,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity takes no time/random inputs — it must be a pure function"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 100,
+      "runs_identical": 100,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "100 calls all produced identical output (worst_delta=0)"
+      ]
+    },
+    "on_exceed": "ComputeTopologySensitivity has hidden state (global variable, map iteration order, time.Now()) → dashboard shows different fragility scores on each orchestrator tick for the same topology",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity called 100 times on same GraphSnapshot (keystone collapse: 7 nodes, 6 edges)",
+      "why_this_threshold": "1e-12 is below float64 arithmetic rounding — any deviation is a state side-effect, not precision",
+      "what_happens_if_it_fails": "Orchestrator tick produces different fragility values on consecutive calls → dashboard flickers → operator can't trust readings",
+      "how_determinism_was_verified": "Direct float64 comparison with 1e-12 epsilon across 100 calls",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003b",
+    "layer": 4,
+    "name": "InjectTopologySnapshot capture fidelity",
+    "aim": "ReplayCapture.FinalFragility must equal ComputeTopologySensitivity output; PressureHeatmap must contain all nodes with valid values; EdgeWeightChanges must cover all edges",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "(*ReplayEngine).InjectTopologySnapshot",
+      "ReplayCapture.FinalFragility",
+      "ReplayCapture.PressureHeatmap",
+      "ReplayCapture.EdgeWeightChanges"
+    ],
+    "golden_file": "N/A",
+    "threshold": {
+      "metric": "fragility_delta",
+      "operator": "\u003c",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "InjectTopologySnapshot must faithfully report ComputeTopologySensitivity output"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "all 4 scenarios: capture fidelity verified"
+      ]
+    },
+    "on_exceed": "Layer 4 regression tests compare against ReplayCapture values — if those values do not faithfully reflect the topology, golden files are built on wrong reference data",
+    "answered_questions": {
+      "what_was_tested": "InjectTopologySnapshot on 4 scenarios; capture fields compared to direct ComputeTopologySensitivity output",
+      "why_this_threshold": "1e-9 — the values should be identical since InjectTopologySnapshot calls ComputeTopologySensitivity internally",
+      "what_happens_if_it_fails": "Golden files written from wrong values — regression detection broken from the start",
+      "how_determinism_was_verified": "Direct comparison of capture.FinalFragility against ComputeTopologySensitivity(same snap)",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002",
+    "layer": 4,
+    "name": "Topology sensitivity golden file comparison — 6 scenarios",
+    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling",
+      "internal/topology"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_relative_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.001,
+      "unit": "percent",
+      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 81,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 all within 0.0010%",
+        "diamond_stress: PASS fields=17 all within 0.0010%",
+        "linear_cascade: PASS fields=14 all within 0.0010%",
+        "recovery_step_1: PASS fields=11 all within 0.0010%",
+        "recovery_step_2: PASS fields=11 all within 0.0010%",
+        "recovery_step_3: PASS fields=11 all within 0.0010%"
+      ]
+    },
+    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
+      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
+      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
+      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
+      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002b",
+    "layer": 4,
+    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
+    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
+      "modelling.ComputeTopologySensitivity (SystemFragility output)"
+    ],
+    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
+    "threshold": {
+      "metric": "fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "percent",
+      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.0047847172904142456,
+      "actual_unit": "worst_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.0047847172904142456,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "keystone_collapse: OK delta=0.00%",
+        "diamond_stress: OK delta=0.00%",
+        "linear_cascade: OK delta=0.00%",
+        "recovery_step_1: OK delta=0.00%",
+        "recovery_step_2: OK delta=0.00%",
+        "recovery_step_3: OK delta=0.00%"
+      ]
+    },
+    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
+    "answered_questions": {
+      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
+      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
+      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
+      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004",
+    "layer": 4,
+    "name": "Version regression: all scenarios within 0.01% of golden",
+    "aim": "Current build must produce topology sensitivity within 0.0100% of stored golden for all 6 scenarios",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity",
+      "integration.Build*Scenario (as inputs)"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "Any change in sensitivity algorithm must be intentional and explicitly reviewed — 0.01% catches real changes, not float noise"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 6,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 1,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 worst=0.000000%",
+        "diamond_stress: PASS fields=17 worst=0.000000%",
+        "linear_cascade: PASS fields=14 worst=0.000000%",
+        "recovery_step_1: PASS fields=11 worst=0.000000%",
+        "recovery_step_2: PASS fields=11 worst=0.000000%",
+        "recovery_step_3: PASS fields=11 worst=0.000000%"
+      ]
+    },
+    "on_exceed": "Topology sensitivity algorithm changed between this commit and the golden-writing commit — review internal/modelling/topology_sensitivity.go diff before proceeding",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity output for 6 scenarios compared against golden files written by L4-REP-002",
+      "why_this_threshold": "0.01% is tighter than the write tolerance (0.001%) to catch regression; still above float64 noise floor",
+      "what_happens_if_it_fails": "An algorithm change altered risk scores — operators may see wrong fragility or perturbation rankings",
+      "how_determinism_was_verified": "Same inputs as L4-REP-002; golden files are the invariant anchor",
+      "is_golden_file_frozen": "Yes — update ONLY when algorithm change is intentional and reviewed",
+      "how_to_update_golden_file": "Delete golden files and re-run L4-REP-002, then confirm all scenarios produce expected outputs"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004b",
+    "layer": 4,
+    "name": "Triangle recovery convergence within 1% of baseline",
+    "aim": "After 3 recovery steps, fragility must be within 1.0% of healthy baseline",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildTriangleRecoveryScenario(0,1,2,3)",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/recovery_convergence.json",
+    "threshold": {
+      "metric": "convergence_delta_pct",
+      "operator": "\u003c=",
+      "value": 1,
+      "unit": "percent",
+      "rationale": "Step 3 edges are nearly identical to healthy baseline — convergence within 1% validates the recovery model"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.011258091753443805,
+      "actual_unit": "convergence_delta_pct",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.011258091753443805,
+      "output_sha256": "",
+      "duration_ms": 2,
+      "error_messages": [
+        "baseline=0.994764 step1=0.600000 step2=1.000000 step3=0.994652",
+        "convergence_delta=0.0113% (threshold=1.0%)",
+        "monotonic=true (step1\u003c=step2\u003c=step3 in fragility)"
+      ]
+    },
+    "on_exceed": "Recovery scenario step 3 does not return to baseline within 1% — either BuildTriangleRecoveryScenario(3) edges need updating or sensitivity is over-penalising residual degradation",
+    "answered_questions": {
+      "what_was_tested": "Triangle recovery fragility across 3 steps; step 3 convergence to healthy baseline",
+      "why_this_threshold": "1% matches the topology_replay_dashboard_test.go acceptance criterion of 0.98-1.00 fragility",
+      "what_happens_if_it_fails": "Dashboard shows incomplete recovery even after all edges are restored — operators confused about system health",
+      "how_determinism_was_verified": "All topology inputs are fixed (no time/random) — computation is deterministic",
+      "is_golden_file_frozen": "Written on first run",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/recovery_convergence.json and re-run"
+    },
+    "run_at": "2026-04-26T07:41:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004c",
+    "layer": 4,
+    "name": "ExecuteAllScenarios end-to-end regression vs golden",
+    "aim": "Full replay pipeline output must match golden within 0.0100% per scenario",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "ReplayCapture.FinalFragility"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "End-to-end regression via full replay pipeline — catches wrapping/modification in InjectTopologySnapshot"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 3005,
+      "error_messages": [
+        "6 scenarios all within 0.0100% of golden"
+      ]
+    },
+    "on_exceed": "Full replay pipeline produces different fragility than direct ComputeTopologySensitivity — InjectTopologySnapshot is transforming or overwriting the computed sensitivity",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() output compared to golden written by L4-REP-001",
+      "why_this_threshold": "0.01% — pipeline should be identical to isolated function; any delta indicates unwanted transformation",
+      "what_happens_if_it_fails": "Replay pipeline does not faithfully reflect topology sensitivity — golden comparisons are unreliable",
+      "how_determinism_was_verified": "L4-REP-001 already verified determinism; this test only checks regression",
+      "is_golden_file_frozen": "Written by L4-REP-001",
+      "how_to_update_golden_file": "Re-run L4-REP-001 to regenerate"
+    },
+    "run_at": "2026-04-26T07:41:45Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-001",
+    "layer": 4,
+    "name": "ExecuteAllScenarios determinism across 20 runs",
+    "aim": "ReplayEngine.ExecuteAllScenarios() must produce identical FinalFragility for all 6 scenarios across 20 runs",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_deviation",
+      "operator": "\u003c=",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity is a pure function of GraphSnapshot — any deviation indicates non-determinism"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 20,
+      "runs_identical": 20,
+      "fields_checked": 120,
+      "fields_in_tolerance": 120,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 60146,
+      "error_messages": [
+        "20 runs × 6 scenarios = 120 checks all identical"
+      ]
+    },
+    "on_exceed": "Non-deterministic sensitivity computation means replay golden files cannot be trusted — CI will produce random pass/fail results for the same commit",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() called 20 times; FinalFragility and PressureHeatmap checksum compared per scenario per run",
+      "why_this_threshold": "1e-9 is float64 arithmetic noise floor — any larger deviation is a real non-determinism bug, not precision",
+      "what_happens_if_it_fails": "Golden file written from run 0 will mismatch run 1 — regression tests produce false alarms every CI build",
+      "how_determinism_was_verified": "SHA256 of (fragility, pressure_heatmap) per scenario compared across all runs",
+      "is_golden_file_frozen": "Written on first run if absent; never overwritten automatically",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/replay_all_scenarios.json and re-run"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003",
+    "layer": 4,
+    "name": "ComputeTopologySensitivity stability across 100 identical calls",
+    "aim": "ComputeTopologySensitivity called 100 times on identical GraphSnapshot must produce zero deviations",
+    "packages_involved": [
+      "internal/modelling",
+      "internal/integration"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "N/A — comparison is internal across runs",
+    "threshold": {
+      "metric": "max_output_deviation",
+      "operator": "==",
+      "value": 0,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity takes no time/random inputs — it must be a pure function"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 100,
+      "runs_identical": 100,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 1,
+      "error_messages": [
+        "100 calls all produced identical output (worst_delta=0)"
+      ]
+    },
+    "on_exceed": "ComputeTopologySensitivity has hidden state (global variable, map iteration order, time.Now()) → dashboard shows different fragility scores on each orchestrator tick for the same topology",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity called 100 times on same GraphSnapshot (keystone collapse: 7 nodes, 6 edges)",
+      "why_this_threshold": "1e-12 is below float64 arithmetic rounding — any deviation is a state side-effect, not precision",
+      "what_happens_if_it_fails": "Orchestrator tick produces different fragility values on consecutive calls → dashboard flickers → operator can't trust readings",
+      "how_determinism_was_verified": "Direct float64 comparison with 1e-12 epsilon across 100 calls",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003b",
+    "layer": 4,
+    "name": "InjectTopologySnapshot capture fidelity",
+    "aim": "ReplayCapture.FinalFragility must equal ComputeTopologySensitivity output; PressureHeatmap must contain all nodes with valid values; EdgeWeightChanges must cover all edges",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "(*ReplayEngine).InjectTopologySnapshot",
+      "ReplayCapture.FinalFragility",
+      "ReplayCapture.PressureHeatmap",
+      "ReplayCapture.EdgeWeightChanges"
+    ],
+    "golden_file": "N/A",
+    "threshold": {
+      "metric": "fragility_delta",
+      "operator": "\u003c",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "InjectTopologySnapshot must faithfully report ComputeTopologySensitivity output"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "all 4 scenarios: capture fidelity verified"
+      ]
+    },
+    "on_exceed": "Layer 4 regression tests compare against ReplayCapture values — if those values do not faithfully reflect the topology, golden files are built on wrong reference data",
+    "answered_questions": {
+      "what_was_tested": "InjectTopologySnapshot on 4 scenarios; capture fields compared to direct ComputeTopologySensitivity output",
+      "why_this_threshold": "1e-9 — the values should be identical since InjectTopologySnapshot calls ComputeTopologySensitivity internally",
+      "what_happens_if_it_fails": "Golden files written from wrong values — regression detection broken from the start",
+      "how_determinism_was_verified": "Direct comparison of capture.FinalFragility against ComputeTopologySensitivity(same snap)",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002",
+    "layer": 4,
+    "name": "Topology sensitivity golden file comparison — 6 scenarios",
+    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling",
+      "internal/topology"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_relative_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.001,
+      "unit": "percent",
+      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 125,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 all within 0.0010%",
+        "diamond_stress: PASS fields=17 all within 0.0010%",
+        "linear_cascade: PASS fields=14 all within 0.0010%",
+        "recovery_step_1: PASS fields=11 all within 0.0010%",
+        "recovery_step_2: PASS fields=11 all within 0.0010%",
+        "recovery_step_3: PASS fields=11 all within 0.0010%"
+      ]
+    },
+    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
+      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
+      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
+      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
+      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002b",
+    "layer": 4,
+    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
+    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
+      "modelling.ComputeTopologySensitivity (SystemFragility output)"
+    ],
+    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
+    "threshold": {
+      "metric": "fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "percent",
+      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.0047847172904142456,
+      "actual_unit": "worst_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.0047847172904142456,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "keystone_collapse: OK delta=0.00%",
+        "diamond_stress: OK delta=0.00%",
+        "linear_cascade: OK delta=0.00%",
+        "recovery_step_1: OK delta=0.00%",
+        "recovery_step_2: OK delta=0.00%",
+        "recovery_step_3: OK delta=0.00%"
+      ]
+    },
+    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
+    "answered_questions": {
+      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
+      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
+      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
+      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004",
+    "layer": 4,
+    "name": "Version regression: all scenarios within 0.01% of golden",
+    "aim": "Current build must produce topology sensitivity within 0.0100% of stored golden for all 6 scenarios",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity",
+      "integration.Build*Scenario (as inputs)"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "Any change in sensitivity algorithm must be intentional and explicitly reviewed — 0.01% catches real changes, not float noise"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 6,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 5,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 worst=0.000000%",
+        "diamond_stress: PASS fields=17 worst=0.000000%",
+        "linear_cascade: PASS fields=14 worst=0.000000%",
+        "recovery_step_1: PASS fields=11 worst=0.000000%",
+        "recovery_step_2: PASS fields=11 worst=0.000000%",
+        "recovery_step_3: PASS fields=11 worst=0.000000%"
+      ]
+    },
+    "on_exceed": "Topology sensitivity algorithm changed between this commit and the golden-writing commit — review internal/modelling/topology_sensitivity.go diff before proceeding",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity output for 6 scenarios compared against golden files written by L4-REP-002",
+      "why_this_threshold": "0.01% is tighter than the write tolerance (0.001%) to catch regression; still above float64 noise floor",
+      "what_happens_if_it_fails": "An algorithm change altered risk scores — operators may see wrong fragility or perturbation rankings",
+      "how_determinism_was_verified": "Same inputs as L4-REP-002; golden files are the invariant anchor",
+      "is_golden_file_frozen": "Yes — update ONLY when algorithm change is intentional and reviewed",
+      "how_to_update_golden_file": "Delete golden files and re-run L4-REP-002, then confirm all scenarios produce expected outputs"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004b",
+    "layer": 4,
+    "name": "Triangle recovery convergence within 1% of baseline",
+    "aim": "After 3 recovery steps, fragility must be within 1.0% of healthy baseline",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildTriangleRecoveryScenario(0,1,2,3)",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/recovery_convergence.json",
+    "threshold": {
+      "metric": "convergence_delta_pct",
+      "operator": "\u003c=",
+      "value": 1,
+      "unit": "percent",
+      "rationale": "Step 3 edges are nearly identical to healthy baseline — convergence within 1% validates the recovery model"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.011258091753443805,
+      "actual_unit": "convergence_delta_pct",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.011258091753443805,
+      "output_sha256": "",
+      "duration_ms": 2,
+      "error_messages": [
+        "baseline=0.994764 step1=0.600000 step2=1.000000 step3=0.994652",
+        "convergence_delta=0.0113% (threshold=1.0%)",
+        "monotonic=true (step1\u003c=step2\u003c=step3 in fragility)"
+      ]
+    },
+    "on_exceed": "Recovery scenario step 3 does not return to baseline within 1% — either BuildTriangleRecoveryScenario(3) edges need updating or sensitivity is over-penalising residual degradation",
+    "answered_questions": {
+      "what_was_tested": "Triangle recovery fragility across 3 steps; step 3 convergence to healthy baseline",
+      "why_this_threshold": "1% matches the topology_replay_dashboard_test.go acceptance criterion of 0.98-1.00 fragility",
+      "what_happens_if_it_fails": "Dashboard shows incomplete recovery even after all edges are restored — operators confused about system health",
+      "how_determinism_was_verified": "All topology inputs are fixed (no time/random) — computation is deterministic",
+      "is_golden_file_frozen": "Written on first run",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/recovery_convergence.json and re-run"
+    },
+    "run_at": "2026-04-26T07:54:08Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004c",
+    "layer": 4,
+    "name": "ExecuteAllScenarios end-to-end regression vs golden",
+    "aim": "Full replay pipeline output must match golden within 0.0100% per scenario",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "ReplayCapture.FinalFragility"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "End-to-end regression via full replay pipeline — catches wrapping/modification in InjectTopologySnapshot"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 3036,
+      "error_messages": [
+        "6 scenarios all within 0.0100% of golden"
+      ]
+    },
+    "on_exceed": "Full replay pipeline produces different fragility than direct ComputeTopologySensitivity — InjectTopologySnapshot is transforming or overwriting the computed sensitivity",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() output compared to golden written by L4-REP-001",
+      "why_this_threshold": "0.01% — pipeline should be identical to isolated function; any delta indicates unwanted transformation",
+      "what_happens_if_it_fails": "Replay pipeline does not faithfully reflect topology sensitivity — golden comparisons are unreliable",
+      "how_determinism_was_verified": "L4-REP-001 already verified determinism; this test only checks regression",
+      "is_golden_file_frozen": "Written by L4-REP-001",
+      "how_to_update_golden_file": "Re-run L4-REP-001 to regenerate"
+    },
+    "run_at": "2026-04-26T07:54:11Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-001",
+    "layer": 4,
+    "name": "ExecuteAllScenarios determinism across 20 runs",
+    "aim": "ReplayEngine.ExecuteAllScenarios() must produce identical FinalFragility for all 6 scenarios across 20 runs",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_deviation",
+      "operator": "\u003c=",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity is a pure function of GraphSnapshot — any deviation indicates non-determinism"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 20,
+      "runs_identical": 20,
+      "fields_checked": 120,
+      "fields_in_tolerance": 120,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 61216,
+      "error_messages": [
+        "20 runs × 6 scenarios = 120 checks all identical"
+      ]
+    },
+    "on_exceed": "Non-deterministic sensitivity computation means replay golden files cannot be trusted — CI will produce random pass/fail results for the same commit",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() called 20 times; FinalFragility and PressureHeatmap checksum compared per scenario per run",
+      "why_this_threshold": "1e-9 is float64 arithmetic noise floor — any larger deviation is a real non-determinism bug, not precision",
+      "what_happens_if_it_fails": "Golden file written from run 0 will mismatch run 1 — regression tests produce false alarms every CI build",
+      "how_determinism_was_verified": "SHA256 of (fragility, pressure_heatmap) per scenario compared across all runs",
+      "is_golden_file_frozen": "Written on first run if absent; never overwritten automatically",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/replay_all_scenarios.json and re-run"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003",
+    "layer": 4,
+    "name": "ComputeTopologySensitivity stability across 100 identical calls",
+    "aim": "ComputeTopologySensitivity called 100 times on identical GraphSnapshot must produce zero deviations",
+    "packages_involved": [
+      "internal/modelling",
+      "internal/integration"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "N/A — comparison is internal across runs",
+    "threshold": {
+      "metric": "max_output_deviation",
+      "operator": "==",
+      "value": 0,
+      "unit": "dimensionless",
+      "rationale": "ComputeTopologySensitivity takes no time/random inputs — it must be a pure function"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 100,
+      "runs_identical": 100,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "100 calls all produced identical output (worst_delta=0)"
+      ]
+    },
+    "on_exceed": "ComputeTopologySensitivity has hidden state (global variable, map iteration order, time.Now()) → dashboard shows different fragility scores on each orchestrator tick for the same topology",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity called 100 times on same GraphSnapshot (keystone collapse: 7 nodes, 6 edges)",
+      "why_this_threshold": "1e-12 is below float64 arithmetic rounding — any deviation is a state side-effect, not precision",
+      "what_happens_if_it_fails": "Orchestrator tick produces different fragility values on consecutive calls → dashboard flickers → operator can't trust readings",
+      "how_determinism_was_verified": "Direct float64 comparison with 1e-12 epsilon across 100 calls",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-003b",
+    "layer": 4,
+    "name": "InjectTopologySnapshot capture fidelity",
+    "aim": "ReplayCapture.FinalFragility must equal ComputeTopologySensitivity output; PressureHeatmap must contain all nodes with valid values; EdgeWeightChanges must cover all edges",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "(*ReplayEngine).InjectTopologySnapshot",
+      "ReplayCapture.FinalFragility",
+      "ReplayCapture.PressureHeatmap",
+      "ReplayCapture.EdgeWeightChanges"
+    ],
+    "golden_file": "N/A",
+    "threshold": {
+      "metric": "fragility_delta",
+      "operator": "\u003c",
+      "value": 1e-9,
+      "unit": "dimensionless",
+      "rationale": "InjectTopologySnapshot must faithfully report ComputeTopologySensitivity output"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "fragility_delta",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "all 4 scenarios: capture fidelity verified"
+      ]
+    },
+    "on_exceed": "Layer 4 regression tests compare against ReplayCapture values — if those values do not faithfully reflect the topology, golden files are built on wrong reference data",
+    "answered_questions": {
+      "what_was_tested": "InjectTopologySnapshot on 4 scenarios; capture fields compared to direct ComputeTopologySensitivity output",
+      "why_this_threshold": "1e-9 — the values should be identical since InjectTopologySnapshot calls ComputeTopologySensitivity internally",
+      "what_happens_if_it_fails": "Golden files written from wrong values — regression detection broken from the start",
+      "how_determinism_was_verified": "Direct comparison of capture.FinalFragility against ComputeTopologySensitivity(same snap)",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "N/A"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002",
+    "layer": 4,
+    "name": "Topology sensitivity golden file comparison — 6 scenarios",
+    "aim": "ComputeTopologySensitivity output for all 6 scenarios must match golden files within 0.0010%",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling",
+      "internal/topology"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario",
+      "integration.BuildDiamondStressScenario",
+      "integration.BuildLinearCascadeScenario",
+      "integration.BuildTriangleRecoveryScenario",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_relative_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.001,
+      "unit": "percent",
+      "rationale": "Any change in fragility/perturbation scores changes what operators see in the dashboard risk panel"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 287,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 all within 0.0010%",
+        "diamond_stress: PASS fields=17 all within 0.0010%",
+        "linear_cascade: PASS fields=14 all within 0.0010%",
+        "recovery_step_1: PASS fields=11 all within 0.0010%",
+        "recovery_step_2: PASS fields=11 all within 0.0010%",
+        "recovery_step_3: PASS fields=11 all within 0.0010%"
+      ]
+    },
+    "on_exceed": "A code change in topology_sensitivity.go silently altered the SystemFragility or PerturbationScore values that the dashboard renders — operators see wrong risk information",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity on 6 topology snapshots: keystone_collapse, diamond_stress, linear_cascade, recovery_step_1, recovery_step_2, recovery_step_3",
+      "why_this_threshold": "0.001% tolerance covers float64 arithmetic variance; larger change is a real behavioral difference that changes dashboard values",
+      "what_happens_if_it_fails": "Dashboard fragility scores and service perturbation rankings differ from expected — operators may prioritise wrong services",
+      "how_determinism_was_verified": "Golden written on first run from actual runtime output; compared on every subsequent run",
+      "is_golden_file_frozen": "Yes — update only when the topology sensitivity algorithm is intentionally changed",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/topology_fragility_*.json files and re-run test"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-002b",
+    "layer": 4,
+    "name": "Builder ExpectedFragility values match ComputeTopologySensitivity output",
+    "aim": "Each scenario builder's ExpectedFragility must be within 5.0% of actual ComputeTopologySensitivity output",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildKeystoneCollapseScenario (ExpectedFragility field)",
+      "modelling.ComputeTopologySensitivity (SystemFragility output)"
+    ],
+    "golden_file": "N/A — no golden needed, threshold is from builder declarations",
+    "threshold": {
+      "metric": "fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "percent",
+      "rationale": "5% tolerance — builder expected values are approximate documentation; exact match not required but large deviation means stale docs"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.0047847172904142456,
+      "actual_unit": "worst_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.0047847172904142456,
+      "output_sha256": "",
+      "duration_ms": 0,
+      "error_messages": [
+        "keystone_collapse: OK delta=0.00%",
+        "diamond_stress: OK delta=0.00%",
+        "linear_cascade: OK delta=0.00%",
+        "recovery_step_1: OK delta=0.00%",
+        "recovery_step_2: OK delta=0.00%",
+        "recovery_step_3: OK delta=0.00%"
+      ]
+    },
+    "on_exceed": "Scenario builders declare fragility values that no longer match computation — documentation and test expectations diverged from reality",
+    "answered_questions": {
+      "what_was_tested": "ExpectedFragility in each of the 6 builder functions vs actual ComputeTopologySensitivity output",
+      "why_this_threshold": "5% — these are declared approximations; exact match is not the contract, but \u003e5% means the algorithm changed significantly",
+      "what_happens_if_it_fails": "Test documentation claims wrong fragility values — operators briefed on wrong expected behaviour",
+      "how_determinism_was_verified": "Single run — cross-run determinism verified in L4-REP-001",
+      "is_golden_file_frozen": "N/A",
+      "how_to_update_golden_file": "Update ExpectedFragility in each builder function in internal/integration/replay.go"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004",
+    "layer": 4,
+    "name": "Version regression: all scenarios within 0.01% of golden",
+    "aim": "Current build must produce topology sensitivity within 0.0100% of stored golden for all 6 scenarios",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "modelling.ComputeTopologySensitivity",
+      "integration.Build*Scenario (as inputs)"
+    ],
+    "golden_file": "./golden/topology_fragility_*.json",
+    "threshold": {
+      "metric": "max_field_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "Any change in sensitivity algorithm must be intentional and explicitly reviewed — 0.01% catches real changes, not float noise"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 6,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 2,
+      "error_messages": [
+        "keystone_collapse: PASS fields=23 worst=0.000000%",
+        "diamond_stress: PASS fields=17 worst=0.000000%",
+        "linear_cascade: PASS fields=14 worst=0.000000%",
+        "recovery_step_1: PASS fields=11 worst=0.000000%",
+        "recovery_step_2: PASS fields=11 worst=0.000000%",
+        "recovery_step_3: PASS fields=11 worst=0.000000%"
+      ]
+    },
+    "on_exceed": "Topology sensitivity algorithm changed between this commit and the golden-writing commit — review internal/modelling/topology_sensitivity.go diff before proceeding",
+    "answered_questions": {
+      "what_was_tested": "ComputeTopologySensitivity output for 6 scenarios compared against golden files written by L4-REP-002",
+      "why_this_threshold": "0.01% is tighter than the write tolerance (0.001%) to catch regression; still above float64 noise floor",
+      "what_happens_if_it_fails": "An algorithm change altered risk scores — operators may see wrong fragility or perturbation rankings",
+      "how_determinism_was_verified": "Same inputs as L4-REP-002; golden files are the invariant anchor",
+      "is_golden_file_frozen": "Yes — update ONLY when algorithm change is intentional and reviewed",
+      "how_to_update_golden_file": "Delete golden files and re-run L4-REP-002, then confirm all scenarios produce expected outputs"
+    },
+    "run_at": "2026-04-28T10:24:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004b",
+    "layer": 4,
+    "name": "Triangle recovery convergence within 1% of baseline",
+    "aim": "After 3 recovery steps, fragility must be within 1.0% of healthy baseline",
+    "packages_involved": [
+      "internal/integration",
+      "internal/modelling"
+    ],
+    "functions_tested": [
+      "integration.BuildTriangleRecoveryScenario(0,1,2,3)",
+      "modelling.ComputeTopologySensitivity"
+    ],
+    "golden_file": "./golden/recovery_convergence.json",
+    "threshold": {
+      "metric": "convergence_delta_pct",
+      "operator": "\u003c=",
+      "value": 1,
+      "unit": "percent",
+      "rationale": "Step 3 edges are nearly identical to healthy baseline — convergence within 1% validates the recovery model"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.011258091753443805,
+      "actual_unit": "convergence_delta_pct",
+      "runs_attempted": 4,
+      "runs_identical": 0,
+      "fields_checked": 0,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0.011258091753443805,
+      "output_sha256": "",
+      "duration_ms": 5,
+      "error_messages": [
+        "baseline=0.994764 step1=0.600000 step2=1.000000 step3=0.994652",
+        "convergence_delta=0.0113% (threshold=1.0%)",
+        "monotonic=true (step1\u003c=step2\u003c=step3 in fragility)"
+      ]
+    },
+    "on_exceed": "Recovery scenario step 3 does not return to baseline within 1% — either BuildTriangleRecoveryScenario(3) edges need updating or sensitivity is over-penalising residual degradation",
+    "answered_questions": {
+      "what_was_tested": "Triangle recovery fragility across 3 steps; step 3 convergence to healthy baseline",
+      "why_this_threshold": "1% matches the topology_replay_dashboard_test.go acceptance criterion of 0.98-1.00 fragility",
+      "what_happens_if_it_fails": "Dashboard shows incomplete recovery even after all edges are restored — operators confused about system health",
+      "how_determinism_was_verified": "All topology inputs are fixed (no time/random) — computation is deterministic",
+      "is_golden_file_frozen": "Written on first run",
+      "how_to_update_golden_file": "Delete tests/layer4_scenario_replay/golden/recovery_convergence.json and re-run"
+    },
+    "run_at": "2026-04-28T10:24:54Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L4-REP-004c",
+    "layer": 4,
+    "name": "ExecuteAllScenarios end-to-end regression vs golden",
+    "aim": "Full replay pipeline output must match golden within 0.0100% per scenario",
+    "packages_involved": [
+      "internal/integration",
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "integration.NewReplayEngine",
+      "(*ReplayEngine).ExecuteAllScenarios",
+      "ReplayCapture.FinalFragility"
+    ],
+    "golden_file": "./golden/replay_all_scenarios.json",
+    "threshold": {
+      "metric": "max_fragility_delta_pct",
+      "operator": "\u003c=",
+      "value": 0.01,
+      "unit": "percent",
+      "rationale": "End-to-end regression via full replay pipeline — catches wrapping/modification in InjectTopologySnapshot"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "relative_delta_pct",
+      "runs_attempted": 1,
+      "runs_identical": 0,
+      "fields_checked": 6,
+      "fields_in_tolerance": 0,
+      "fields_outside_tolerance": 0,
+      "worst_relative_delta_pct": 0,
+      "output_sha256": "",
+      "duration_ms": 3123,
+      "error_messages": [
+        "6 scenarios all within 0.0100% of golden"
+      ]
+    },
+    "on_exceed": "Full replay pipeline produces different fragility than direct ComputeTopologySensitivity — InjectTopologySnapshot is transforming or overwriting the computed sensitivity",
+    "answered_questions": {
+      "what_was_tested": "ExecuteAllScenarios() output compared to golden written by L4-REP-001",
+      "why_this_threshold": "0.01% — pipeline should be identical to isolated function; any delta indicates unwanted transformation",
+      "what_happens_if_it_fails": "Replay pipeline does not faithfully reflect topology sensitivity — golden comparisons are unreliable",
+      "how_determinism_was_verified": "L4-REP-001 already verified determinism; this test only checks regression",
+      "is_golden_file_frozen": "Written by L4-REP-001",
+      "how_to_update_golden_file": "Re-run L4-REP-001 to regenerate"
+    },
+    "run_at": "2026-04-28T10:24:57Z",
+    "go_version": "go1.26.0"
   }
 ]

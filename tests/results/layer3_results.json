@@ -22609,5 +22609,1564 @@
     },
     "run_at": "2026-04-11T13:43:54Z",
     "go_version": "go1.22.2"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 594556,
+      "race_detector_active_flag": true,
+      "duration_ms": 20002,
+      "error_messages": [
+        "broadcasts=594556 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-26T06:51:20Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 969,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-26T06:51:21Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9891885364834931,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 1126,
+      "error_messages": [
+        "after_1M: heap=1464KB",
+        "after_2M: heap=1464KB",
+        "after_3M: heap=1464KB",
+        "after_4M: heap=1464KB",
+        "after_5M: heap=1464KB",
+        "after_6M: heap=1464KB",
+        "after_7M: heap=1464KB",
+        "after_8M: heap=1464KB",
+        "after_9M: heap=1464KB",
+        "after_10M: heap=1464KB",
+        "heap_before=1480KB heap_after=1464KB growth=0.9892x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-26T06:51:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 60817,
+      "race_detector_active_flag": true,
+      "duration_ms": 30021,
+      "error_messages": [
+        "pushes_done=60817 snapshots=67629 last_calls=5653967 size_calls=73730 summary_calls=73730 final_size=1024 mean_req=5769.80"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 60817 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-26T06:51:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-003",
+    "layer": 3,
+    "name": "Store concurrent Ingest/Prune/AllWindows/Window/ServiceIDs",
+    "aim": "20 ingesters + 5 pruners + 5 readers on Store for 30s: zero races, zero panics, zero nil windows",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).Prune",
+      "(*Store).AllWindows",
+      "(*Store).Window",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "panics_plus_nil_windows",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map access without proper locking causes panic in Go runtime"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics+nil_deref",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 40738,
+      "race_detector_active_flag": true,
+      "duration_ms": 30138,
+      "error_messages": [
+        "ingests=40738 prunes=1079 reads=114993 panics=0 nil_windows=0"
+      ]
+    },
+    "on_exceed": "Race on Store.buffers map → 'concurrent map read and map write' panic → Orchestrator.tick goroutine crashes → control loop halts → system goes open-loop",
+    "answered_questions": {
+      "what_was_tested": "Store(bufCap=256 maxSvc=50 staleAge=2s) under 20 ingesters + 5 pruners + 5 readers for 30s",
+      "why_this_threshold": "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+      "what_happens_if_it_fails": "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+      "how_races_were_detected": "Go race detector on test binary + explicit panic recovery in each goroutine",
+      "how_leaks_were_detected": "N/A — not the focus of this test",
+      "concurrency_pattern_exercised": "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest"
+    },
+    "run_at": "2026-04-26T06:52:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-004",
+    "layer": 3,
+    "name": "Store cardinality cap enforced under concurrent ingestion",
+    "aim": "50 goroutines each registering unique services against Store(maxSvc=10): count must never exceed cap",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "cardinality_cap_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Exceeding maxServices allows unbounded map growth → OOM in high-cardinality environments"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "final_service_count",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 25000,
+      "race_detector_active_flag": true,
+      "duration_ms": 9,
+      "error_messages": [
+        "goroutines=50 iterations_each=500 total_ingests=25000 violations=0 panics=0 final_count=10 max_allowed=10"
+      ]
+    },
+    "on_exceed": "More than maxServices entries in the Store → heap grows unboundedly → Kubernetes OOM killer terminates the pod",
+    "answered_questions": {
+      "what_was_tested": "50 goroutines trying to register 50 unique services against Store(maxSvc=10) simultaneously",
+      "why_this_threshold": "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+      "what_happens_if_it_fails": "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+      "how_races_were_detected": "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+      "how_leaks_were_detected": "N/A",
+      "concurrency_pattern_exercised": "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations"
+    },
+    "run_at": "2026-04-26T06:52:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 387906,
+      "race_detector_active_flag": true,
+      "duration_ms": 20000,
+      "error_messages": [
+        "broadcasts=387906 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-26T07:06:22Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 1052,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-26T07:06:23Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9999993771926711,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 1183,
+      "error_messages": [
+        "after_1M: heap=1568KB",
+        "after_2M: heap=1568KB",
+        "after_3M: heap=1568KB",
+        "after_4M: heap=1568KB",
+        "after_5M: heap=1568KB",
+        "after_6M: heap=1568KB",
+        "after_7M: heap=1568KB",
+        "after_8M: heap=1568KB",
+        "after_9M: heap=1568KB",
+        "after_10M: heap=1568KB",
+        "heap_before=1568KB heap_after=1568KB growth=1.0000x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-26T07:06:24Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 68629,
+      "race_detector_active_flag": true,
+      "duration_ms": 30042,
+      "error_messages": [
+        "pushes_done=68629 snapshots=313587 last_calls=8854837 size_calls=111624 summary_calls=111624 final_size=1024 mean_req=6314.74"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 68629 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-26T07:06:54Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-003",
+    "layer": 3,
+    "name": "Store concurrent Ingest/Prune/AllWindows/Window/ServiceIDs",
+    "aim": "20 ingesters + 5 pruners + 5 readers on Store for 30s: zero races, zero panics, zero nil windows",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).Prune",
+      "(*Store).AllWindows",
+      "(*Store).Window",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "panics_plus_nil_windows",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map access without proper locking causes panic in Go runtime"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics+nil_deref",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 29351,
+      "race_detector_active_flag": true,
+      "duration_ms": 30001,
+      "error_messages": [
+        "ingests=29351 prunes=969 reads=50347 panics=0 nil_windows=0"
+      ]
+    },
+    "on_exceed": "Race on Store.buffers map → 'concurrent map read and map write' panic → Orchestrator.tick goroutine crashes → control loop halts → system goes open-loop",
+    "answered_questions": {
+      "what_was_tested": "Store(bufCap=256 maxSvc=50 staleAge=2s) under 20 ingesters + 5 pruners + 5 readers for 30s",
+      "why_this_threshold": "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+      "what_happens_if_it_fails": "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+      "how_races_were_detected": "Go race detector on test binary + explicit panic recovery in each goroutine",
+      "how_leaks_were_detected": "N/A — not the focus of this test",
+      "concurrency_pattern_exercised": "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest"
+    },
+    "run_at": "2026-04-26T07:07:25Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-004",
+    "layer": 3,
+    "name": "Store cardinality cap enforced under concurrent ingestion",
+    "aim": "50 goroutines each registering unique services against Store(maxSvc=10): count must never exceed cap",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "cardinality_cap_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Exceeding maxServices allows unbounded map growth → OOM in high-cardinality environments"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "final_service_count",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 25000,
+      "race_detector_active_flag": true,
+      "duration_ms": 11,
+      "error_messages": [
+        "goroutines=50 iterations_each=500 total_ingests=25000 violations=0 panics=0 final_count=10 max_allowed=10"
+      ]
+    },
+    "on_exceed": "More than maxServices entries in the Store → heap grows unboundedly → Kubernetes OOM killer terminates the pod",
+    "answered_questions": {
+      "what_was_tested": "50 goroutines trying to register 50 unique services against Store(maxSvc=10) simultaneously",
+      "why_this_threshold": "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+      "what_happens_if_it_fails": "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+      "how_races_were_detected": "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+      "how_leaks_were_detected": "N/A",
+      "concurrency_pattern_exercised": "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations"
+    },
+    "run_at": "2026-04-26T07:07:25Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 2826468,
+      "race_detector_active_flag": true,
+      "duration_ms": 20011,
+      "error_messages": [
+        "broadcasts=2826468 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-26T07:41:03Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 648,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=false fast_received=26 final_clients=2"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-26T07:41:03Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9999993739987894,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 438,
+      "error_messages": [
+        "after_1M: heap=1560KB",
+        "after_2M: heap=1560KB",
+        "after_3M: heap=1560KB",
+        "after_4M: heap=1560KB",
+        "after_5M: heap=1560KB",
+        "after_6M: heap=1560KB",
+        "after_7M: heap=1560KB",
+        "after_8M: heap=1560KB",
+        "after_9M: heap=1560KB",
+        "after_10M: heap=1560KB",
+        "heap_before=1560KB heap_after=1560KB growth=1.0000x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-26T07:41:04Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 262547,
+      "race_detector_active_flag": true,
+      "duration_ms": 30000,
+      "error_messages": [
+        "pushes_done=262547 snapshots=421499 last_calls=17070211 size_calls=493620 summary_calls=493620 final_size=1024 mean_req=26207.52"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 262547 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-26T07:41:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-003",
+    "layer": 3,
+    "name": "Store concurrent Ingest/Prune/AllWindows/Window/ServiceIDs",
+    "aim": "20 ingesters + 5 pruners + 5 readers on Store for 30s: zero races, zero panics, zero nil windows",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).Prune",
+      "(*Store).AllWindows",
+      "(*Store).Window",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "panics_plus_nil_windows",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map access without proper locking causes panic in Go runtime"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics+nil_deref",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 227965,
+      "race_detector_active_flag": true,
+      "duration_ms": 30062,
+      "error_messages": [
+        "ingests=227965 prunes=1421 reads=384277 panics=0 nil_windows=0"
+      ]
+    },
+    "on_exceed": "Race on Store.buffers map → 'concurrent map read and map write' panic → Orchestrator.tick goroutine crashes → control loop halts → system goes open-loop",
+    "answered_questions": {
+      "what_was_tested": "Store(bufCap=256 maxSvc=50 staleAge=2s) under 20 ingesters + 5 pruners + 5 readers for 30s",
+      "why_this_threshold": "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+      "what_happens_if_it_fails": "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+      "how_races_were_detected": "Go race detector on test binary + explicit panic recovery in each goroutine",
+      "how_leaks_were_detected": "N/A — not the focus of this test",
+      "concurrency_pattern_exercised": "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest"
+    },
+    "run_at": "2026-04-26T07:42:04Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-004",
+    "layer": 3,
+    "name": "Store cardinality cap enforced under concurrent ingestion",
+    "aim": "50 goroutines each registering unique services against Store(maxSvc=10): count must never exceed cap",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "cardinality_cap_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Exceeding maxServices allows unbounded map growth → OOM in high-cardinality environments"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "final_service_count",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 25000,
+      "race_detector_active_flag": true,
+      "duration_ms": 3,
+      "error_messages": [
+        "goroutines=50 iterations_each=500 total_ingests=25000 violations=0 panics=0 final_count=10 max_allowed=10"
+      ]
+    },
+    "on_exceed": "More than maxServices entries in the Store → heap grows unboundedly → Kubernetes OOM killer terminates the pod",
+    "answered_questions": {
+      "what_was_tested": "50 goroutines trying to register 50 unique services against Store(maxSvc=10) simultaneously",
+      "why_this_threshold": "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+      "what_happens_if_it_fails": "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+      "how_races_were_detected": "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+      "how_leaks_were_detected": "N/A",
+      "concurrency_pattern_exercised": "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations"
+    },
+    "run_at": "2026-04-26T07:42:04Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 678,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=1050 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-26T07:44:15Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 2780650,
+      "race_detector_active_flag": true,
+      "duration_ms": 20000,
+      "error_messages": [
+        "broadcasts=2780650 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-26T07:46:12Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 658,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=1050 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-26T07:46:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9999993608888247,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 456,
+      "error_messages": [
+        "after_1M: heap=1528KB",
+        "after_2M: heap=1528KB",
+        "after_3M: heap=1528KB",
+        "after_4M: heap=1528KB",
+        "after_5M: heap=1528KB",
+        "after_6M: heap=1528KB",
+        "after_7M: heap=1528KB",
+        "after_8M: heap=1528KB",
+        "after_9M: heap=1528KB",
+        "after_10M: heap=1528KB",
+        "heap_before=1528KB heap_after=1528KB growth=1.0000x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-26T07:46:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 251385,
+      "race_detector_active_flag": true,
+      "duration_ms": 30000,
+      "error_messages": [
+        "pushes_done=251385 snapshots=399106 last_calls=17146278 size_calls=443830 summary_calls=443830 final_size=1024 mean_req=25102.14"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 251385 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-26T07:46:43Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-003",
+    "layer": 3,
+    "name": "Store concurrent Ingest/Prune/AllWindows/Window/ServiceIDs",
+    "aim": "20 ingesters + 5 pruners + 5 readers on Store for 30s: zero races, zero panics, zero nil windows",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).Prune",
+      "(*Store).AllWindows",
+      "(*Store).Window",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "panics_plus_nil_windows",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map access without proper locking causes panic in Go runtime"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics+nil_deref",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 201477,
+      "race_detector_active_flag": true,
+      "duration_ms": 30084,
+      "error_messages": [
+        "ingests=201477 prunes=1427 reads=340010 panics=0 nil_windows=0"
+      ]
+    },
+    "on_exceed": "Race on Store.buffers map → 'concurrent map read and map write' panic → Orchestrator.tick goroutine crashes → control loop halts → system goes open-loop",
+    "answered_questions": {
+      "what_was_tested": "Store(bufCap=256 maxSvc=50 staleAge=2s) under 20 ingesters + 5 pruners + 5 readers for 30s",
+      "why_this_threshold": "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+      "what_happens_if_it_fails": "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+      "how_races_were_detected": "Go race detector on test binary + explicit panic recovery in each goroutine",
+      "how_leaks_were_detected": "N/A — not the focus of this test",
+      "concurrency_pattern_exercised": "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest"
+    },
+    "run_at": "2026-04-26T07:47:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-004",
+    "layer": 3,
+    "name": "Store cardinality cap enforced under concurrent ingestion",
+    "aim": "50 goroutines each registering unique services against Store(maxSvc=10): count must never exceed cap",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "cardinality_cap_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Exceeding maxServices allows unbounded map growth → OOM in high-cardinality environments"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "final_service_count",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 25000,
+      "race_detector_active_flag": true,
+      "duration_ms": 9,
+      "error_messages": [
+        "goroutines=50 iterations_each=500 total_ingests=25000 violations=0 panics=0 final_count=10 max_allowed=10"
+      ]
+    },
+    "on_exceed": "More than maxServices entries in the Store → heap grows unboundedly → Kubernetes OOM killer terminates the pod",
+    "answered_questions": {
+      "what_was_tested": "50 goroutines trying to register 50 unique services against Store(maxSvc=10) simultaneously",
+      "why_this_threshold": "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+      "what_happens_if_it_fails": "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+      "how_races_were_detected": "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+      "how_leaks_were_detected": "N/A",
+      "concurrency_pattern_exercised": "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations"
+    },
+    "run_at": "2026-04-26T07:47:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-001",
+    "layer": 3,
+    "name": "Hub.Broadcast concurrent race safety",
+    "aim": "50 concurrent Broadcast callers + 1 GetLastPayload poller + 1 ClientCount poller for 20s: zero races, zero panics, SequenceNo never 0 after first broadcast",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "NewHub",
+      "(*Hub).SetMaxClients",
+      "(*Hub).Broadcast",
+      "(*Hub).GetLastPayload",
+      "(*Hub).ClientCount"
+    ],
+    "threshold": {
+      "metric": "panics_plus_seq_regressions",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map/struct access in Broadcast must be fully protected by h.mu"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 513218,
+      "race_detector_active_flag": true,
+      "duration_ms": 20013,
+      "error_messages": [
+        "broadcasts=513218 panics=0 seq_regressions=0"
+      ]
+    },
+    "on_exceed": "Concurrent access to h.clients map or h.lastPayload without proper locking → 'concurrent map iteration and map write' panic → streaming Hub crashes → all dashboard clients lose feed",
+    "answered_questions": {
+      "what_was_tested": "Hub.Broadcast called from 50 concurrent goroutines for 20s while GetLastPayload and ClientCount polled simultaneously",
+      "why_this_threshold": "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+      "what_happens_if_it_fails": "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+      "how_races_were_detected": "Go race detector on binary; also seqNo continuity check catches silent corruption",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+      "concurrency_pattern_exercised": "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock"
+    },
+    "run_at": "2026-04-28T10:24:13Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-HUB-002",
+    "layer": 3,
+    "name": "Slow client dropped without blocking fast client",
+    "aim": "After 26 broadcasts with 1 slow + 1 fast client: slow dropped, fast receives ≥16 msgs, no broadcast blocks",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/ws"
+    ],
+    "functions_tested": [
+      "(*Hub).HandleUpgrade",
+      "(*Hub).Broadcast",
+      "(*Hub).ClientCount",
+      "(*Hub).remove"
+    ],
+    "threshold": {
+      "metric": "blocked_broadcast_calls",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Broadcast must use non-blocking send (select default) — never block on a slow consumer"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "blocked_broadcast_calls",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 26,
+      "race_detector_active_flag": true,
+      "duration_ms": 859,
+      "error_messages": [
+        "sent=26 blocked=0 slow_dropped=true fast_received=1050 final_clients=1"
+      ]
+    },
+    "on_exceed": "Broadcast blocks on slow client → all Broadcast calls serialise behind slow consumer → dashboard latency grows unboundedly for ALL operators, not just the slow one",
+    "answered_questions": {
+      "what_was_tested": "26 broadcasts with sendBufSize=16, 1 slow (never reads) + 1 fast (drains immediately) client",
+      "why_this_threshold": "Broadcast uses 'select { case c.send \u003c- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+      "what_happens_if_it_fails": "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+      "how_races_were_detected": "Go race detector on binary + timing assertions on each Broadcast call",
+      "how_leaks_were_detected": "ClientCount checked after drops to verify remove() cleaned up correctly",
+      "concurrency_pattern_exercised": "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select"
+    },
+    "run_at": "2026-04-28T10:24:14Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-002",
+    "layer": 3,
+    "name": "RingBuffer memory stability under 10M pushes",
+    "aim": "Pushing 10000000 entries into RingBuffer(capacity=1000) must not grow HeapInuse beyond 2× baseline",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Size"
+    ],
+    "threshold": {
+      "metric": "heap_inuse_growth_factor",
+      "operator": "\u003c=",
+      "value": 2,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffer must overwrite old slots; heap growth \u003e 2× means entries are being retained"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.9999993575250838,
+      "actual_unit": "growth_factor_x",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 10000000,
+      "race_detector_active_flag": false,
+      "duration_ms": 1099,
+      "error_messages": [
+        "after_1M: heap=1520KB",
+        "after_2M: heap=1520KB",
+        "after_3M: heap=1520KB",
+        "after_4M: heap=1520KB",
+        "after_5M: heap=1520KB",
+        "after_6M: heap=1520KB",
+        "after_7M: heap=1520KB",
+        "after_8M: heap=1520KB",
+        "after_9M: heap=1520KB",
+        "after_10M: heap=1520KB",
+        "heap_before=1520KB heap_after=1520KB growth=1.0000x final_size=1000(expected 1000)"
+      ]
+    },
+    "on_exceed": "RingBuffer retains pushed MetricPoints beyond its capacity → heap grows O(N) → Kubernetes OOM kill → pod CrashLoopBackOff → total telemetry loss",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1000).Push called 10000000 times; HeapInuse sampled every 1000000 pushes with forced GC",
+      "why_this_threshold": "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+      "what_happens_if_it_fails": "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+      "how_races_were_detected": "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+      "how_leaks_were_detected": "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+      "concurrency_pattern_exercised": "Single-writer sequential push to verify allocation semantics, not concurrent safety"
+    },
+    "run_at": "2026-04-28T10:24:15Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-001",
+    "layer": 3,
+    "name": "RingBuffer concurrent Push/Snapshot/Last/Size/SummaryStats",
+    "aim": "10 writers + 10 readers on one RingBuffer for 30s: zero data races (race detector), zero torn reads, zero panics",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewRingBuffer",
+      "(*RingBuffer).Push",
+      "(*RingBuffer).Snapshot",
+      "(*RingBuffer).Last",
+      "(*RingBuffer).Size",
+      "(*RingBuffer).SummaryStats"
+    ],
+    "threshold": {
+      "metric": "torn_reads_plus_panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Any torn read means the control loop sees a physically impossible sensor state"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "integrity_violations",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 54003,
+      "race_detector_active_flag": true,
+      "duration_ms": 30031,
+      "error_messages": [
+        "pushes_done=54003 snapshots=514099 last_calls=8334936 size_calls=99393 summary_calls=99393 final_size=1024 mean_req=8801.43"
+      ]
+    },
+    "on_exceed": "Torn MetricPoint delivered to QueuePhysicsEngine → MPC optimises on garbled state → unbounded ControlDirective.ScaleFactor sent to actuator",
+    "answered_questions": {
+      "what_was_tested": "RingBuffer(capacity=1024) under 10 concurrent writers and 10 concurrent readers for 30s, 54003 total pushes",
+      "why_this_threshold": "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+      "what_happens_if_it_fails": "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+      "how_races_were_detected": "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+      "how_leaks_were_detected": "N/A — goroutine lifecycle not the focus of this test",
+      "concurrency_pattern_exercised": "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)"
+    },
+    "run_at": "2026-04-28T10:24:45Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-003",
+    "layer": 3,
+    "name": "Store concurrent Ingest/Prune/AllWindows/Window/ServiceIDs",
+    "aim": "20 ingesters + 5 pruners + 5 readers on Store for 30s: zero races, zero panics, zero nil windows",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).Prune",
+      "(*Store).AllWindows",
+      "(*Store).Window",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "panics_plus_nil_windows",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Concurrent map access without proper locking causes panic in Go runtime"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics+nil_deref",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 42379,
+      "race_detector_active_flag": true,
+      "duration_ms": 30121,
+      "error_messages": [
+        "ingests=42379 prunes=1093 reads=74818 panics=0 nil_windows=0"
+      ]
+    },
+    "on_exceed": "Race on Store.buffers map → 'concurrent map read and map write' panic → Orchestrator.tick goroutine crashes → control loop halts → system goes open-loop",
+    "answered_questions": {
+      "what_was_tested": "Store(bufCap=256 maxSvc=50 staleAge=2s) under 20 ingesters + 5 pruners + 5 readers for 30s",
+      "why_this_threshold": "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+      "what_happens_if_it_fails": "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+      "how_races_were_detected": "Go race detector on test binary + explicit panic recovery in each goroutine",
+      "how_leaks_were_detected": "N/A — not the focus of this test",
+      "concurrency_pattern_exercised": "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest"
+    },
+    "run_at": "2026-04-28T10:25:15Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L3-TEL-004",
+    "layer": 3,
+    "name": "Store cardinality cap enforced under concurrent ingestion",
+    "aim": "50 goroutines each registering unique services against Store(maxSvc=10): count must never exceed cap",
+    "packages_involved": [
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "NewStore",
+      "(*Store).Ingest",
+      "(*Store).ServiceIDs"
+    ],
+    "threshold": {
+      "metric": "cardinality_cap_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Exceeding maxServices allows unbounded map growth → OOM in high-cardinality environments"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 10,
+      "actual_unit": "final_service_count",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "operations_completed": 25000,
+      "race_detector_active_flag": true,
+      "duration_ms": 24,
+      "error_messages": [
+        "goroutines=50 iterations_each=500 total_ingests=25000 violations=0 panics=0 final_count=10 max_allowed=10"
+      ]
+    },
+    "on_exceed": "More than maxServices entries in the Store → heap grows unboundedly → Kubernetes OOM killer terminates the pod",
+    "answered_questions": {
+      "what_was_tested": "50 goroutines trying to register 50 unique services against Store(maxSvc=10) simultaneously",
+      "why_this_threshold": "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+      "what_happens_if_it_fails": "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+      "how_races_were_detected": "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+      "how_leaks_were_detected": "N/A",
+      "concurrency_pattern_exercised": "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations"
+    },
+    "run_at": "2026-04-28T10:25:16Z",
+    "go_version": "go1.26.0"
   }
 ]

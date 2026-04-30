@@ -55,9 +55,14 @@ func (c *Controller) Tick(
 	cacheSat :=
 		memPressure * sys.CacheAggression
 
+	// ADDED: Direct Backlog Bias
+	// This ensures energy stays high even if the service is "stalled" (low utilization)
+	rawBacklogBias := math.Min(1.0, backlog/400.0)
+
 	energy :=
 		math.Tanh(
 			0.7*util*queuePressure +
+				1.0*rawBacklogBias + // NEW: Critical priority boost
 				0.4*retryStorm +
 				0.2*cacheSat,
 		)
@@ -95,20 +100,14 @@ func (c *Controller) Tick(
 	}
 
 	if c.decisionCooldown > 0 {
-
-		ApplyActuatorDynamics(
-			sys,
-			c.ActState,
-			c.LastDecision,
-			c.ActuatorCfg,
-			backlog,
-			errorRate,
-			memPressure,
-			dt,
-		)
-
-		c.decisionCooldown -= dt
-		return
+		// EMERGENCY BYPASS
+		if backlog > float64(sys.QueueLimit)*0.3 || energy > 0.75 || sys.Risk > 0.7 {
+			c.decisionCooldown = 0 // Break cooldown to resolve conflict
+		} else {
+			ApplyActuatorDynamics(sys, c.ActState, c.LastDecision, c.ActuatorCfg, backlog, errorRate, memPressure, dt)
+			c.decisionCooldown -= dt
+			return
+		}
 	}
 
 	// ===== ADAPTIVE GENERATOR RADIUS =====
@@ -136,32 +135,35 @@ func (c *Controller) Tick(
 			c.Memory,
 		)
 
-	// ===== MODEL-BASED EMERGENCY LAW =====
-	if energy > 0.92 {
+		// 🔥 AUTOPILOT AS MINIMUM GUARANTEE (CRITICAL FIX)
+	best.Replicas =
+		maxInt(
+			int(autoScale),
+			best.Replicas,
+		)
 
-    requiredCapacity :=
-        sys.PredictedArrival * 1.4
+	utilAfter :=
+		sys.PredictedArrival /
+			(float64(best.Replicas)*sys.ServiceRate + 0.001)
 
-    targetReplicas :=
-        int(
-            requiredCapacity /
-                math.Max(sys.ServiceRate, 0.1),
-        )
+	if utilAfter > 0.85 {
+		best.Replicas++
+	}
 
-    // autopilot-derived replicas (ensure this is set earlier in Tick)
-    autoReplicas := int(autoScale)
+	if energy > 0.85 || backlog > 200 {
+		// Force capacity to exceed arrival rate by 25%
+		requiredCapacity := sys.PredictedArrival * 1.25
 
-    // 🔥 COMBINE (override नहीं)
-    best.Replicas =
-        maxInt(
-            maxInt(best.Replicas, targetReplicas),
-            autoReplicas,
-        )
+		targetReplicas :=
+			int(math.Ceil(requiredCapacity / math.Max(sys.ServiceRate, 0.1)))
 
-    // RetryLimit logic same रहेगा (ये scaling से independent है)
-    best.RetryLimit =
-        maxInt(1, best.RetryLimit-1)
-}
+		// Force a minimum increment of 1 replica during emergency
+		best.Replicas = maxInt(best.Replicas, sys.Replicas+1)
+		best.Replicas = maxInt(best.Replicas, targetReplicas)
+
+		// Ensure Autopilot recommendation is the floor
+		best.Replicas = maxInt(int(autoScale), best.Replicas)
+	}
 
 	c.LastDecision = best
 

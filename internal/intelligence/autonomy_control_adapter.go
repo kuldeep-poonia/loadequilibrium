@@ -4,8 +4,6 @@ import (
 	"math"
 )
 
-
-
 type InfraState struct {
 	QueueDepth float64
 	LatencyP95 float64
@@ -22,12 +20,15 @@ type MPCWeighting struct {
 	RiskWeight float64
 	SmoothCost float64
 
-
+	Regime       int
+	RiskEWMA     float64
+	AnomalyScore float64
+	CostBias     float64
 }
 
 type AutonomyControlAdapter struct {
-	orc *AutonomyOrchestrator
-	roll *PredictiveStabilityRollout
+	orc    *AutonomyOrchestrator
+	roll   *PredictiveStabilityRollout
 	policy func([]float64) []float64
 
 	mean [4]float64
@@ -37,6 +38,7 @@ type AutonomyControlAdapter struct {
 	lastAct    []float64
 
 	actLatencyEW float64
+	riskEWMA     float64
 }
 
 /* ===== ctor ===== */
@@ -48,8 +50,8 @@ func NewAutonomyControlAdapter(
 ) *AutonomyControlAdapter {
 
 	return &AutonomyControlAdapter{
-		orc: orc,
-		roll: roll,
+		orc:     orc,
+		roll:    roll,
 		lastAct: make([]float64, actDim),
 	}
 }
@@ -76,6 +78,9 @@ func (a *AutonomyControlAdapter) Step(
 
 	risk :=
 		a.physicalRisk(norm, s)
+	a.riskEWMA =
+		0.85*a.riskEWMA +
+			0.15*risk
 
 	reg :=
 		a.regimeTemporal(norm)
@@ -83,13 +88,13 @@ func (a *AutonomyControlAdapter) Step(
 	fc :=
 		a.roll.Forecast(
 			RolloutInput{
-				State: norm,
-				Action: a.lastAct,
-				Regime: reg,
-				ModelUnc: 0.25,
+				State:     norm,
+				Action:    a.lastAct,
+				Regime:    reg,
+				ModelUnc:  0.25,
 				HazardUnc: 0.25,
 				SLAWeight: norm,
-				Policy: a.policy,
+				Policy:    a.policy,
 				PolicyUnc: 0.15,
 			},
 		)
@@ -110,7 +115,7 @@ func (a *AutonomyControlAdapter) Step(
 			SLASeverity:   s.SLASeverity,
 			EntropyProxy:  entropy(norm),
 			GradProxy:     math.Abs(trend(riskFc)),
-			Novelty:       math.Abs(norm[0]-norm[1]),
+			Novelty:       math.Abs(norm[0] - norm[1]),
 			Regime:        reg,
 			Policy:        a.policy,
 			PolicyUnc:     0.15,
@@ -118,27 +123,27 @@ func (a *AutonomyControlAdapter) Step(
 
 	telmIn :=
 		TelemetryInput{
-			RiskForecast: riskFc,
-			ActionExec: a.lastAct,
-			ActionPrev: a.lastAct,
-			ValueUnc: variance(riskFc),
-			PolicyEntropy: entropy(norm),
-			CalibError: math.Abs(risk-mean(riskFc)),
+			RiskForecast:   riskFc,
+			ActionExec:     a.lastAct,
+			ActionPrev:     a.lastAct,
+			ValueUnc:       variance(riskFc),
+			PolicyEntropy:  entropy(norm),
+			CalibError:     math.Abs(risk - mean(riskFc)),
 			SpectralEnergy: norm,
-			AdvSkew: skew(riskFc),
-			DistKL: variance(norm),
-			TrackingErr: 1 - s.PerfScore,
-			SLASeverity: s.SLASeverity,
-			LoadPressure: s.CapacityPressure,
-			FailureMode: norm[3],
-			Seasonality: norm[2],
-			Regime: reg,
+			AdvSkew:        skew(riskFc),
+			DistKL:         variance(norm),
+			TrackingErr:    1 - s.PerfScore,
+			SLASeverity:    s.SLASeverity,
+			LoadPressure:   s.CapacityPressure,
+			FailureMode:    norm[3],
+			Seasonality:    norm[2],
+			Regime:         reg,
 		}
 
 	out :=
 		a.orc.Step(
 			OrchestratorInput{
-				RuntimeIn: runtimeIn,
+				RuntimeIn:   runtimeIn,
 				TelemetryIn: telmIn,
 			},
 		)
@@ -147,12 +152,20 @@ func (a *AutonomyControlAdapter) Step(
 		a.feasibleActuator(out.Action)
 
 	a.lastAct = act
+	anomaly := clamp(
+		math.Abs(trend(riskFc))+
+			0.5*math.Abs(norm[0]-norm[1]),
+		0,
+		1,
+	)
 
 	return MPCWeighting{
-		RiskWeight: 0.20 * clamp(act[0], -0.2, 0.4),
-		SmoothCost: 0.10 * clamp(act[1], -0.1, 0.2),
-
-
+		RiskWeight:   0.20 * clamp(act[0], -0.2, 0.4),
+		SmoothCost:   0.10 * clamp(act[1], -0.1, 0.2),
+		Regime:       reg,
+		RiskEWMA:     a.riskEWMA,
+		AnomalyScore: anomaly,
+		CostBias:     clamp(act[2], -0.5, 0.5),
 	}
 }
 
@@ -329,4 +342,3 @@ func entropy(x []float64) float64 {
 
 	return s / float64(len(x))
 }
-

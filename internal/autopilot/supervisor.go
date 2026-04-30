@@ -2,25 +2,23 @@ package autopilot
 
 import "math"
 
-
-
 type PlantState struct {
 	Backlog float64
 
-	ArrivalMean float64
-	ArrivalP95  float64
+	ArrivalMean        float64
+	ArrivalP95         float64
 	ArrivalRegimeShift float64
 
 	ServiceRate float64
 
-	Disturbance float64
+	Disturbance       float64
 	DisturbanceEnergy float64
 
 	CapacityActive float64
 	CapacityTarget float64
-	CapacityTau float64
+	CapacityTau    float64
 
-	RetryFactor float64
+	RetryFactor     float64
 	LatencyPressure float64
 
 	ScalingCost float64
@@ -30,15 +28,14 @@ type PlantState struct {
 }
 
 type Supervisor struct {
-
-	Dt float64
+	Dt         float64
 	MaxHorizon int
 
 	Alpha float64
 	Beta  float64
 
-	EnergyAbsLimit float64
-	SafeBacklogLimit float64
+	EnergyAbsLimit      float64
+	SafeBacklogLimit    float64
 	TerminalSafeBacklog float64
 
 	DisturbanceBound float64
@@ -57,8 +54,7 @@ func (s *Supervisor) arrivalEnvelope(x PlantState, step int) float64 {
 		x.ArrivalRegimeShift *
 			math.Min(1, float64(step)/5.0)
 
-
-return math.Max(
+	return math.Max(
 		x.ArrivalMean+regimeBoost,
 		x.ArrivalP95,
 	)
@@ -67,9 +63,9 @@ return math.Max(
 /*
 Retry load
 */
-     func (s *Supervisor) retryLoad(x PlantState) float64 {
+func (s *Supervisor) retryLoad(x PlantState) float64 {
 
-	   return x.RetryFactor *
+	return x.RetryFactor *
 		(1 + x.LatencyPressure) *
 		math.Sqrt(x.Backlog+1)
 }
@@ -177,12 +173,12 @@ func (s *Supervisor) adapt(x PlantState) {
 
 	if x.ModelConfidence > 0.7 {
 		s.Alpha *= (1 - s.AdaptGain)
-		s.Beta  *= (1 - s.AdaptGain)
+		s.Beta *= (1 - s.AdaptGain)
 	}
 
 	if x.PredictionError > 0.3 {
 		s.Alpha *= (1 + s.AdaptGain)
-		s.Beta  *= (1 + s.AdaptGain)
+		s.Beta *= (1 + s.AdaptGain)
 	}
 }
 
@@ -224,10 +220,14 @@ func (s *Supervisor) ShouldRecompute(x PlantState) bool {
 }
 
 // Clamp final scaling decision
+//
+// Smooth damping without thresholds. Oscillation and confidence modulate
+// the delta but never crush it to near-zero.
+//   - Oscillation: reduced coefficient (0.8, was 2.0) — prevents over-damping
+//   - Confidence:  raised floor (0.5, was 0.3) — low confidence slows but doesn't kill
 func (s *Supervisor) ClampDecision(delta float64, osc float64, conf float64) float64 {
 	d := delta
-	// FIX 6: Continuous smooth damping without thresholds
-	d *= 1.0 / (1.0 + 2.0*osc)
-	d *= (0.3 + 0.7*conf)
+	d *= 1.0 / (1.0 + 0.8*osc) // min at osc=1: 0.556 (was 0.333)
+	d *= (0.5 + 0.5*conf)      // min at conf=0: 0.500 (was 0.300)
 	return d
 }

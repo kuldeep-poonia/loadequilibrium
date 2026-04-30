@@ -33,7 +33,11 @@ func SelectBestBundle(
 		return bundleFromState(initial)
 	}
 
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	seed := simCfg.Seed
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+	rng := rand.New(rand.NewSource(seed))
 
 	// ---------- corrected heuristic util ----------
 	sort.Slice(candidates, func(i, j int) bool {
@@ -43,7 +47,7 @@ func SelectBestBundle(
 
 	// ---------- regime adaptive temperature ----------
 	temp := cfg.BaseTemperature
-	inertiaWeight := 0.08
+	inertiaWeight := 0.02
 
 	if mem != nil {
 		temp *= math.Exp(1.4 * mem.RiskEWMA)
@@ -86,11 +90,12 @@ func SelectBestBundle(
 			meanSoFar :=
 				totalCost / float64(len(costs))
 
-			if evaluated >= cfg.MinEvaluate &&
-				meanSoFar >
-					bestScore*(1+cfg.EarlyStopMargin) {
-				break
-			}
+			// 🔥 disable aggressive early stop
+if evaluated >= cfg.MinEvaluate &&
+    meanSoFar >
+        bestScore*(1+cfg.EarlyStopMargin*2) {
+    break
+}
 		}
 
 		if len(costs) == 0 {
@@ -111,8 +116,13 @@ func SelectBestBundle(
 		downside =
 			math.Sqrt(downside / float64(len(costs)))
 
-		score :=
-			meanCost + 0.8*downside
+		// 🔥 CRITICAL BACKLOG PENALTY
+backlogPressure := initial.QueueDepth / float64(initial.QueueLimit)
+
+score :=
+    meanCost +
+        0.3*downside +
+        5.0*backlogPressure
 
 		// inertia
 		if mem != nil {

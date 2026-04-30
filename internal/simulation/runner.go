@@ -390,7 +390,8 @@ func mergeScenarios(runs []SimulationResult) SimulationResult {
 	}
 
 	for id := range serviceIDs {
-		var sumFinalQ, sumPeakQ, sumThroughput, sumMeanWait int
+		var sumFinalQ, sumPeakQ int
+		var sumThroughput, sumMeanWait float64
 		var sumPeakUtil, sumQMean, sumQVar, sumRecovery float64
 		var countSat, countValid int
 
@@ -401,8 +402,8 @@ func mergeScenarios(runs []SimulationResult) SimulationResult {
 			}
 			sumFinalQ += svc.FinalQueueLen
 			sumPeakQ += svc.PeakQueueLen
-			sumThroughput += int(svc.ThroughputRatio * 1000)
-			sumMeanWait += int(svc.MeanWaitMs)
+			sumThroughput += svc.ThroughputRatio
+			sumMeanWait += svc.MeanWaitMs
 			sumPeakUtil += svc.PeakUtilisation
 			sumQMean += svc.QueueLenMean
 			sumQVar += svc.QueueLenVariance
@@ -420,8 +421,8 @@ func mergeScenarios(runs []SimulationResult) SimulationResult {
 			ServiceID:        id,
 			FinalQueueLen:    sumFinalQ / countValid,
 			PeakQueueLen:     sumPeakQ / countValid,
-			ThroughputRatio:  float64(sumThroughput) / cf / 1000.0,
-			MeanWaitMs:       float64(sumMeanWait) / cf,
+			ThroughputRatio:  sumThroughput / cf,
+			MeanWaitMs:       sumMeanWait / cf,
 			Saturated:        countSat > countValid/2, // majority-vote saturation
 			PeakUtilisation:  sumPeakUtil / cf,
 			QueueLenMean:     sumQMean / cf,
@@ -506,9 +507,10 @@ func (r *Runner) handleTick(e Event, st *ServiceSimState, sched interface{ Sched
 				e.ServiceID, st.Plant.Q, st.Plant.A, st.Plant.S, st.Plant.Z, st.Plant.R, st.Plant.Sigma)
 		}
 
-		// Map physics state back
+		// Map physics state back. Keep request-level queued arrivals visible so
+		// wait/SLA metrics cannot be erased by the fluid queue approximation.
 		st.QueueMass = st.Plant.Q
-		st.QueueLen = int(math.Round(st.Plant.Q))
+		st.QueueLen = maxInt(int(math.Round(st.Plant.Q)), len(st.QueuedArrivalTimes))
 		st.ArrivalRate = st.Plant.A
 		st.ServiceRate = st.Plant.S
 		st.Hazard = st.Plant.Z
@@ -838,11 +840,18 @@ func (r *Runner) run(
 	return result
 }
 
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func handleArrival(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, mode string, rng *rand.Rand) {
 	st.TotalArrived++
 	arrivalTime := e.Time
 
-	if st.QueueLen >= maxQueueDepth {
+	if len(st.QueuedArrivalTimes) >= maxQueueDepth {
 		st.TotalDropped++
 		st.CollapseCount++ // accumulate collapse frequency for failure probability
 	} else if st.InService < st.Concurrency {
@@ -855,9 +864,13 @@ func handleArrival(e Event, st *ServiceSimState, sched interface{ Schedule(Event
 			ServiceDurationMs: svcDur,
 			ArrivalTime:       arrivalTime,
 		})
+	} else {
+		st.QueuedArrivalTimes = append(st.QueuedArrivalTimes, arrivalTime)
+		st.QueueLen = maxInt(st.QueueLen, len(st.QueuedArrivalTimes))
+		if st.QueueLen > st.MaxQueueLen {
+			st.MaxQueueLen = st.QueueLen
+		}
 	}
-	// Note: QueueLen is now evolved via EventTick / plant.Step
-	// instead of manual increment here.
 
 	if st.ArrivalRate > 0 {
 		sched.Schedule(Event{
@@ -870,12 +883,15 @@ func handleArrival(e Event, st *ServiceSimState, sched interface{ Schedule(Event
 
 func handleDeparture(e Event, st *ServiceSimState, sched interface{ Schedule(Event) }, mode string, rng *rand.Rand) {
 	st.TotalServed++
-	st.InService--
+	if st.InService > 0 {
+		st.InService--
+	}
 
 	waitMs := e.Time - e.ArrivalTime - e.ServiceDurationMs
 	if waitMs > 0 {
 		st.SumWaitMs += waitMs
 	}
+	totalLatencyMs := e.Time - e.ArrivalTime
 
 	// Sample queue length distribution at each departure for variance tracking.
 	ql := float64(st.QueueLen)
@@ -890,18 +906,14 @@ func handleDeparture(e Event, st *ServiceSimState, sched interface{ Schedule(Eve
 	// waitMs is the queueing wait; total latency ≈ waitMs + service time.
 	// We track against the configured threshold passed in via the run closure.
 	st.SLAChecked++
-	if waitMs > 0 {
-		// SLA threshold is stored in the state via the bundleSnap slaThresholdMs field.
-		// For requests with wait > 0, we already know queueing contributed.
-		// Use a conservative threshold: if waitMs alone exceeds threshold, it's a violation.
-		if waitMs > st.SLAThresholdMs {
-			st.SLAExceedances++
-		}
+	if st.SLAThresholdMs > 0 && totalLatencyMs > st.SLAThresholdMs {
+		st.SLAExceedances++
 	}
 
-	// Note: QueueLen is evolved via plant.Step.
-	// If the plant says the queue is non-empty, pull into service.
-	if st.QueueLen > 0 {
+	if len(st.QueuedArrivalTimes) > 0 {
+		nextArrival := st.QueuedArrivalTimes[0]
+		st.QueuedArrivalTimes = st.QueuedArrivalTimes[1:]
+		st.QueueLen = maxInt(int(math.Round(st.QueueMass)), len(st.QueuedArrivalTimes))
 		st.InService++
 		svcDur := interarrival(rng, 1.0/math.Max(st.ServiceRate, 1e-12), "exponential")
 		sched.Schedule(Event{
@@ -909,7 +921,7 @@ func handleDeparture(e Event, st *ServiceSimState, sched interface{ Schedule(Eve
 			Kind:              EventDeparture,
 			ServiceID:         e.ServiceID,
 			ServiceDurationMs: svcDur,
-			ArrivalTime:       e.Time,
+			ArrivalTime:       nextArrival,
 		})
 	}
 }

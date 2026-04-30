@@ -379,12 +379,13 @@ func (s *SafetyEngine) ShouldOverrideProb(
 		delta := u.CapacityTarget - cur.CapacityActive
 
 // 🚀 fast path when system stressed
-if cur.Backlog > 100 {
-    cur.CapacityActive = u.CapacityTarget
-} else {
-    // normal smoothing
-    cur.CapacityActive += delta * 0.3
-}
+if cur.Backlog > 80 {
+            cur.CapacityActive = u.CapacityTarget
+        } else if cur.Backlog > 40 {
+            cur.CapacityActive += delta * 0.6
+        } else {
+            cur.CapacityActive += delta * 0.3
+        }
 
 		// retain retry pressure from MPC retry knob
 		cur.RetryPressure = u.RetryFactor

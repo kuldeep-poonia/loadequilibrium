@@ -29,15 +29,16 @@ type Event struct {
 
 // ServiceSimState is mutable per-service state during a simulation run.
 type ServiceSimState struct {
-	ServiceID   string
-	ArrivalRate float64
-	BaseRate    float64 // original rate before shock
-	ServiceRate float64
-	Concurrency int
-	Utilisation float64
-	QueueLen    int
-	InService   int
-	MaxQueueLen int
+	ServiceID          string
+	ArrivalRate        float64
+	BaseRate           float64 // original rate before shock
+	ServiceRate        float64
+	Concurrency        int
+	Utilisation        float64
+	QueueLen           int
+	InService          int
+	MaxQueueLen        int
+	QueuedArrivalTimes []float64
 
 	TotalArrived int64
 	TotalServed  int64

@@ -15,6 +15,13 @@ type Store struct {
 	staleAge time.Duration
 }
 
+func finiteOrZero(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
 func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
 	return &Store{
 		buffers:  make(map[string]*RingBuffer),
@@ -35,6 +42,14 @@ func sanitizePoint(p *MetricPoint) bool {
 		return false
 	}
 	// Clamp to physically meaningful ranges.
+	p.RequestRate = finiteOrZero(p.RequestRate)
+	p.ErrorRate = finiteOrZero(p.ErrorRate)
+	p.Latency.Mean = finiteOrZero(p.Latency.Mean)
+	p.Latency.P50 = finiteOrZero(p.Latency.P50)
+	p.Latency.P95 = finiteOrZero(p.Latency.P95)
+	p.Latency.P99 = finiteOrZero(p.Latency.P99)
+	p.CPUUsage = finiteOrZero(p.CPUUsage)
+	p.MemUsage = finiteOrZero(p.MemUsage)
 	if p.RequestRate < 0 {
 		p.RequestRate = 0
 	}
@@ -205,6 +220,9 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		sumQueue += float64(p.QueueDepth)
 		sumConns += float64(p.ActiveConns)
 		for _, uc := range p.UpstreamCalls {
+			uc.CallRate = finiteOrZero(uc.CallRate)
+			uc.ErrorRate = finiteOrZero(uc.ErrorRate)
+			uc.LatencyMean = finiteOrZero(uc.LatencyMean)
 			if edgeSums == nil {
 				edgeSums = make(map[string]*edgeAccum)
 			}
@@ -267,6 +285,9 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		// Estimate: excess latency fraction × mean active connections.
 		excessFrac := (last.Latency.Mean - last.Latency.P50) / last.Latency.Mean
 		lastQueueDepth = excessFrac * meanConns
+		if meanQueueDepth == 0 {
+			meanQueueDepth = lastQueueDepth / n
+		}
 	}
 
 	// Signal confidence: product of three quality dimensions.

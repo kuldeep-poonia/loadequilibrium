@@ -12,7 +12,7 @@ type Decision struct {
 
 	// ScaleDelta ∈ [0,1]: normalized response magnitude.
 	//
-	
+
 	ScaleDelta float64
 
 	Urgency float64
@@ -47,13 +47,13 @@ func Decide(in DecisionInput) Decision {
 
 	// 2. BASE SCALING CURVE (Continuous smooth function, no hard thresholds)
 	absGap := math.Abs(gap)
-	
+
 	rateMultiplier := 1.0
 	if backlog > 0.0 {
 		rateMultiplier *= 1.5 // accelerate if there is backlog
 	}
-	
-	baseDelta := (absGap / (absGap + 2.0)) * rateMultiplier 
+
+	baseDelta := (absGap / (absGap + 2.0)) * rateMultiplier
 
 	// 3. MEMORY INTEGRATION
 	memFactor := (1.0 + 0.6*in.Effectiveness) * (1.0 - in.Oscillation)
@@ -70,19 +70,26 @@ func Decide(in DecisionInput) Decision {
 	}
 
 	// 5. SELECT ACTION
+	// pressure = backlog / targetCapacity.
+	// Threshold 1.0 means backlog equals or exceeds full capacity — true overload.
+	// Old threshold 0.6 fired scale_up whenever backlog > 60% of target, causing
+	// constant "scale_up" noise that conflicted with the authority's "hold".
 	var action string
-	if gap > 0.05 {
+	pressure := backlog / math.Max(in.TargetCapacity, 1.0)
+
+	if pressure > 1.0 {
 		action = "scale_up"
-	} else if gap < -0.05 {
+
+	} else if pressure < 0.1 && gap < -1.0 && backlog < 1.0 && inst < 0.3 {
 		action = "scale_down"
+
 	} else {
 		action = "hold"
-		delta = 0.0
 	}
 
-	// 6. NO FREEZE RULE & ALWAYS ACT RULE
+	// 6. NO FREEZE RULE & HOLD STABILITY RULE
 	if action == "hold" {
-		if backlog > 0 || in.Trend > 0.1 || inst > 0.5 {
+		if pressure > 1.0 || backlog > workers*3 {
 			action = "scale_up"
 			delta = 0.02
 		} else if backlog == 0 && inst < 0.3 && in.Trend <= 0 {
@@ -90,10 +97,12 @@ func Decide(in DecisionInput) Decision {
 			action = "hold"
 			delta = 0.0
 		} else {
-			action = "scale_down"
-			delta = 0.01
+			// Keep hold when the system is within a small stability band.
+			// Avoid unnecessary scale-down churn for tiny backlog noise.
+			action = "hold"
+			delta = 0.0
 		}
-	}else {
+	} else {
 		// Minimum action if not explicitly holding
 		if delta < 0.01 {
 			delta = 0.01

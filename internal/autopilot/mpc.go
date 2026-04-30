@@ -38,8 +38,6 @@ type MPCOptimiser struct {
 
 	rng *rand.Rand
 
-	
-
 	// adaptive regime hook
 	BurstProb float64
 
@@ -66,13 +64,9 @@ type MPCOptimiser struct {
 	Cooling  float64
 	Iters    int
 
-	
-
 	// runtime-adjustable cadence modifier — set by damping signal
 	IterModifier float64
 }
-
-
 
 func (m *MPCOptimiser) initRNG() {
 	// In non-deterministic mode, create once and reuse
@@ -160,6 +154,7 @@ func (m *MPCOptimiser) capLag(
 	// Sync with Predictor.go (Line 150) to eliminate model mismatch
 	return x.CapacityActive + 0.3*(target-x.CapacityActive)
 }
+
 /*
 Propagation
 */
@@ -174,15 +169,15 @@ func (m *MPCOptimiser) propagate(
 	cap :=
 		m.capLag(x, u.CapacityTarget)
 
-		cap = math.Max(m.MinCapacity, math.Min(m.MaxCapacity, cap))
+	cap = math.Max(m.MinCapacity, math.Min(m.MaxCapacity, cap))
 
-	effectiveCache := math.Min(0.5, u.CacheRelief)
-service := x.ServiceRate * cap * (1 - effectiveCache)
+	effectiveCache := math.Min(0.5, math.Max(0, u.CacheRelief))
+	service := x.ServiceRate * cap
 
 	retry := math.Min(
-    u.RetryFactor * x.ArrivalMean,
-    x.ArrivalMean * 0.5,
-)
+		u.RetryFactor*x.ArrivalMean,
+		x.ArrivalMean*0.5,
+	)
 
 	dist :=
 		m.disturb(x, scenario)
@@ -200,6 +195,7 @@ service := x.ServiceRate * cap * (1 - effectiveCache)
 	}
 
 	arrival = 0.8*x.ArrivalMean + 0.2*arrival
+	arrival *= 1 - effectiveCache
 
 	dQ :=
 		(arrival + retry - service) * m.Dt
@@ -225,7 +221,6 @@ service := x.ServiceRate * cap * (1 - effectiveCache)
 
 	next.PrevBacklog = x.Backlog
 
-
 	return next
 }
 
@@ -239,8 +234,6 @@ func (m *MPCOptimiser) barrier(q float64) float64 {
 		(1 + q*q)
 }
 
-
-
 /*
 Stage cost
 */
@@ -250,7 +243,6 @@ func (m *MPCOptimiser) cost(
 	prev MPCControl,
 ) float64 {
 
-	
 	// NO HARD THRESHOLD: Smooth collapse penalty
 	collapsePenalty := math.Pow(x.Backlog, 3) * 0.05
 
@@ -258,21 +250,15 @@ func (m *MPCOptimiser) cost(
 	util := x.ArrivalMean / (x.ServiceRate*x.CapacityActive + 1e-6)
 	volUtil := math.Sqrt(x.ArrivalVar + 1)
 	targetUtil := 0.95 - math.Min(0.3, volUtil/10.0)
-	utilPenalty := math.Pow(math.Max(0, util - targetUtil), 2) * 30
+	utilPenalty := math.Pow(math.Max(0, util-targetUtil), 2) * 30
 
 	// -------------------------------
 	// 3) REQUIRED CAPACITY - DYNAMIC SAFETY
 	// -------------------------------
 	pressure := x.ArrivalMean - x.ServiceRate*x.CapacityActive
 	vol := math.Sqrt(x.ArrivalVar + 1)
-	safety := 1 + math.Min(1.0, vol/10.0 + math.Max(0, pressure)/100.0)
+	safety := 1 + math.Min(1.0, vol/10.0+math.Max(0, pressure)/100.0)
 	required := x.ArrivalMean / (x.ServiceRate + 1e-6) * safety
-
-
-	
-
-
-	
 
 	excess := u.CapacityTarget - required
 	excessCost := 0.0
@@ -286,52 +272,49 @@ func (m *MPCOptimiser) cost(
 	if deficit > 0 {
 		deficitWeight := 20.0 * (1 + math.Max(0, pressure))
 
-deficitCost = deficit * deficit * deficit * deficitWeight
+		deficitCost = deficit * deficit * deficit * deficitWeight
 	}
 
 	// -------------------------------
 	// 5) SMOOTHNESS (no jumps)
 	// -------------------------------
-	
 
 	idleWeight := math.Exp(-x.Backlog)
 
-minIdle := required * 0.8
-diff := math.Max(0, minIdle-u.CapacityTarget)
+	minIdle := required * 0.8
+	diff := math.Max(0, minIdle-u.CapacityTarget)
 
-idlePenalty := idleWeight * diff * diff * 20.0
+	idlePenalty := idleWeight * diff * diff * 3.0 // Drastically lower idle punishment
 
-	
+	//
 
-	// 
-	
-
-retryPenalty :=
-    u.RetryFactor * u.RetryFactor *
-        (1 + math.Max(0, pressure) + vol)
+	retryPenalty :=
+		u.RetryFactor * u.RetryFactor *
+			(1 + math.Max(0, pressure) + vol)
 	// Cache benefit (reduces load)
 	cacheBenefit := u.CacheRelief * x.ArrivalMean
 
 	growth := x.Backlog - x.PrevBacklog
 
-growthPenalty := 0.0
-if growth > 0 {
-    growthPenalty = growth * growth * (5.0 + math.Sqrt(x.ArrivalVar+1))
-}
+	growthPenalty := 0.0
+	if growth > 0 {
+		growthPenalty = growth * growth * (20.0 + math.Sqrt(x.ArrivalVar+1)) // Heavily penalize unhandled queue growth
+	}
 
 	return m.LatencyCost*x.Latency*x.Latency +
-    m.VarianceBase*math.Sqrt(x.ArrivalVar+1) +
-    excessCost +
-    deficitCost +
-    
-    idlePenalty +
-    m.SmoothCost*math.Abs(u.CapacityTarget-prev.CapacityTarget) +
-    m.barrier(x.Backlog) +
-    collapsePenalty +
-    utilPenalty +
-    retryPenalty +
-    growthPenalty -
-    0.5 * cacheBenefit}
+		m.VarianceBase*math.Sqrt(x.ArrivalVar+1) +
+		excessCost +
+		deficitCost +
+
+		idlePenalty +
+		m.SmoothCost*math.Abs(u.CapacityTarget-prev.CapacityTarget) +
+		m.barrier(x.Backlog) +
+		collapsePenalty +
+		utilPenalty +
+		retryPenalty +
+		growthPenalty -
+		0.5*cacheBenefit
+}
 
 func (m *MPCOptimiser) terminal(
 	x MPCState,
@@ -356,6 +339,7 @@ func (m *MPCOptimiser) evaluate(
 	initial MPCState,
 	seq []MPCControl,
 ) (float64, float64) {
+	initial = sanitizeMPCState(initial)
 
 	costs :=
 		make([]float64, m.ScenarioCount)
@@ -374,13 +358,13 @@ func (m *MPCOptimiser) evaluate(
 				))]
 
 			total +=
-				m.cost(x, seq[t], prev)
+				safeCost(m.cost(x, seq[t], prev))
 
 			x =
 				m.propagate(x, seq[t], s)
 		}
 
-		total += m.terminal(x)
+		total += safeCost(m.terminal(x))
 
 		costs[s] = total
 	}
@@ -392,6 +376,12 @@ func (m *MPCOptimiser) evaluate(
 			m.RiskQuantile *
 				float64(len(costs)),
 		)
+	if qIdx >= len(costs) {
+		qIdx = len(costs) - 1
+	}
+	if qIdx < 0 {
+		qIdx = 0
+	}
 
 	cvar := 0.0
 
@@ -399,7 +389,7 @@ func (m *MPCOptimiser) evaluate(
 		cvar += costs[i]
 	}
 
-	cvar /= float64(len(costs) - qIdx)
+	cvar /= math.Max(1, float64(len(costs)-qIdx))
 
 	mean := 0.0
 	for _, c := range costs {
@@ -407,8 +397,9 @@ func (m *MPCOptimiser) evaluate(
 	}
 	mean /= float64(len(costs))
 
-	return mean + m.RiskWeight*cvar,
-		cvar
+	score := mean + m.RiskWeight*cvar
+	return safeCost(score),
+		safeCost(cvar)
 }
 
 /*
@@ -430,8 +421,8 @@ func (m *MPCOptimiser) mutate(
 			math.Max(m.MinCapacity,
 				math.Min(m.MaxCapacity,
 					seq[i].CapacityTarget+
-						(m.rng.Float64()-0.5)*m.MaxStepCap +
-						0.1*(bias - seq[i].CapacityTarget)))
+						(m.rng.Float64()-0.5)*m.MaxStepCap+
+						0.1*(bias-seq[i].CapacityTarget)))
 
 		seq[i].RetryFactor =
 			math.Max(0,
@@ -466,15 +457,25 @@ func (m *MPCOptimiser) SetCadenceModifier(d float64) {
 	if d <= 0 {
 		return
 	}
+	if d > 1 {
+		d = 1
+	}
 	m.IterModifier = d
 }
 
 func (m *MPCOptimiser) effectiveIters() int {
-	if m.IterModifier <= 0 {
-		return m.Iters
+	base := m.Iters
+	if base <= 0 {
+		base = 1
 	}
-	n := int(math.Max(1, float64(m.Iters)*m.IterModifier))
-	if max := m.Iters * 4; n > max {
+	if base > 32 {
+		base = 32
+	}
+	if m.IterModifier <= 0 {
+		return base
+	}
+	n := int(math.Max(1, float64(base)*m.IterModifier))
+	if max := int(math.Ceil(float64(base))); n > max {
 		return max
 	}
 	return n
@@ -486,6 +487,7 @@ func (m *MPCOptimiser) Optimise(
 ) ([]MPCControl, float64) {
 
 	m.initRNG()
+	initial = sanitizeMPCState(initial)
 
 	seq := make([]MPCControl, m.Horizon)
 	copy(seq, prevSeq)
@@ -509,7 +511,26 @@ func (m *MPCOptimiser) Optimise(
 	// -------------------------------
 	// 2) OPTIMIZATION LOOP
 	// -------------------------------
-	best, tail := m.evaluate(initial, seq)
+	if len(prevSeq) > 0 && initial.ArrivalMean > 1e-6 {
+        // Infer previous arrival from warm-started capacity target
+        prevImpliedArrival := prevSeq[0].CapacityTarget * initial.ServiceRate
+        if prevImpliedArrival > 1e-6 {
+            ratio := initial.ArrivalMean / prevImpliedArrival
+            if ratio > 1.30 || ratio < 0.70 {
+                // Regime shift detected (>30% arrival change): hard reset to required
+                for i := range seq {
+                    seq[i].CapacityTarget = warmRequired
+                    seq[i].RetryFactor = 0
+                    seq[i].CacheRelief = 0
+                }
+            }
+        }
+    }
+
+    // -------------------------------
+    // 2) OPTIMIZATION LOOP
+    // -------------------------------
+    best, tail := m.evaluate(initial, seq)
 	temp := m.InitTemp
 
 	candidate := make([]MPCControl, m.Horizon)
@@ -532,19 +553,33 @@ func (m *MPCOptimiser) Optimise(
 		temp *= m.Cooling
 	}
 
-	
-	
-	
-
-	
-
-	
-	
-
-	
-
-	
-	conf := 1 / (1 + math.Sqrt(tail))
+	conf := 1 / (1 + math.Sqrt(safeCost(tail)))
+	if math.IsNaN(conf) || math.IsInf(conf, 0) {
+		conf = 0
+	}
 
 	return seq, conf
+}
+
+func sanitizeMPCState(x MPCState) MPCState {
+	x.Backlog = finiteNonNegative(x.Backlog)
+	x.Latency = finiteNonNegative(x.Latency)
+	x.ArrivalMean = finiteNonNegative(x.ArrivalMean)
+	x.ArrivalVar = finiteNonNegative(x.ArrivalVar)
+	x.TopologyPressure = finiteOrZero(x.TopologyPressure)
+	x.TopologyState = finiteOrZero(x.TopologyState)
+	x.ServiceRate = math.Max(finiteNonNegative(x.ServiceRate), 1e-6)
+	x.CapacityActive = math.Max(finiteNonNegative(x.CapacityActive), 0.5)
+	x.PrevBacklog = finiteNonNegative(x.PrevBacklog)
+	return x
+}
+
+func safeCost(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 1e12
+	}
+	if v < 0 {
+		return 0
+	}
+	return v
 }

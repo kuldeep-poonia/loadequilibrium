@@ -1,107 +1,37 @@
 [
   {
-    "test_id": "L2-SAFETY-001",
+    "test_id": "L2-PIPE-003",
     "layer": 2,
-    "name": "SafetyConstraintProjector envelope bounds",
-    "aim": "Project() output must be within integratedEnvelope [lo, up] for any input",
+    "name": "MPC plan length always matches horizon",
+    "aim": "MPCOptimiser.Optimise must return exactly Horizon-length sequence",
     "packages_involved": [
-      "internal/intelligence"
+      "internal/autopilot"
     ],
-    "function_under_test": "SafetyConstraintProjector.Project → integratedEnvelope",
+    "function_under_test": "MPCOptimiser.Optimise",
     "threshold": {
-      "metric": "envelope_violations",
+      "metric": "plan_length_mismatches",
       "operator": "==",
       "value": 0,
       "unit": "count",
-      "rationale": "CRITICAL — no action may exceed the safety envelope"
+      "rationale": "Short plan → truncated safety trajectory → undetected risk"
     },
     "result": {
       "status": "PASS",
       "actual_value": 0,
       "actual_unit": "count",
-      "sample_count": 200000,
-      "duration_ms": 568
+      "sample_count": 20,
+      "duration_ms": 9
     },
-    "on_exceed": "CRITICAL: Action exceeds physical safety envelope → actuator operates in unsafe regime → hardware damage risk",
+    "on_exceed": "MPC returns short plan → SafetyEngine.ShouldOverrideProb operates on truncated trajectory → misses future hazards",
     "answered_questions": {
-      "what_was_tested": "50000 inputs × 4 dimensions = 200000 bound checks with action magnitudes up to ±190",
-      "why_this_threshold": "integratedEnvelope is the hard safety clamp. The gradient descent may not converge, but the envelope MUST clamp",
-      "what_happens_if_it_fails": "Action outside envelope → actuator commanded beyond physical limits → mechanical/electrical failure",
-      "how_interface_was_verified": "Compute exact upper/lower per dimension from integratedEnvelope formula, check every output element",
-      "has_this_ever_failed": "0 violations in this run",
-      "worst_case_description": "violation: \u003cnil\u003e"
+      "what_was_tested": "20 combinations of horizon [3,5,8,10] × prevSeqLen [0,1,3,5,10]",
+      "why_this_threshold": "Safety evaluation depends on len(plan)==Horizon. Any mismatch silently truncates the safety check",
+      "what_happens_if_it_fails": "Safety engine evaluates fewer future states than expected → blind spot in predictive safety",
+      "how_interface_was_verified": "Call Optimise with various prevSeq lengths, check len(result)==Horizon",
+      "has_this_ever_failed": "0 mismatches in this run",
+      "worst_case_description": "mismatches: []"
     },
-    "run_at": "2026-04-11T10:02:22Z",
-    "go_version": "go1.26.0"
-  },
-  {
-    "test_id": "L2-SAFETY-002",
-    "layer": 2,
-    "name": "SafetyConstraintProjector correction effectiveness",
-    "aim": "Projector must reduce action magnitude for \u003e99% of unsafe inputs",
-    "packages_involved": [
-      "internal/intelligence"
-    ],
-    "function_under_test": "SafetyConstraintProjector.Project",
-    "threshold": {
-      "metric": "correction_rate_pct",
-      "operator": "\u003e=",
-      "value": 99,
-      "unit": "percent",
-      "rationale": "Projector that doesn't correct is a no-op — defeats safety purpose"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 100,
-      "actual_unit": "percent",
-      "sample_count": 10000,
-      "duration_ms": 93
-    },
-    "on_exceed": "Projector passes unsafe actions through unchanged → safety layer is decorative, not functional",
-    "answered_questions": {
-      "what_was_tested": "10000 inputs with action magnitude 20+ (far beyond envelope ~3.7)",
-      "why_this_threshold": "Input at 20+ vs envelope at ~3.7 → projector must reduce. 99% allows tiny tolerance for edge cases where gradient is trapped",
-      "what_happens_if_it_fails": "Safety projector passes dangerous actions unchanged → actuator operates in unsafe region → damage",
-      "how_interface_was_verified": "Compare ‖input action‖ vs ‖projected action‖, verify output norm \u003c input norm",
-      "has_this_ever_failed": "correction rate=100.00%, worst ratio=0.0000",
-      "worst_case_description": "worst uncorrected: \u003cnil\u003e"
-    },
-    "run_at": "2026-04-11T10:02:22Z",
-    "go_version": "go1.26.0"
-  },
-  {
-    "test_id": "L2-SAFETY-003",
-    "layer": 2,
-    "name": "SafetyConstraintProjector output finite",
-    "aim": "Project() must never return NaN/Inf in Action, ViolationNorm, or ConstraintCost",
-    "packages_involved": [
-      "internal/intelligence"
-    ],
-    "function_under_test": "SafetyConstraintProjector.Project",
-    "threshold": {
-      "metric": "nan_inf_count",
-      "operator": "==",
-      "value": 0,
-      "unit": "count",
-      "rationale": "CRITICAL — NaN in action vector → undefined actuator behavior"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0,
-      "actual_unit": "count",
-      "sample_count": 20000,
-      "duration_ms": 184
-    },
-    "on_exceed": "CRITICAL: NaN/Inf in projected action → actuator receives undefined command → system crash or hardware damage",
-    "answered_questions": {
-      "what_was_tested": "20000 adversarial inputs with action range [-500, 499], risk [0, 1], capPress [0, 1]",
-      "why_this_threshold": "NaN/Inf propagates through the entire actuator chain — any single occurrence is catastrophic",
-      "what_happens_if_it_fails": "NaN action → actuator produces undefined behavior → system enters unknown state",
-      "how_interface_was_verified": "Check all output fields (Action[], ViolationNorm, ConstraintCost) for IsNaN/IsInf",
-      "has_this_ever_failed": "0 NaN/Inf in this run",
-      "worst_case_description": "NaN at \u003cnil\u003e"
-    },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:53Z",
     "go_version": "go1.26.0"
   },
   {
@@ -122,16 +52,16 @@
     },
     "result": {
       "status": "PASS",
-      "actual_value": 3.732,
+      "actual_value": 3.582,
       "actual_unit": "ms",
       "sample_count": 1000,
       "percentiles": {
-        "p50_ms": 0,
-        "p95_ms": 2.536,
-        "p99_ms": 3.732,
-        "p100_ms": 5.492
+        "p50_ms": 0.511,
+        "p95_ms": 2.011,
+        "p99_ms": 3.582,
+        "p100_ms": 18.384
       },
-      "duration_ms": 496
+      "duration_ms": 609
     },
     "on_exceed": "Pipeline too slow → control frequency drops → actuator corrections delayed → system drifts",
     "answered_questions": {
@@ -139,10 +69,10 @@
       "why_this_threshold": "The autopilot tick includes MPC SA optimization (50 iters × 8 scenarios), safety evaluation, rollout, predictor, and identification — all must fit in \u003c8ms at p99",
       "what_happens_if_it_fails": "Autopilot cannot maintain \u003e100Hz control frequency → delayed corrections → oscillation/instability",
       "how_interface_was_verified": "Wall-clock measurement of each Tick() call with varying arrival and infra load",
-      "has_this_ever_failed": "p50=0.00ms p95=2.54ms p99=3.73ms p100=5.49ms",
-      "worst_case_description": "p99=3.73ms (threshold 8ms), p100=5.49ms"
+      "has_this_ever_failed": "p50=0.51ms p95=2.01ms p99=3.58ms p100=18.38ms",
+      "worst_case_description": "p99=3.58ms (threshold 8ms), p100=18.38ms"
     },
-    "run_at": "2026-04-11T10:02:20Z",
+    "run_at": "2026-04-28T10:23:51Z",
     "go_version": "go1.26.0"
   },
   {
@@ -166,7 +96,7 @@
       "actual_value": 0,
       "actual_unit": "count",
       "sample_count": 18000,
-      "duration_ms": 1437
+      "duration_ms": 1243
     },
     "on_exceed": "NaN/Inf in telemetry → dashboard shows garbage → operator loses situational awareness → bad decisions",
     "answered_questions": {
@@ -177,42 +107,7 @@
       "has_this_ever_failed": "0 NaN/Inf values in this run",
       "worst_case_description": "NaN/Inf at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T10:02:22Z",
-    "go_version": "go1.26.0"
-  },
-  {
-    "test_id": "L2-PIPE-003",
-    "layer": 2,
-    "name": "MPC plan length always matches horizon",
-    "aim": "MPCOptimiser.Optimise must return exactly Horizon-length sequence",
-    "packages_involved": [
-      "internal/autopilot"
-    ],
-    "function_under_test": "MPCOptimiser.Optimise",
-    "threshold": {
-      "metric": "plan_length_mismatches",
-      "operator": "==",
-      "value": 0,
-      "unit": "count",
-      "rationale": "Short plan → truncated safety trajectory → undetected risk"
-    },
-    "result": {
-      "status": "PASS",
-      "actual_value": 0,
-      "actual_unit": "count",
-      "sample_count": 20,
-      "duration_ms": 4
-    },
-    "on_exceed": "MPC returns short plan → SafetyEngine.ShouldOverrideProb operates on truncated trajectory → misses future hazards",
-    "answered_questions": {
-      "what_was_tested": "20 combinations of horizon [3,5,8,10] × prevSeqLen [0,1,3,5,10]",
-      "why_this_threshold": "Safety evaluation depends on len(plan)==Horizon. Any mismatch silently truncates the safety check",
-      "what_happens_if_it_fails": "Safety engine evaluates fewer future states than expected → blind spot in predictive safety",
-      "how_interface_was_verified": "Call Optimise with various prevSeq lengths, check len(result)==Horizon",
-      "has_this_ever_failed": "0 mismatches in this run",
-      "worst_case_description": "mismatches: []"
-    },
-    "run_at": "2026-04-11T10:02:22Z",
+    "run_at": "2026-04-28T10:23:53Z",
     "go_version": "go1.26.0"
   },
   {
@@ -236,7 +131,7 @@
       "actual_value": 0,
       "actual_unit": "failed_count",
       "sample_count": 50,
-      "duration_ms": 120
+      "duration_ms": 251
     },
     "on_exceed": "Actuator feedback shows failures for noop backend → feedback channel logic broken → control loop cannot confirm actuation",
     "answered_questions": {
@@ -247,7 +142,7 @@
       "has_this_ever_failed": "0 failures in this run",
       "worst_case_description": "failures: []"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -271,7 +166,7 @@
       "actual_value": 10,
       "actual_unit": "scale_factor",
       "sample_count": 1,
-      "duration_ms": 201
+      "duration_ms": 204
     },
     "on_exceed": "Stale directives execute alongside fresh ones → actuator sends contradictory commands → system oscillation",
     "answered_questions": {
@@ -282,7 +177,7 @@
       "has_this_ever_failed": "executions=1, last=10.0",
       "worst_case_description": "scale factors executed: [10]"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -317,7 +212,7 @@
       "has_this_ever_failed": "0 misrouted in this run",
       "worst_case_description": "misrouted: []"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -337,17 +232,17 @@
       "rationale": "Real-time control loop requires \u003c30ms actuator response at p99"
     },
     "result": {
-      "status": "PASS",
-      "actual_value": 0.655,
+      "status": "FAIL",
+      "actual_value": 41.967,
       "actual_unit": "ms",
       "sample_count": 200,
       "percentiles": {
-        "p50_ms": 0,
-        "p95_ms": 0,
-        "p99_ms": 0.655,
-        "p100_ms": 1.069
+        "p50_ms": 4.31,
+        "p95_ms": 16.43,
+        "p99_ms": 41.967,
+        "p100_ms": 42.124
       },
-      "duration_ms": 4
+      "duration_ms": 1255
     },
     "on_exceed": "Actuator feedback arrives late → control loop operates on stale confirmation → timing drift",
     "answered_questions": {
@@ -355,10 +250,10 @@
       "why_this_threshold": "Control loop runs at ~33Hz (30ms). Actuator feedback must arrive within 1 cycle",
       "what_happens_if_it_fails": "Control loop starts next tick before knowing if previous actuation succeeded",
       "how_interface_was_verified": "Measure wall-clock time from Dispatch() to Feedback() receipt per directive",
-      "has_this_ever_failed": "p50=0.00ms p95=0.00ms p99=0.66ms p100=1.07ms errors=0",
-      "worst_case_description": "p99=0.66ms (threshold 30ms), p100=1.07ms"
+      "has_this_ever_failed": "p50=4.31ms p95=16.43ms p99=41.97ms p100=42.12ms errors=0",
+      "worst_case_description": "p99=41.97ms (threshold 30ms), p100=42.12ms"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:56Z",
     "go_version": "go1.26.0"
   },
   {
@@ -393,7 +288,7 @@
       "has_this_ever_failed": "0 deviations in this run",
       "worst_case_description": "deviations: []"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:56Z",
     "go_version": "go1.26.0"
   },
   {
@@ -417,7 +312,7 @@
       "actual_value": 1,
       "actual_unit": "received_count",
       "sample_count": 50,
-      "duration_ms": 500
+      "duration_ms": 503
     },
     "on_exceed": "Zero feedbacks received = feedback channel completely broken, not just backpressure",
     "answered_questions": {
@@ -428,7 +323,112 @@
       "has_this_ever_failed": "received=1 of 50 dispatched",
       "worst_case_description": "received 1 of 50 (49 dropped by backpressure)"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:57Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-SAFETY-001",
+    "layer": 2,
+    "name": "SafetyConstraintProjector envelope bounds",
+    "aim": "Project() output must be within integratedEnvelope [lo, up] for any input",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project → integratedEnvelope",
+    "threshold": {
+      "metric": "envelope_violations",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "CRITICAL — no action may exceed the safety envelope"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 200000,
+      "duration_ms": 1008
+    },
+    "on_exceed": "CRITICAL: Action exceeds physical safety envelope → actuator operates in unsafe regime → hardware damage risk",
+    "answered_questions": {
+      "what_was_tested": "50000 inputs × 4 dimensions = 200000 bound checks with action magnitudes up to ±190",
+      "why_this_threshold": "integratedEnvelope is the hard safety clamp. The gradient descent may not converge, but the envelope MUST clamp",
+      "what_happens_if_it_fails": "Action outside envelope → actuator commanded beyond physical limits → mechanical/electrical failure",
+      "how_interface_was_verified": "Compute exact upper/lower per dimension from integratedEnvelope formula, check every output element",
+      "has_this_ever_failed": "0 violations in this run",
+      "worst_case_description": "violation: \u003cnil\u003e"
+    },
+    "run_at": "2026-04-28T10:23:54Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-SAFETY-002",
+    "layer": 2,
+    "name": "SafetyConstraintProjector correction effectiveness",
+    "aim": "Projector must reduce action magnitude for \u003e99% of unsafe inputs",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project",
+    "threshold": {
+      "metric": "correction_rate_pct",
+      "operator": "\u003e=",
+      "value": 99,
+      "unit": "percent",
+      "rationale": "Projector that doesn't correct is a no-op — defeats safety purpose"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 100,
+      "actual_unit": "percent",
+      "sample_count": 10000,
+      "duration_ms": 587
+    },
+    "on_exceed": "Projector passes unsafe actions through unchanged → safety layer is decorative, not functional",
+    "answered_questions": {
+      "what_was_tested": "10000 inputs with action magnitude 20+ (far beyond envelope ~3.7)",
+      "why_this_threshold": "Input at 20+ vs envelope at ~3.7 → projector must reduce. 99% allows tiny tolerance for edge cases where gradient is trapped",
+      "what_happens_if_it_fails": "Safety projector passes dangerous actions unchanged → actuator operates in unsafe region → damage",
+      "how_interface_was_verified": "Compare ‖input action‖ vs ‖projected action‖, verify output norm \u003c input norm",
+      "has_this_ever_failed": "correction rate=100.00%, worst ratio=0.0000",
+      "worst_case_description": "worst uncorrected: \u003cnil\u003e"
+    },
+    "run_at": "2026-04-28T10:23:54Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L2-SAFETY-003",
+    "layer": 2,
+    "name": "SafetyConstraintProjector output finite",
+    "aim": "Project() must never return NaN/Inf in Action, ViolationNorm, or ConstraintCost",
+    "packages_involved": [
+      "internal/intelligence"
+    ],
+    "function_under_test": "SafetyConstraintProjector.Project",
+    "threshold": {
+      "metric": "nan_inf_count",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "CRITICAL — NaN in action vector → undefined actuator behavior"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "count",
+      "sample_count": 20000,
+      "duration_ms": 289
+    },
+    "on_exceed": "CRITICAL: NaN/Inf in projected action → actuator receives undefined command → system crash or hardware damage",
+    "answered_questions": {
+      "what_was_tested": "20000 adversarial inputs with action range [-500, 499], risk [0, 1], capPress [0, 1]",
+      "why_this_threshold": "NaN/Inf propagates through the entire actuator chain — any single occurrence is catastrophic",
+      "what_happens_if_it_fails": "NaN action → actuator produces undefined behavior → system enters unknown state",
+      "how_interface_was_verified": "Check all output fields (Action[], ViolationNorm, ConstraintCost) for IsNaN/IsInf",
+      "has_this_ever_failed": "0 NaN/Inf in this run",
+      "worst_case_description": "NaN at \u003cnil\u003e"
+    },
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -463,7 +463,7 @@
       "has_this_ever_failed": "0 missed in this run",
       "worst_case_description": "missed at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T10:02:23Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -487,7 +487,7 @@
       "actual_value": 0,
       "actual_unit": "count",
       "sample_count": 1000,
-      "duration_ms": 1
+      "duration_ms": 0
     },
     "on_exceed": "False alarms → system enters unnecessary emergency mode → capacity waste + operator alert fatigue",
     "answered_questions": {
@@ -498,7 +498,7 @@
       "has_this_ever_failed": "0 false alarms in this run",
       "worst_case_description": "false alarm at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T10:02:24Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -522,7 +522,7 @@
       "actual_value": 0,
       "actual_unit": "count",
       "sample_count": 5000,
-      "duration_ms": 1
+      "duration_ms": 0
     },
     "on_exceed": "Capacity jumps beyond ramp rate → infrastructure shock (too many containers spawned at once)",
     "answered_questions": {
@@ -533,7 +533,7 @@
       "has_this_ever_failed": "0 violations, worst delta=0.0000",
       "worst_case_description": "worst ramp violation: \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T10:02:24Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -568,7 +568,7 @@
       "has_this_ever_failed": "0 misclassifications in this run",
       "worst_case_description": "misclassed: []"
     },
-    "run_at": "2026-04-11T10:02:24Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -592,7 +592,7 @@
       "actual_value": 0,
       "actual_unit": "count",
       "sample_count": 200,
-      "duration_ms": 1
+      "duration_ms": 0
     },
     "on_exceed": "Non-deterministic supervisor → recomputation timing unpredictable → control loop scheduling unreliable",
     "answered_questions": {
@@ -603,7 +603,7 @@
       "has_this_ever_failed": "0 flips in this run",
       "worst_case_description": "0 non-deterministic results"
     },
-    "run_at": "2026-04-11T10:02:24Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -624,16 +624,16 @@
     },
     "result": {
       "status": "PASS",
-      "actual_value": 3.626,
+      "actual_value": 3.531,
       "actual_unit": "ms",
       "sample_count": 500,
       "percentiles": {
-        "p50_ms": 0,
-        "p95_ms": 2.176,
-        "p99_ms": 3.626,
-        "p100_ms": 4.281
+        "p50_ms": 0.502,
+        "p95_ms": 2.028,
+        "p99_ms": 3.531,
+        "p100_ms": 6.865
       },
-      "duration_ms": 293
+      "duration_ms": 285
     },
     "on_exceed": "Tick exceeds budget → autopilot frequency drops → control latency increases → system drift",
     "answered_questions": {
@@ -641,10 +641,10 @@
       "why_this_threshold": "100Hz autopilot loop = 10ms budget. MPC SA optimization + safety + rollout must fit",
       "what_happens_if_it_fails": "Autopilot cannot maintain target control frequency → delayed corrections → instability",
       "how_interface_was_verified": "Wall-clock measurement of each Tick() call duration",
-      "has_this_ever_failed": "p50=0.00ms p95=2.18ms p99=3.63ms p100=4.28ms",
-      "worst_case_description": "p99=3.63ms (threshold 10ms), p100=4.28ms"
+      "has_this_ever_failed": "p50=0.50ms p95=2.03ms p99=3.53ms p100=6.87ms",
+      "worst_case_description": "p99=3.53ms (threshold 10ms), p100=6.87ms"
     },
-    "run_at": "2026-04-11T10:02:24Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   }
 ]

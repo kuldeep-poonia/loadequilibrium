@@ -36,6 +36,25 @@ type ControlDirective struct {
 	PlannerProbabilisticScore float64
 }
 
+// ControlCandidate is an optimizer-produced advisory, not an executable command.
+//
+// The runtime control authority may use these candidates as search-space hints,
+// but this type deliberately has no actuation fields beyond the candidate value
+// and its evaluation metadata. A candidate becomes executable only after the
+// control authority selects and constrains it into a ControlDirective.
+type ControlCandidate struct {
+	ServiceID    string
+	ScaleFactor  float64
+	Score        float64
+	Feasible     bool
+	Convergent   bool
+	PredictedRho float64
+	RiskScore    float64
+	Uncertainty  float64
+	Source       string
+	ComputedAt   time.Time
+}
+
 type ObjectiveScore struct {
 	ComputedAt                time.Time
 	PredictedP99LatencyMs     float64

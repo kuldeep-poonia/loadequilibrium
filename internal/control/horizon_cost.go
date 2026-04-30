@@ -31,38 +31,59 @@ func EvaluateHorizonCost(
 	horizonTime :=
 		float64(cfg.HorizonSteps) * cfg.Dt
 
-	//  infra cost 
+	// =========================
+	// INFRA COST (normalized, stable)
+	// =========================
 	infraCost :=
-		float64(b.Replicas) *
-			p.InfraUnitCost *
-			horizonTime
+    p.InfraUnitCost *
+    math.Sqrt(float64(b.Replicas))
 
-	// SLA area 
+	// =========================
+	// SLA COST
+	// =========================
 	slaCost :=
 		p.SLAWeight *
 			traj.SLAIntegral
 
-	// adaptive risk aversion 
+	// =========================
+	// RISK COST (adaptive + backlog aware)
+	// =========================
 	riskExponent := 1.3
 	if mem != nil {
 		riskExponent =
 			1.2 + 0.8*mem.RiskEWMA
 	}
 
+	riskSignal :=
+		traj.CollapseRisk +
+			0.3*math.Min(1, traj.FinalBacklog/(b.QueueLimit+1))
+
 	riskCost :=
 		p.RiskWeight *
-			math.Pow(traj.CollapseRisk, riskExponent)
+			math.Pow(riskSignal, riskExponent)
 
-	// ---------- backlog stress ----------
+	// =========================
+	// BACKLOG COST (aggressive)
+	// =========================
 	queuePressure :=
 		traj.FinalBacklog /
 			(b.QueueLimit + 1)
 
 	backlogCost :=
 		p.BacklogWeight *
-			math.Pow(queuePressure, 1.4)
+			math.Pow(queuePressure, 2.5)
 
-	// ---------- trajectory utilisation proxy ----------
+	if traj.FinalBacklog > float64(b.QueueLimit)*1.5 {
+		backlogCost *= 2.5
+	}
+
+	if traj.PeakLatency > initial.SLATarget {
+		backlogCost *= 1.8
+	}
+
+	// =========================
+	// UTILIZATION COST (asymmetric)
+	// =========================
 	avgUtil :=
 		initial.PredictedArrival /
 			math.Max(
@@ -70,21 +91,28 @@ func EvaluateHorizonCost(
 				0.001,
 			)
 
-	utilDeviation :=
-		math.Abs(avgUtil - p.UtilTarget)
-
 	utilCost := 0.0
 
-	if utilDeviation > p.UtilBand {
-
-		excess :=
-			utilDeviation - p.UtilBand
-
-		utilCost =
-			excess * excess * 0.9
+	// under-utilization (mild penalty)
+	if avgUtil < p.UtilTarget {
+		utilCost += 0.5 * (p.UtilTarget - avgUtil)
 	}
 
-	// ---------- actuator smoothness ----------
+	// overload (quadratic penalty)
+	if avgUtil > p.UtilTarget {
+		overload := avgUtil - p.UtilTarget
+		utilCost += 2.0 * overload * overload
+	}
+
+	// heavy overload (strong push to scale up)
+	if avgUtil > p.UtilTarget+0.3 {
+		overload := avgUtil - (p.UtilTarget + 0.3)
+		utilCost += 5.0 * overload * overload
+	}
+
+	// =========================
+	// ACTUATOR SMOOTHNESS
+	// =========================
 	repRange :=
 		math.Max(
 			float64(initial.MaxReplicas-initial.MinReplicas),
@@ -124,19 +152,26 @@ func EvaluateHorizonCost(
 				b.CacheAggression-initial.CacheAggression,
 			)
 
-	// ---------- cache operating economics ----------
+	// =========================
+	// CACHE COST
+	// =========================
 	cacheCost :=
 		p.CacheCostWeight *
 			math.Pow(b.CacheAggression, 1.3) *
 			horizonTime
 
-	// ---------- oscillation penalty hook ----------
+	// =========================
+	// OSCILLATION PENALTY
+	// =========================
 	oscPenalty := 0.0
 	if mem != nil {
 		oscPenalty =
 			0.4 * mem.OscillationEWMA
 	}
 
+	// =========================
+	// TOTAL COST
+	// =========================
 	total :=
 		infraCost +
 			slaCost +

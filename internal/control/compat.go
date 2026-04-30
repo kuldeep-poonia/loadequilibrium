@@ -36,56 +36,58 @@ type SystemState struct {
 
 type GeneratorConfig struct {
 	BaseRadius int
+	Seed       int64
 }
 
 type BundleConfig struct {
-	ReplicaRadius       int
-	QueueRadius         int
-	CacheRadius         int
-	MaxScaleStep        int
-	MinReplicas         int
-	MaxReplicas         int
-	QueueStep           float64
-	MinQueue            float64
-	MaxQueue            float64
-	MinRetry            int
-	MaxRetry            int
-	CacheStep           float64
-	MinCache            float64
-	MaxCache            float64
-	RetryAmplification  float64
-	EfficiencyDecay     float64
-	TargetUtil          float64
-	QueueWeight         float64
-	ReplicaMovePenalty  float64
-	QueueMovePenalty    float64
-	RetryMovePenalty    float64
-	CacheMovePenalty    float64
-	MinBundleDistance   float64
-	TopK                int
-	GenerationKeepProb  float64
+	ReplicaRadius      int
+	QueueRadius        int
+	CacheRadius        int
+	MaxScaleStep       int
+	MinReplicas        int
+	MaxReplicas        int
+	QueueStep          float64
+	MinQueue           float64
+	MaxQueue           float64
+	MinRetry           int
+	MaxRetry           int
+	CacheStep          float64
+	MinCache           float64
+	MaxCache           float64
+	RetryAmplification float64
+	EfficiencyDecay    float64
+	TargetUtil         float64
+	QueueWeight        float64
+	ReplicaMovePenalty float64
+	QueueMovePenalty   float64
+	RetryMovePenalty   float64
+	CacheMovePenalty   float64
+	MinBundleDistance  float64
+	TopK               int
+	GenerationKeepProb float64
+	Seed               int64
 }
 
 type SimConfig struct {
-	HorizonSteps       int
-	BaseLatency        float64
-	Dt                 float64
-	DisturbanceStd     float64
-	DisturbanceFreq    float64
-	RetryFeedbackGain  float64
-	WarmupRate         float64
-	EfficiencyDecay    float64
-	MaxQueueDelay      float64
-	HazardUtilGain     float64
-	HazardBacklogGain  float64
-	HazardRetryGain    float64
-	Seed               int64
+	HorizonSteps      int
+	BaseLatency       float64
+	Dt                float64
+	DisturbanceStd    float64
+	DisturbanceFreq   float64
+	RetryFeedbackGain float64
+	WarmupRate        float64
+	EfficiencyDecay   float64
+	MaxQueueDelay     float64
+	HazardUtilGain    float64
+	HazardBacklogGain float64
+	HazardRetryGain   float64
+	Seed              int64
 }
 
 func NewRegimeMemory() *RegimeMemory {
 	return &RegimeMemory{
-		Regime:      RegimeCalm,
-		LastAction:  ActionBundle{},
+		Regime:     RegimeCalm,
+		LastAction: ActionBundle{},
 	}
 }
 
@@ -105,11 +107,11 @@ func (r *RegimeMemory) RecordAction(next ActionBundle) {
 
 func defaultRegimeConfig() RegimeConfig {
 	return RegimeConfig{
-		EWMAAlpha:         0.20,
-		HistorySize:       64,
-		BaseUtilStress:    0.70,
-		BaseRiskUnstable:  0.60,
-		HysteresisMargin:  0.05,
+		EWMAAlpha:        0.20,
+		HistorySize:      64,
+		BaseUtilStress:   0.70,
+		BaseRiskUnstable: 0.60,
+		HysteresisMargin: 0.05,
 	}
 }
 
@@ -154,5 +156,6 @@ func GenerateBundles(
 		MinBundleDistance:  0.30,
 		TopK:               8,
 		GenerationKeepProb: 0.75,
+		Seed:               cfg.Seed,
 	}, mem)
 }

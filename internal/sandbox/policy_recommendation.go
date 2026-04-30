@@ -2,37 +2,13 @@ package sandbox
 
 import "math"
 
-/*
-PHASE-4 — POLICY RECOMMENDATION ENGINE (REV-5 TEMPERATURE-SCALED / ADAPTER-BASED / TREND-URGENT)
-
-Sequence position:
-6️⃣ after comparison_engine.go
-
-This revision fixes advisory robustness + layer decoupling:
-
-✔ temperature-scaled softmax regime mixture (scale-invariant logits)
-✔ bounded multiplicative trend shaping (tanh envelope)
-✔ arbitration considers congestion trend as well as risk level
-✔ urgency incorporates degradation speed + robustness collapse
-✔ explicit adapter struct removes hidden cross-layer proxy coupling
-✔ retry advisory reacts to congestion coupling regimes (not only collapse)
-
-Design direction:
-
-advisor ≈ SLA-aware navigation functional with stable gain surfaces.
-
-Human infra style intentionally uneven.
-*/
-
 type RecommendationSignals struct {
-
 	ThroughputMargin float64
 	CostGradient     float64
 	DegradationRate  float64
 }
 
 type PolicyRecommendation struct {
-
 	CapacityDelta   float64
 	EfficiencyDelta float64
 
@@ -52,7 +28,6 @@ type PolicyRecommendation struct {
 }
 
 type RecommendationConfig struct {
-
 	CapacityGain   float64
 	EfficiencyGain float64
 
@@ -132,7 +107,7 @@ func RecommendPolicy(
 	dampAdj :=
 		cfg.DampingGain *
 			math.Tanh(
-				(1-comp.TemporalRobustness) +
+				(1-comp.TemporalRobustness)+
 					iNorm,
 			)
 
@@ -140,7 +115,7 @@ func RecommendPolicy(
 	retryAdj :=
 		cfg.RetryGain *
 			math.Tanh(
-				cNorm + 0.7*iNorm,
+				cNorm+0.7*iNorm,
 			)
 
 	brownAdj :=
@@ -156,7 +131,7 @@ func RecommendPolicy(
 	// ----- urgency includes degradation speed -----
 	urg :=
 		math.Tanh(
-			risk +
+			risk+
 				0.5*math.Abs(sig.DegradationRate),
 		) *
 			comp.Confidence

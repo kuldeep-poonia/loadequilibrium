@@ -76,14 +76,21 @@ func (p *Predictor) updateBurstState(x CongestionState) float64 {
 		p.BurstEntryRate * (1 + x.UpstreamPressure)
 
 	val :=
-		x.BurstState + entry*p.Dt
+    x.BurstState + entry*p.Dt
 
-	if x.Backlog < p.BurstCollapseThreshold {
-		val *= 0.5 // abrupt regime weakening
-	}
-
-	return val / (1 + val)
+if x.Backlog < p.BurstCollapseThreshold {
+    val *= 0.85   // softened decay
 }
+
+// normalization
+val = val / (1 + val)
+
+// 🔒 FLOOR (signal ko marne se bachane ke liye)
+if val < 0.05 {
+    val = 0.05
+}
+
+return val}
 
 /*
 Arrival model
@@ -114,8 +121,12 @@ func (p *Predictor) updateArrivalStats(
 		gain = p.ArrivalDropGain
 	}
 
-	m :=
-		(1-gain)*x.ArrivalMean + gain*arrival
+	m := (1-gain)*x.ArrivalMean + gain*arrival
+
+// prevent collapse
+if m < 0.1*x.ArrivalMean {
+    m = 0.1 * x.ArrivalMean
+}
 
 	v :=
 		(1-p.VarianceDecayRate)*x.ArrivalVar +
@@ -135,10 +146,12 @@ func (p *Predictor) retryCascade(x CongestionState) float64 {
 	pressure :=
 		(1 - lag) * (x.Backlog + x.Latency)
 
-	load :=
-		p.RetryGain *
-			x.RetryFactor *
-			math.Pow(pressure+1, 1.05)
+	load := p.RetryGain * x.RetryFactor * math.Pow(pressure+1, 1.02)
+
+// clamp
+if load > 5.0 {
+    load = 5.0
+}
 
 	return load / (1 + load)
 }
@@ -147,9 +160,10 @@ func (p *Predictor) retryCascade(x CongestionState) float64 {
 Capacity evolution with stochastic jitter
 */
 func (p *Predictor) capacityNext(x CongestionState) float64 {
-    alpha := 0.3
-    return x.CapacityActive + alpha*(x.CapacityTarget-x.CapacityActive)
+	alpha := 0.3
+	return x.CapacityActive + alpha*(x.CapacityTarget-x.CapacityActive)
 }
+
 /*
 Latency dynamics with service recovery coupling
 */
@@ -282,24 +296,31 @@ func (p *Predictor) Step(x CongestionState) CongestionState {
 	next.ArrivalMean = m
 	next.ArrivalVar = v
 
-	maxArrival := 1000.0
-	minArrival := 0.0
+	maxArrival := math.Max(100.0, x.ArrivalMean*8.0)
+    minArrival := 0.0
 
-	if next.ArrivalMean > maxArrival {
-		next.ArrivalMean = maxArrival
-	}
-	if next.ArrivalMean < minArrival {
-		next.ArrivalMean = minArrival
-	}
+    if next.ArrivalMean > maxArrival {
+        next.ArrivalMean = maxArrival
+    }
+    if next.ArrivalMean < minArrival {
+        next.ArrivalMean = minArrival
+    }
+
 
 	retry := p.retryCascade(x)
 
 	cap :=
 		p.capacityNext(x)
 
-	//effectiveRelief := math.Min(0.5, math.Max(0.0, x.CacheRelief))
+	effectiveRelief := math.Min(0.25, math.Max(0.0, x.CacheRelief))
 
-service := x.ServiceRate * cap
+	service := x.ServiceRate * cap
+
+// avoid over-draining backlog
+maxService := 1.5 * x.ArrivalMean
+if service > maxService {
+    service = maxService
+}
 
 	next.TopologyAmplification =
 		p.topologyNext(x)
@@ -316,10 +337,21 @@ service := x.ServiceRate * cap
 		p.latencyNext(x)
 
 	dQ :=
-		(arrival + retry + topology - service + dist) * p.Dt
+		(arrival*(1-effectiveRelief) + retry + topology - service + dist) * p.Dt
 
 	next.Backlog =
-		p.overloadBarrier(x.Backlog + dQ)
+    p.overloadBarrier(x.Backlog + dQ)
+
+// NOTE: Hard floor removed. A floor of 1.0 caused the predictor to report
+// tel.Backlog=1.0 throughout entire burst events (real queue was 1257+),
+// because the virtual-capacity service rate (2.0×108=216) exceeded effective
+// arrival (220×0.75=165 with CacheRelief=0.25), draining the model queue to
+// zero while the physical queue exploded. All SLA and adaptScore metrics were
+// therefore computed against a permanently collapsed (fake) backlog signal.
+// The real queue is now tracked separately as PhysicalBacklog in RuntimeState.
+if next.Backlog < 0 {
+    next.Backlog = 0
+}
 
 	next.CapacityActive = cap
 	next.Latency = lat

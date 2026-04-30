@@ -22,7 +22,7 @@
       "seed": 31415,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 80
+      "duration_ms": 190
     },
     "on_exceed": "Controller receives wrong zone → 'collapse' zone triggers max damping; wrong zone = either overreaction (capacity waste) or underreaction (congestion crash)",
     "answered_questions": {
@@ -33,7 +33,7 @@
       "has_this_ever_failed": "0 violations",
       "worst_case_description": "misclassification at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:21Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -59,7 +59,7 @@
       "seed": 54321,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 86
+      "duration_ms": 187
     },
     "on_exceed": "StabilityMargin miscalculated → Engine.RunControl uses wrong distance-to-saturation → PID tunes deadband incorrectly → control oscillation or stiction",
     "answered_questions": {
@@ -70,7 +70,7 @@
       "has_this_ever_failed": "0 violations, worst error=0.0000e+00",
       "worst_case_description": "worst err=0.0000e+00 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:21Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -96,7 +96,7 @@
       "seed": 27182,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 64
+      "duration_ms": 168
     },
     "on_exceed": "CollapseRisk decreases with load → stability model claims higher load is safer → controller reduces capacity when it should increase it → congestion crash",
     "answered_questions": {
@@ -107,7 +107,7 @@
       "has_this_ever_failed": "0 violations, worst regression=0.0000e+00",
       "worst_case_description": "worst regression=0.0000e+00 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:22Z",
+    "run_at": "2026-04-28T10:23:55Z",
     "go_version": "go1.26.0"
   },
   {
@@ -133,7 +133,7 @@
       "seed": 99887,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 818
+      "duration_ms": 1462
     },
     "on_exceed": "PDE solver produces NaN/Inf → density field becomes garbage → all network-coupled load propagation and routing produce meaningless results",
     "answered_questions": {
@@ -144,7 +144,7 @@
       "has_this_ever_failed": "0 violations",
       "worst_case_description": "NaN/Inf at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:22Z",
+    "run_at": "2026-04-28T10:23:57Z",
     "go_version": "go1.26.0"
   },
   {
@@ -170,7 +170,7 @@
       "seed": 77777,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 673
+      "duration_ms": 1023
     },
     "on_exceed": "Density outside [0,1] → Flux(ρ)=ρ(1-ρ) produces negative values → Godunov flux sign inverts → solver diverges catastrophically",
     "answered_questions": {
@@ -181,7 +181,7 @@
       "has_this_ever_failed": "0 violations, worst OOB=0.000000",
       "worst_case_description": "worst OOB=0.000000 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:23Z",
+    "run_at": "2026-04-28T10:23:58Z",
     "go_version": "go1.26.0"
   },
   {
@@ -207,7 +207,7 @@
       "seed": 1337,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 77
+      "duration_ms": 146
     },
     "on_exceed": "Trajectory cost outside [0,1] → composite objective function produces wrong scale factor → MPC steers system away from setpoint",
     "answered_questions": {
@@ -218,7 +218,7 @@
       "has_this_ever_failed": "0 violations found in this run",
       "worst_case_description": "worst value=0.000000 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:23Z",
+    "run_at": "2026-04-28T10:23:58Z",
     "go_version": "go1.26.0"
   },
   {
@@ -244,7 +244,7 @@
       "seed": 777,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 2349
+      "duration_ms": 5524
     },
     "on_exceed": "PID output exceeds configured bounds → scale factor exceeds physical actuator range → control system instability or hardware damage",
     "answered_questions": {
@@ -255,7 +255,7 @@
       "has_this_ever_failed": "0 violations, worst overshoot=0.000000",
       "worst_case_description": "worst overshoot=0.000000 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:25Z",
+    "run_at": "2026-04-28T10:24:03Z",
     "go_version": "go1.26.0"
   },
   {
@@ -281,7 +281,7 @@
       "seed": 2024,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 147
+      "duration_ms": 358
     },
     "on_exceed": "MPC scale factor exceeds [0.5, 3.0] → Engine.RunControl amplifies it further → actuator receives unbounded capacity change → system crash",
     "answered_questions": {
@@ -292,7 +292,7 @@
       "has_this_ever_failed": "0 violations",
       "worst_case_description": "worst OOB=0.000000 at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:26Z",
+    "run_at": "2026-04-28T10:24:04Z",
     "go_version": "go1.26.0"
   },
   {
@@ -318,7 +318,7 @@
       "seed": 54321,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 98
+      "duration_ms": 317
     },
     "on_exceed": "Planner selects infeasible trajectory → system deliberately steered past collapse threshold → congestion collapse",
     "answered_questions": {
@@ -329,7 +329,7 @@
       "has_this_ever_failed": "0 violations",
       "worst_case_description": "infeasible selection at \u003cnil\u003e"
     },
-    "run_at": "2026-04-11T05:15:26Z",
+    "run_at": "2026-04-28T10:24:04Z",
     "go_version": "go1.26.0"
   },
   {
@@ -358,7 +358,7 @@
         "max_q": 1.867190355884401
       },
       "worst_case_output": 1.867190355884401,
-      "duration_ms": 11024
+      "duration_ms": 57842
     },
     "on_exceed": "Unbounded queue length → MPC operates on divergent state → actuator command has no physical bound → system crash or hardware damage",
     "answered_questions": {
@@ -369,7 +369,7 @@
       "has_this_ever_failed": "0 violations found in this run",
       "worst_case_description": "worst Q=1.8672 at input map[arrival_rate:4.999898344972868 max_q:1.867190355884401]"
     },
-    "run_at": "2026-04-11T05:15:37Z",
+    "run_at": "2026-04-28T10:25:02Z",
     "go_version": "go1.26.0"
   },
   {
@@ -395,7 +395,7 @@
       "seed": 99,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 4035
+      "duration_ms": 37309
     },
     "on_exceed": "Non-determinism breaks simulation replay, A/B testing, and offline debugging — root cause analysis becomes impossible",
     "answered_questions": {
@@ -406,7 +406,7 @@
       "has_this_ever_failed": "0 violations found in this run",
       "worst_case_description": "worst diff=0.0000e+00 at input map[]"
     },
-    "run_at": "2026-04-11T05:15:41Z",
+    "run_at": "2026-04-28T10:25:39Z",
     "go_version": "go1.26.0"
   },
   {
@@ -432,7 +432,7 @@
       "seed": 1337,
       "worst_case_input": null,
       "worst_case_output": 0,
-      "duration_ms": 9616
+      "duration_ms": 8470
     },
     "on_exceed": "Negative hazard → BaseService/(1+α*q+β*Z) increases service rate → physics model rewards damage → MPC exploits this to steer into collapse",
     "answered_questions": {
@@ -443,7 +443,7 @@
       "has_this_ever_failed": "0 violations found in this run",
       "worst_case_description": "worst Z=0.000000 at input map[]"
     },
-    "run_at": "2026-04-11T05:15:50Z",
+    "run_at": "2026-04-26T07:47:51Z",
     "go_version": "go1.26.0"
   }
 ]

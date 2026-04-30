@@ -2,16 +2,14 @@ package autopilot
 
 import "math"
 
-
-
 type IdentificationState struct {
 
 	// arrival estimation
-	ArrivalFast float64
-	ArrivalSlow float64
+	ArrivalFast      float64
+	ArrivalSlow      float64
 	ArrivalBlendCoef float64
-	ArrivalEstimate float64
-	ArrivalVar float64
+	ArrivalEstimate  float64
+	ArrivalVar       float64
 
 	// bounded burst regime
 	BurstEnergy float64
@@ -42,36 +40,34 @@ type IdentificationState struct {
 }
 
 type IdentificationSignals struct {
-
-	MPCVarianceScale float64
+	MPCVarianceScale  float64
 	SafetyMarginScale float64
 	RolloutTrustScale float64
-	DampingFactor float64
+	DampingFactor     float64
 }
 
 type IdentificationEngine struct {
-
 	Dt float64
 
-	FastGain float64
-	SlowGain float64
+	FastGain  float64
+	SlowGain  float64
 	BlendGain float64
-	VarGain float64
+	VarGain   float64
 
-	BurstGain float64
+	BurstGain  float64
 	BurstDecay float64
-	BurstCap float64
+	BurstCap   float64
 
 	NoiseGain float64
 	DriftGain float64
 
 	BaseConfidenceFloor float64
-	ConfidenceGain float64
+	ConfidenceGain      float64
 
-	ReliabilityGain float64
+	ReliabilityGain  float64
 	InfraSensitivity float64
 
-	SLAWeightQueue float64
+	SLAWeightQueue   float64
 	SLAWeightLatency float64
 
 	EVTFactor float64
@@ -172,7 +168,7 @@ func (e *IdentificationEngine) updateErrors(
 ) IdentificationState {
 
 	s.QueueErr = qErr
-	s.LatErr   = lErr
+	s.LatErr = lErr
 
 	return s
 }
@@ -215,7 +211,7 @@ func (e *IdentificationEngine) updateConfidence(
 			0.3*(1-queuePressure)
 
 	target :=
-		(1-loss)*external
+		(1 - loss) * external
 
 	floor :=
 		e.confidenceFloor(
@@ -226,7 +222,7 @@ func (e *IdentificationEngine) updateConfidence(
 	s.ModelConfidence =
 		math.Max(
 			floor,
-			(1-e.ConfidenceGain)*s.ModelConfidence +
+			(1-e.ConfidenceGain)*s.ModelConfidence+
 				e.ConfidenceGain*target,
 		)
 
@@ -323,19 +319,24 @@ adaptive signals output
 func (e *IdentificationEngine) signals(
 	s IdentificationState,
 ) IdentificationSignals {
+	conf := finiteClamp01(s.ModelConfidence)
+	burst := finiteNonNegative(s.BurstEnergy)
+	noise := finiteNonNegative(math.Abs(s.DisturbNoise))
+	seasonal := finiteClamp(s.SeasonalLoadMemory, 0, 2)
+	pressure := finiteClamp(s.StabilityPressure, 0, 2)
 
 	variance :=
 		math.Min(
 			3,
-			1+0.4*s.BurstEnergy+
-				0.6*math.Abs(s.DisturbNoise),
+			1+0.4*burst+
+				0.6*noise,
 		)
 
 	safety :=
 		math.Min(
 			3,
-			1+(1-s.ModelConfidence)+
-				s.SeasonalLoadMemory,
+			1+(1-conf)+
+				seasonal,
 		)
 
 	trust :=
@@ -346,13 +347,13 @@ func (e *IdentificationEngine) signals(
 			)
 
 	damping :=
-		1 + s.StabilityPressure
+		1 + pressure
 
 	return IdentificationSignals{
-		MPCVarianceScale: variance,
+		MPCVarianceScale:  variance,
 		SafetyMarginScale: safety,
 		RolloutTrustScale: trust,
-		DampingFactor: damping,
+		DampingFactor:     damping,
 	}
 }
 
@@ -421,8 +422,60 @@ func (e *IdentificationEngine) Step(
 	next =
 		e.updateDamping(next)
 
+	next = sanitizeIdentificationState(next)
+
 	sig :=
 		e.signals(next)
 
 	return next, sig
+}
+
+func sanitizeIdentificationState(s IdentificationState) IdentificationState {
+	s.ArrivalFast = finiteNonNegative(s.ArrivalFast)
+	s.ArrivalSlow = finiteNonNegative(s.ArrivalSlow)
+	s.ArrivalBlendCoef = finiteNonNegative(s.ArrivalBlendCoef)
+	s.ArrivalEstimate = finiteNonNegative(s.ArrivalEstimate)
+	s.ArrivalVar = finiteNonNegative(s.ArrivalVar)
+	s.BurstEnergy = finiteNonNegative(s.BurstEnergy)
+	s.DisturbNoise = finiteOrZero(s.DisturbNoise)
+	s.ModelDrift = finiteOrZero(s.ModelDrift)
+	s.ReliabilityUp = finiteClamp01(s.ReliabilityUp)
+	s.ReliabilityDown = finiteClamp01(s.ReliabilityDown)
+	s.QueueErr = finiteOrZero(s.QueueErr)
+	s.LatErr = finiteOrZero(s.LatErr)
+	s.ModelConfidence = finiteClamp01(s.ModelConfidence)
+	s.ArrivalUpper = finiteNonNegative(s.ArrivalUpper)
+	s.SeasonalLoadMemory = finiteClamp(s.SeasonalLoadMemory, 0, 2)
+	s.StabilityPressure = finiteClamp(s.StabilityPressure, 0, 2)
+	return s
+}
+
+func finiteOrZero(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+func finiteNonNegative(v float64) float64 {
+	v = finiteOrZero(v)
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func finiteClamp01(v float64) float64 {
+	return finiteClamp(v, 0, 1)
+}
+
+func finiteClamp(v, lo, hi float64) float64 {
+	v = finiteOrZero(v)
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
+	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
 	"github.com/loadequilibrium/loadequilibrium/internal/debug"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
@@ -846,12 +847,12 @@ func (o *Orchestrator) tick(now time.Time) {
 	// ── CRITICAL Stage 5: Optimisation / control ──────────────────────────────
 	s5 := time.Now()
 	costGradients := optimisation.ComputeCostGradients(bundles, topoSnap, 500.0)
-	directives := o.optEngine.RunControl(bundles, costGradients, o.lastSimResult, topoSnap, now)
+	optimizerCandidates := o.optEngine.EvaluateCandidates(bundles, costGradients, o.lastSimResult, topoSnap, now)
 	objective := optimisation.ComputeObjective(bundles, topoSnap, now)
-	directives = o.phaseRuntime.apply(o.tickCount, now, bundles, objective, directives)
+	directives := o.phaseRuntime.apply(o.tickCount, now, bundles, objective, optimizerCandidates)
 
 	if o.actuator != nil && o.ActuationEnabled() {
-		o.actuator.Dispatch(o.tickCount, directives)
+		ctrl.Dispatch(o.actuator, o.tickCount, directives)
 	}
 
 	recordStage(stageIdxOptimise, "optimise", s5)

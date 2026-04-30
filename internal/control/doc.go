@@ -1,13 +1,8 @@
-// Package control implements a coordinated stochastic MPC controller
-// that was superseded by the intelligence/autopilot layers during
-// architectural iteration but not removed.
+// Package control implements the single executable decision authority.
 //
-// STATUS: ISOLATED — not imported by any runtime path.
-// DO NOT import this package without a full architectural review.
-// The CoordinatedOptimizer, RegimeMemory, and JointSimulator here
-// are structurally more rigorous than the active system's heuristic
-// blend and represent a viable integration path if the merge authority
-// issue is resolved.
+// Autopilot, intelligence, policy, sandbox, and optimisation modules feed this
+// package as advisory signal generators. They may shape constraints, costs, and
+// candidate sets, but only the control authority emits executable directives.
 //
-// Audit reference: mergeDirective() in runtime/phase_runtime.go.
+// Runtime integration point: phaseRuntime.apply() in runtime/phase_runtime.go.
 package control

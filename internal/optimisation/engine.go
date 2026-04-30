@@ -3,6 +3,7 @@ package optimisation
 import (
 	"log"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
@@ -51,6 +52,84 @@ func NewEngine(cfg *config.Config) *Engine {
 		mpc:           NewMPCHorizonEval(horizonTicks, cfg.TickInterval.Seconds(), cfg.UtilisationSetpoint),
 		observer:      NewAdaptiveStateObserver(),
 	}
+}
+
+// EvaluateCandidates evaluates scale candidates without selecting or emitting
+// executable directives. This is the optimizer's advisory path for the single
+// control-authority architecture.
+func (e *Engine) EvaluateCandidates(
+	bundles map[string]*modelling.ServiceModelBundle,
+	costGradients map[string]ServiceCostContribution,
+	lastSimResult *simulation.SimulationResult,
+	topo topology.GraphSnapshot,
+	now time.Time,
+) map[string][]ControlCandidate {
+	_ = lastSimResult
+	_ = topo
+
+	horizonTicks := e.cfg.PredictiveHorizonTicks
+	if horizonTicks <= 0 {
+		horizonTicks = 5
+	}
+
+	out := make(map[string][]ControlCandidate, len(bundles))
+	for id, b := range bundles {
+		plan := PlanTrajectory(
+			b,
+			e.cfg.UtilisationSetpoint,
+			horizonTicks,
+			e.cfg.TickInterval.Seconds(),
+			e.cfg.CollapseThreshold,
+		)
+
+		gradient := 0.0
+		if cg, ok := costGradients[id]; ok {
+			gradient = cg.CostGradient
+		}
+
+		cands := make([]ControlCandidate, 0, len(plan.Candidates)+1)
+		for _, c := range plan.Candidates {
+			score := c.ProbabilisticScore
+			if !c.Feasible {
+				score += 10
+			}
+			if gradient > 0 {
+				score += math.Min(gradient, 5) * 0.02
+			}
+			cands = append(cands, ControlCandidate{
+				ServiceID:    id,
+				ScaleFactor:  c.ScaleFactor,
+				Score:        score,
+				Feasible:     c.Feasible,
+				Convergent:   c.ConvergesTo <= e.cfg.UtilisationSetpoint+0.03,
+				PredictedRho: c.FinalRho,
+				RiskScore:    c.TrajectoryScore,
+				Uncertainty:  c.UncertaintyBand,
+				Source:       "optimisation.trajectory",
+				ComputedAt:   now,
+			})
+		}
+
+		cands = append(cands, ControlCandidate{
+			ServiceID:    id,
+			ScaleFactor:  1.0,
+			Score:        math.Max(0, b.Queue.Utilisation-e.cfg.UtilisationSetpoint),
+			Feasible:     b.Queue.Utilisation < e.cfg.CollapseThreshold,
+			Convergent:   math.Abs(b.Queue.Utilisation-e.cfg.UtilisationSetpoint) < 0.05,
+			PredictedRho: b.Queue.Utilisation,
+			RiskScore:    b.Stability.CollapseRisk,
+			Uncertainty:  b.Stochastic.ArrivalCoV,
+			Source:       "optimisation.hold",
+			ComputedAt:   now,
+		})
+
+		sort.Slice(cands, func(i, j int) bool {
+			return cands[i].Score < cands[j].Score
+		})
+		out[id] = cands
+	}
+
+	return out
 }
 
 // RunControl executes one PID control cycle per service.
@@ -214,6 +293,9 @@ func (e *Engine) RunControl(
 				// Non-convex surface: rely more on planner which searched more broadly.
 				scaleFactor = 0.45*scaleFactor + 0.55*plan.BestScaleFactor
 			}
+		}
+		if b.Stability.CollapseZone != "safe" && rho >= e.cfg.UtilisationSetpoint {
+			scaleFactor = math.Min(scaleFactor, 0.95)
 		}
 		scaleFactor = math.Max(0.45, math.Min(scaleFactor, 6.0))
 		// E. Anti-Stiction Mechanism: Detect stuck limits and inject exploratory bump.

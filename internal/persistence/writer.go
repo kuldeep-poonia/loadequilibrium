@@ -1,9 +1,4 @@
-// Package persistence provides async write-behind snapshot persistence to
-// PostgreSQL. When DATABASE_URL is empty, the Writer is a no-op so the
-// engine runs fully without any database dependency.
-//
-// A minimal PostgreSQL simple-query-protocol driver is included here so the
-// binary requires zero external packages.
+
 package persistence
 
 import (

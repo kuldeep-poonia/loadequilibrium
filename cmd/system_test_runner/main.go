@@ -288,13 +288,6 @@ func newInitialState(arrivalMean, capacity, serviceRate float64) ap.RuntimeState
 	}
 }
 
-// ─────────────────────────────────────────────────────────
-//  Authority Simulation (inline, since optimisation pkg absent)
-// ─────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────
-//  Metric Computation Helpers
-// ─────────────────────────────────────────────────────────
 
 func computeAdaptationScore(timeline []TickSnapshot) float64 {
 	if len(timeline) < 4 {

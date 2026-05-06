@@ -337,7 +337,6 @@ func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 	var mu sync.Mutex
 	var allEvents []reasoning.Event
 	// Event and directive capture will be read from hub.Latest() after run
-	var allEvents []reasoning.Event
 	var allDirectives []optimisation.ControlDirective
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

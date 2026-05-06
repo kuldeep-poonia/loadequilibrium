@@ -1,0 +1,64 @@
+# Go
+.gocache/
+.gomodcache/
+bin/
+
+# Node / Frontend
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+
+# Archives / binaries
+*.zip
+*.exe
+
+# Generated runtime outputs
+/calibration_results.txt
+/mass_only.txt
+/mass_series.txt
+/physics_*.txt
+/PHYSICS_*.txt
+/results.txt
+/snapshot.txt
+/tmp.txt
+/tv_only.txt
+
+# Runtime binaries
+/diagnostic_runtime
+/test_runtime
+/loadequilibrium
+/loadequilibrium.exe
+/le_new
+/le_runtime
+/le_runtime.exe
+/le_sweep
+/le_test
+
+# Internal analysis / docs
+BACKEND_ANALYSIS.md
+BACKEND_DEEP_ANALYSIS.md
+DASHBOARD_CHANGES.md
+DASHBOARD_INTEGRATION.md
+INTERNAL_INTERFACE_MAP.md
+
+# Generated reports only (NOT all json/txt)
+system_test_report.json
+*.out
+*.test
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Generated reports
+internal/autopilot/*.json
+internal/control/*.json
+internal/intelligence/*.json
+tests/results/*.json

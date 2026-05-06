@@ -208,7 +208,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: http://${{ secrets.DEPLOY_HOST }}:8080/health
+      
     steps:
       - uses: actions/checkout@v4
 

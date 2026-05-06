@@ -552,10 +552,9 @@ func (h *Hub) remove(c *client) {
 	}
 
 	h.mu.Lock()
-	if _, ok := h.clients[c]; ok {
-		delete(h.clients, c)
-	}
-	h.mu.Unlock()
+defer h.mu.Unlock()
+
+delete(h.clients, c)
 
 	for {
 		select {

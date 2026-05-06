@@ -334,7 +334,7 @@ func TestIntegration_BundlesToPolicy(t *testing.T) {
 	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
 	bundle := &modelling.ServiceModelBundle{
 		Queue:      q,
-		Signal:     sig,
+		
 		Stability:  stab,
 		Stochastic: modelling.StochasticModel{ServiceID: "svc-p", Confidence: 0.9},
 	}

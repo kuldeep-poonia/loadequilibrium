@@ -278,10 +278,15 @@ func TestRuntimeContextCancellationResilience(t *testing.T) {
 
 	// Test 3: Nested cancellation
 	rootCtx := context.Background()
-	ctx1, c1 := context.WithCancel(rootCtx)
-	ctx2, c2 := context.WithCancel(ctx1)
-	ctx3, _ := context.WithCancel(ctx2)
 
+ctx1, c1 := context.WithCancel(rootCtx)
+defer c1()
+
+ctx2, c2 := context.WithCancel(ctx1)
+defer c2()
+
+ctx3, c3 := context.WithCancel(ctx2)
+defer c3()
 	c2()
 	time.Sleep(10 * time.Millisecond)
 

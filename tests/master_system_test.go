@@ -231,7 +231,7 @@ func TestMaster_FullSystemLifecycle(t *testing.T) {
 
 	// Validate payload structure
 	lastPayload := receivedPayloads[len(receivedPayloads)-1]
-	if lastPayload.Bundles == nil || len(lastPayload.Bundles) == 0 {
+	if len(lastPayload.Bundles) == 0 {
 		t.Fatal("Last payload has nil/empty Bundles — modelling stage failed")
 	}
 	t.Logf("Last payload: %d bundles, %d directives, %d events",
@@ -366,6 +366,8 @@ func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 	if ticks >= 3 && directiveCount == 0 {
 		t.Error("Zero directives produced under critical load — control authority not connected to streaming")
 	}
+
+	
 
 	mu.Lock()
 	for _, d := range allDirectives {

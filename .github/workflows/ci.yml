@@ -1,0 +1,250 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel any in-progress run for the same branch/PR so pushes don't queue up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # e.g. yourorg/loadequilibrium
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── 1. Lint ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build (all packages)
+        run: go build ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  # ── 2. Unit & integration tests ───────────────────────────────────────────
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run tests (race detector, 3-min timeout)
+        run: |
+          go test \
+            -race \
+            -count=1 \
+            -timeout=180s \
+            -coverprofile=coverage.out \
+            ./internal/...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7
+
+  # ── 3. System tests (the full autopilot test suite) ───────────────────────
+  system-test:
+    name: System Tests (Autopilot)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build system test runner
+        run: go build -o system_test_runner ./cmd/system_test_runner/
+
+      - name: Run system tests
+        run: |
+          # Suppress per-tick noise; the runner writes system_test_report.json
+          ./system_test_runner 2>/dev/null
+
+          VERDICT=$(jq -r '.global_summary.overall_system_verdict' system_test_report.json)
+          READY=$(jq -r '.global_summary.production_ready_count' system_test_report.json)
+          TOTAL=$(jq '.scenarios | length' system_test_report.json)
+          SLA=$(jq -r '.global_summary.total_sla_breaches' system_test_report.json)
+
+          echo "──────────────────────────────────────────"
+          echo "  Verdict : $VERDICT"
+          echo "  Ready   : $READY / $TOTAL"
+          echo "  SLA     : $SLA breaches"
+          echo "──────────────────────────────────────────"
+
+          # Hard gates — any failure here blocks the build
+          if [ "$VERDICT" != "STABLE_PRODUCTION_GRADE" ]; then
+            echo "FAIL: verdict is $VERDICT (expected STABLE_PRODUCTION_GRADE)"
+            exit 1
+          fi
+          if [ "$READY" != "$TOTAL" ]; then
+            echo "FAIL: only $READY/$TOTAL scenarios production-ready"
+            exit 1
+          fi
+          if [ "$SLA" != "0" ]; then
+            echo "FAIL: $SLA SLA breaches detected (expected 0)"
+            exit 1
+          fi
+
+      - name: Print per-scenario summary on failure
+        if: failure()
+        run: |
+          jq -r '
+            .scenarios[] |
+            "  \(.scenario): ready=\(.summary.production_ready)  sla=\(.summary.sla_breaches)  max_bl=\(.summary.max_backlog)"
+          ' system_test_report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: system-test-report
+          path: system_test_report.json
+          retention-days: 30
+
+  # ── 4. Docker build & push to GHCR ───────────────────────────────────────
+  # Only runs on pushes to main (not PRs) after all tests pass.
+  build-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: [unit-test, system-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write   # required to push to GHCR
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag strategy:
+      #   ghcr.io/org/loadequilibrium:sha-<short-sha>  ← immutable, always
+      #   ghcr.io/org/loadequilibrium:latest            ← mutable, main only
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Reproducible builds: embed commit SHA as build-arg
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+
+      - name: Image digest
+        run: echo "Pushed ${{ steps.build.outputs.digest }}"
+
+  # ── 5. Deploy ─────────────────────────────────────────────────────────────
+  # SSH into the production server and do a docker compose pull + up.
+  # Requires three repository secrets:
+  #   DEPLOY_HOST  — IP or hostname of the server
+  #   DEPLOY_USER  — SSH username (must be in the docker group)
+  #   DEPLOY_KEY   — SSH private key (paste the full PEM block)
+  # And two environment secrets (set on the "production" environment in GitHub):
+  #   INGEST_TOKEN — production auth token
+  #   DATABASE_URL — production Postgres DSN
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: http://${{ secrets.DEPLOY_HOST }}:8080/health
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          timeout: 120s
+          script: |
+            set -euo pipefail
+            cd /opt/loadequilibrium
+
+            echo "Pulling latest images..."
+            docker compose pull
+
+            echo "Starting updated containers..."
+            docker compose up -d --remove-orphans
+
+            echo "Waiting for health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8080/health > /dev/null; then
+                echo "Health check passed after ${i}s"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Health check failed after 30s — rolling back"
+                docker compose up -d --no-build
+                exit 1
+              fi
+              sleep 1
+            done
+
+            echo "Pruning old images..."
+            docker image prune -f
+
+            echo "Deploy complete."
+            docker compose ps

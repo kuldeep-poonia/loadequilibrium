@@ -1,930 +1,631 @@
-# LOADEQUILIBRIUM
-## Autonomous Distributed System Stability Engine
+# loadequilibrium
 
-![License](https://img.shields.io/badge/license-commercial-informational)
-![Go](https://img.shields.io/badge/go-1.21%2B-blue)
-![Vite](https://img.shields.io/badge/vite-5.4-blue)
-![React](https://img.shields.io/badge/react-18-blue)
-![Status](https://img.shields.io/badge/status-production_ready-brightgreen)
+**An adaptive, tick-based autopilot control system** that monitors distributed services in real time, identifies instability before it becomes an outage, and issues precise scaling directives — autonomously, without human intervention.
 
 ---
 
-## Overview
+## What It Is
 
-LOADEQUILIBRIUM is a real-time distributed system observability and stability engine. It implements numerical convergence detection, topology stability analysis, and model predictive control for microservice architectures.
+Most autoscalers react to a metric crossing a threshold. loadequilibrium does something fundamentally different: it builds a **continuous mathematical model of your system** — arrival rates, queue dynamics, service rates, upstream dependency health — and uses that model to anticipate failure and act with precision before the queue overflows or latency spikes.
 
-Unlike traditional monitoring systems that operate on discrete metrics, LOADEQUILIBRIUM models the continuous dynamical state of your entire infrastructure, predicts cascade failures before they occur, and maintains system equilibrium autonomously.
+The result is a system that distinguishes between a genuine load surge and a noisy sensor, scales capacity at exactly the right speed (not too fast, not too slow), and remains stable even when the signal it's reading is volatile.
 
-This is production grade infrastructure software.
-
----
-
-## Project Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  DASHBOARD (Vite + React)                                  │
-│  • Real-time WebSocket data stream (10 Hz)                │
-│  • REST API control plane (toggle, chaos, policy)         │
-│  • Type-safe TypeScript (SchemaV3 contract)               │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│  API SERVER                                                │
-│  • REST control plane                                      │
-│  • WebSocket streaming hub                                 │
-│  • Zero allocation broadcast                               │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│  RUNTIME ORCHESTRATOR                                      │
-│  • 10Hz tick loop                                          │
-│  • Pipeline stage scheduler                                │
-│  • Telemetry aggregation                                   │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-┌───────────────┼─────────────────────────────────────────────┐
-│  INTELLIGENCE │  TOPOLOGY       DYNAMICS      POLICY       │
-│  • RL Control  • Graph Stability • Queue Theory • Adaptation│
-└───────────────┴─────────────────────────────────────────────┘
-                │
-┌───────────────▼─────────────────────────────────────────────┐
-│  ACTUATOR                                                  │
-│  • Coalescing control plane                                │
-│  • Multi backend routing                                    │
-│  • Native + HTTP interfaces                                │
-└─────────────────────────────────────────────────────────────┘
-```
+**It is not a Kubernetes controller. It is not a threshold alarm.** It is a closed-loop control system, the same class of technology used in aircraft autopilots and industrial process controllers — applied to distributed software.
 
 ---
 
-## Repository Structure
+## How It Works — The Full Pipeline
+
+Every two seconds, the following sequence executes deterministically:
 
 ```
-completeproject/
-├── cmd/loadequilibrium/          # Main entry point
-├── internal/
-│   ├── api/                       # HTTP + WebSocket server
-│   ├── streaming/                 # WebSocket hub + broadcast
-│   ├── telemetry/                 # Time series ring buffer
-│   ├── runtime/                   # Orchestrator + tick loop
-│   ├── actuator/                  # Control plane actuator
-│   ├── topology/                  # Graph stability engine
-│   ├── dynamics/                  # Queueing theory physics
-│   ├── control/                   # MPC + optimisation
-│   ├── policy/                    # Adaptive policy engine
-│   ├── intelligence/              # Reinforcement learning
-│   ├── autopilot/                 # Stability control loop
-│   ├── simulation/                # Forward simulation
-│   ├── sandbox/                   # What-if analysis
-│   ├── modelling/                 # System identification
-│   ├── optimisation/              # Numerical optimisation
-│   ├── scenario/                  # Scenario engine
-│   ├── persistence/               # Persistence layer
-│   ├── config/                    # Configuration
-│   └── ws/                        # WebSocket primitives
-├── dashboard/                     # Vite + React frontend
-│   ├── src/components/            # UI panels + layout
-│   │   ├── panels/                # Dashboard panels (status, services, topology)
-│   │   ├── layout/                # Page layout components
-│   │   └── ui/                    # Minimal UI component library
-│   ├── src/hooks/                 # useWebSocket + utility hooks
-│   ├── src/store/                 # Zustand telemetry store
-│   ├── src/lib/                   # Formatting + API client
-│   ├── src/types/                 # Backend contract (SchemaV3)
-│   ├── vite.config.ts             # Vite configuration
-│   └── index.html                 # Entry point
-└── bin/                           # Build artifacts
+                         ┌───────────────────────────────────────────────────┐
+                         │              EXTERNAL SERVICES                    │
+                         │   service-A   service-B   service-C   ...         │
+                         └──────────────┬────────────────────────────────────┘
+                                        │  POST /api/v1/ingest
+                                        │  { request_rate, latency, error_rate,
+                                        │    cpu, mem, queue_depth, upstream_calls }
+                                        ▼
+                         ┌─────────────────────────────┐
+                         │      Telemetry Store         │
+                         │  ring buffer per service     │
+                         │  300 samples × N services    │
+                         │  prune stale after 5 min     │
+                         └──────────────┬──────────────┘
+                                        │
+                    ┌───────────────────┼────────────────────────────┐
+                    │                   │                            │
+                    ▼                   ▼                            ▼
+           ┌──────────────┐   ┌─────────────────┐       ┌──────────────────┐
+           │  Topology    │   │   Window        │       │  Stochastic      │
+           │  Graph       │   │   Computation   │       │  Model           │
+           │              │   │                 │       │                  │
+           │ builds DAG   │   │ EWMA fast+slow  │       │ burst amplitude  │
+           │ of upstream  │   │ variance, CoV   │       │ arrival variance │
+           │ call edges   │   │ confidence score│       │ risk propagation │
+           │ critical path│   │ signal quality  │       │ probability      │
+           └──────┬───────┘   └────────┬────────┘       └────────┬─────────┘
+                  │                   │                          │
+                  └───────────────────┼──────────────────────────┘
+                                      │
+                                      ▼
+                         ┌────────────────────────────┐
+                         │    Reasoning Engine         │
+                         │                            │
+                         │  hysteresis-gated rules    │
+                         │  cause → model →           │
+                         │  prediction → action       │
+                         │                            │
+                         │  emits structured events:  │
+                         │  · collapse_risk           │
+                         │  · cascade_risk            │
+                         │  · saturation_predicted    │
+                         │  · keystone_degraded       │
+                         └──────────────┬─────────────┘
+                                        │
+                                        ▼
+                         ┌────────────────────────────┐
+                         │     Simulation Engine       │
+                         │                            │
+                         │  discrete-event sim        │
+                         │  60-second horizon         │
+                         │  stochastic arrival model  │
+                         │  shock factor 2×           │
+                         │  async, drop-oldest        │
+                         └──────────────┬─────────────┘
+                                        │
+                                        ▼
+                    ┌───────────────────────────────────────┐
+                    │           AUTOPILOT CORE              │
+                    │                                       │
+                    │  ┌──────────────────────────────┐    │
+                    │  │   System Identification       │    │
+                    │  │                              │    │
+                    │  │  · EWMA fast (α=0.30)        │    │
+                    │  │  · EWMA slow (α=0.10)        │    │
+                    │  │  · ArrivalVar tracker        │    │
+                    │  │  · BurstEnergy (decay=0.25)  │    │
+                    │  │  · NoiseEnergy tracker       │    │
+                    │  │  · ConfidenceScore           │    │
+                    │  └──────────────┬───────────────┘    │
+                    │                 │                     │
+                    │  ┌──────────────▼───────────────┐    │
+                    │  │   Instability Engine          │    │
+                    │  │                              │    │
+                    │  │  load-scaled oscillation     │    │
+                    │  │  pressure + momentum score   │    │
+                    │  │  variance scale [0,1]        │    │
+                    │  │  instabilityScore → mode     │    │
+                    │  └──────────────┬───────────────┘    │
+                    │                 │                     │
+                    │  ┌──────────────▼───────────────┐    │
+                    │  │   MPC + Rollout Controller    │    │
+                    │  │                              │    │
+                    │  │  target capacity computation │    │
+                    │  │  ramp rate: Normal=30/tick   │    │
+                    │  │  ramp rate: Emergency=14/tick│    │
+                    │  │  ramp rate: scale-down=1.5   │    │
+                    │  │  queue pressure gradient     │    │
+                    │  │  mode: Normal/Degraded/      │    │
+                    │  │        Emergency/Safe        │    │
+                    │  └──────────────┬───────────────┘    │
+                    │                 │                     │
+                    │  ┌──────────────▼───────────────┐    │
+                    │  │   Decision Policy             │    │
+                    │  │                              │    │
+                    │  │  Regime Memory lookup        │    │
+                    │  │  oscillation history         │    │
+                    │  │  cooldown enforcement        │    │
+                    │  └──────────────┬───────────────┘    │
+                    └─────────────────┼─────────────────────┘
+                                      │
+                                      ▼
+                         ┌────────────────────────────┐
+                         │   Control Authority         │
+                         │                            │
+                         │  PID controller             │
+                         │  trajectory planning        │
+                         │  N-candidate evaluation     │
+                         │  3-tick direction cooldown  │
+                         │  Bundle.Replicas (integer)  │
+                         │  ScaleFactor (float)        │
+                         └──────────────┬─────────────┘
+                                        │
+                                        ▼
+                         ┌────────────────────────────┐
+                         │   Coalescing Actuator       │
+                         │                            │
+                         │  deduplicates directives   │
+                         │  async, non-blocking        │
+                         │  LogOnlyBackend (default)  │
+                         │  HTTPBackend (production)  │
+                         └──────────────┬─────────────┘
+                                        │
+                                        ▼
+                         ┌────────────────────────────┐
+                         │   External Execution        │
+                         │   (Kubernetes, Nomad, etc.) │
+                         └────────────────────────────┘
 ```
 
 ---
 
-## Data Flow
+## The Control Loop in Detail
+
+### 1. Telemetry Ingestion
+
+Services push metrics via `POST /api/v1/ingest` authenticated with `INGEST_TOKEN`. Each point is sanitised (NaN/Inf clamped, error rate bounded to [0,1], latency floored at 0.1ms to prevent division-by-zero) and written into a **per-service ring buffer** of 300 samples. Stale services (no ingest for 5 minutes) are pruned automatically.
+
+### 2. Window Computation
+
+Each tick, a sliding window is computed per service from the ring buffer. It produces:
+
+- `MeanRequestRate` / `LastRequestRate` — arrival rate signal
+- `MeanLatencyMs` / `LastP99LatencyMs` — latency distribution
+- `ConfidenceScore` — composite [0,1] signal quality based on sample count, arrival rate stability (CoV), and data freshness
+- `SignalQuality` — categorical: `good` / `degraded` / `sparse`
+
+Low-confidence windows cause the autopilot to downgrade its predictions, not ignore them — graceful degradation under bad data.
+
+### 3. Topology Graph
+
+Every service that reports upstream calls (`upstream_calls[]` in the ingest payload) is wired into a directed acyclic graph. The graph:
+
+- Computes **critical paths** — chains of services where failure propagates end-to-end
+- Identifies **keystone services** — nodes with the highest fan-out (failure impact)
+- Propagates **load estimates** through edges to model induced upstream pressure
+- Prunes edges below a weight floor to stay `O(N + E_significant)`
+
+This makes it possible for the reasoning engine to issue a `cascade_risk` alert for service-B *before* it is overloaded, because service-A's queue depth is already rising and B is directly downstream.
+
+### 4. Stochastic Model
+
+For each service window, three quantities are computed:
+
+- **Arrival variance** — how unpredictable the load is
+- **Burst amplification** — how much worse the 95th-percentile load is vs mean
+- **Risk propagation probability** — likelihood that instability spreads to dependents
+
+These feed into the trajectory planner's probabilistic cost evaluation: a capacity action that looks cheap in deterministic analysis but sits in a high-variance zone is penalised upward.
+
+### 5. System Identification
+
+The identification engine runs a set of recursive estimators on the arrival signal:
 
 ```
-  Observations
+ArrivalFast ─── α=0.30 EWMA  ──► fast-tracking signal (responds in ~3 ticks)
+ArrivalSlow ─── α=0.10 EWMA  ──► trend signal (responds in ~10 ticks)
+ArrivalBlend ── weighted mix  ──► main arrival estimate
+
+ArrivalVar  ─── online variance tracker
+BurstEnergy ─── excess / relative-floor → decay=0.25 (half-life 2.8 ticks)
+NoiseEnergy ─── high-frequency jitter detector
+```
+
+**Key design decision**: The burst normalisation uses a relative floor of `max(mean × 0.10, 1.0)` as the denominator. This prevents the variance tracker decaying toward zero during stable periods from producing explosively large burst signals when load increases. A +1.67 rps increment on a 20 rps baseline produces `excess = 1.67/2.0 = 0.84` — a real but proportionate signal. Without the floor it would produce `excess = 9.98`, maxing out BurstEnergy for the entire rising-load scenario.
+
+### 6. Instability Scoring
+
+The instability engine combines four signals multiplicatively:
+
+```
+pressure  = queue_depth / sla_limit          (how full is the queue?)
+momentum  = burst_energy / burst_cap         (is load growing fast?)
+variance  = arrival_var / relative_floor     (how unpredictable is arrival?)
+oscillation = osc_score × load_context      (is the controller hunting?)
+
+instabilityScore = bounded_aggregate(pressure, momentum, variance, oscillation)
+```
+
+A score above 0.5 AND backlog above 10% of SLA triggers an `instability_high` event. The backlog gate is critical: it prevents a noisy signal during a stable period (workload volatility) from being classified as system instability.
+
+### 7. Governance Mode
+
+The autopilot operates in one of four modes, selected each tick:
+
+| Mode | Trigger | Behaviour |
+|---|---|---|
+| `Normal` | backlog < 48% SLA | Standard ramp rates, confidence-weighted predictions |
+| `Degraded` | backlog > 48% SLA | Emergency ramp rate, higher urgency |
+| `Emergency` | instabilityScore > 0.7 OR backlog > 80% SLA | Maximum ramp, full priority |
+| `Safe` | signal quality critically low | Conservative holds, waits for confidence recovery |
+
+### 8. Capacity Target Computation (MPC + Rollout)
+
+Given the current arrival estimate and utilisation setpoint (70%), the **Model Predictive Controller** computes a target replica count:
+
+```
+targetCapacity = arrivalEstimate / (serviceRate × utilisationSetpoint)
+```
+
+The **rollout controller** then ramps the current capacity toward the target:
+
+```
+rampRate (Normal)    = 30 replicas/tick
+rampRate (Emergency) = 14 replicas/tick  + proportional boost (capped at 2×)
+rampRate (scale-down)= 1.5 replicas/tick (conservative — never crash the fleet)
+
+queuePressureMultiplier = 1.0 + 0.5 × ((backlog - 50) / (SLA - 50))  [max 1.5×]
+```
+
+The proportional boost for large deficits (`min(err × 0.3, rate)`) means the system accelerates toward a target that is far away, but cannot panic-scale. A 100-replica deficit at emergency rate produces `boost = min(30, 14) = 14`, total rate `= 28`. Not `164`.
+
+### 9. Control Authority
+
+The authority converts the float capacity target into an integer `Bundle.Replicas` decision. It also:
+
+- Enforces a **3-tick direction-change cooldown** — prevents oscillating between scale_up and scale_down within a burst transition
+- Runs a **PID controller** (Kp=-1.5, Ki=-0.3, Kd=-0.1) for fine-grained utilisation tracking
+- Evaluates **N trajectory candidates** via `PlanTrajectory`, ranking them by probabilistic cost
+- Applies **anti-windup integral clamping** and a **hysteresis deadband** to suppress chattering near setpoint
+
+### 10. Actuator Dispatch
+
+The `CoalescingActuator` receives a `DirectiveSnapshot` — an immutable, decoupled control directive — and dispatches it asynchronously. It deduplicates identical consecutive directives. The default backend (`LogOnlyBackend`) logs what would be done; a production `HTTPBackend` sends the scaling command to the target orchestrator.
+
+---
+
+## Why This Architecture
+
+### Why tick-based?
+
+A fixed control interval (`TICK_INTERVAL=2s`) makes the system **deterministic and auditable**. Every decision is traceable to a specific tick, a specific set of measurements, and a specific computation path. Interrupt-driven or fully async systems make it much harder to reason about why a decision was made.
+
+The orchestrator enforces a **tick deadline** (`TICK_DEADLINE=1800ms`). If any pipeline stage runs long, the orchestrator adaptively stretches the interval rather than dropping the tick — preventing cascading overruns. It also **pre-emptively stretches** when EWMA-predicted stage cost exceeds 85% of the deadline, before the first overrun occurs.
+
+### Why a physics plant model?
+
+The `FluidPlant` and `FinalFluidPlant` models treat the request queue as a **stochastic fluid system** with:
+
+- Nonlinear inflow driven by measured arrival rates
+- Hazard accumulation when utilisation approaches 1.0
+- Reservoir dynamics that capture burst absorption capacity
+- Reflection forces that prevent queue from going negative
+
+This is more accurate than a simple `arrivals - departures` model because it captures the nonlinear behaviour of real queues near saturation — where latency degrades superlinearly and small changes in load produce large changes in queue depth.
+
+### Why policy gradient + PID?
+
+The system uses **two complementary controllers**:
+
+- The **PID controller** handles steady-state tracking with known dynamics — it is fast, interpretable, and provably stable for linear systems
+- The **Policy Gradient Optimizer** (PPO-style actor-critic) handles the non-linear, delayed-reward regime where the PID's linearisation breaks down — burst transitions, topology-induced load shifts, regime changes
+
+The PG optimizer uses **Generalised Advantage Estimation (GAE)**, reward normalisation, and a **safety cost function** that penalises actions with `r > 0.85` utilisation, making it risk-aware rather than purely reward-maximising.
+
+### Why a sandbox?
+
+The `sandbox` package provides a safe **pre-flight simulation environment** where proposed control strategies can be evaluated against historical or synthetic scenarios before being applied in production. It supports:
+
+- Deterministic replay of past incidents
+- Uncertainty-inflated scenarios (what if the load was 2× worse?)
+- Phase-comparison between candidate policies
+
+---
+
+## Data Flow: Ingest to Decision
+
+```
+External Service
+      │
+      │  POST /api/v1/ingest
+      │  Authorization: Bearer <INGEST_TOKEN>
+      │  Content-Type: application/json
       │
       ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Telemetry   │────▶│ Dynamics    │────▶│ Topology    │
-│ Ingest      │     │ Engine      │     │ Analysis    │
-└─────────────┘     └─────────────┘     └─────────────┘
-                                                         
-                                 │
-                                 ▼
-                        ┌─────────────┐
-                        │ Convergence │
-                        │ Detection   │
-                        └─────────────┘
-                                 │
-┌─────────────┐     ┌─────────────▼     ┌─────────────┐
-│ Actuator    │◀────│ Policy        │◀───│ Intelligence│
-│ Control     │     │ Optimisation  │    │ Engine      │
-└─────────────┘     └───────────────┘    └─────────────┘
-      │
-      ▼
-  Control Actions
+┌─────────────────────────────────────────────────────┐
+│  handleIngest()                                      │
+│  1. Authenticate token                              │
+│  2. Decode JSON → MetricPoint                       │
+│  3. Sanitise: clamp NaN/Inf, floor latency 0.1ms   │
+│  4. store.Ingest(point)                             │
+│  5. hub.Broadcast(snapshot) → WebSocket clients    │
+└──────────────────────────┬──────────────────────────┘
+                           │
+              [every 2 seconds — tick boundary]
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│  orchestrator.tick()                                 │
+│                                                     │
+│  Stage 1: prune stale services                     │
+│  Stage 2: compute windows (parallel, worker pool)  │
+│  Stage 3: topology graph update                    │
+│  Stage 4: stochastic model per service             │
+│  Stage 5: reasoning engine → events                │
+│  Stage 6: async simulation (60s horizon)           │
+│  Stage 7: autopilot tick (see below)               │
+│  Stage 8: actuator dispatch                        │
+│  Stage 9: persistence write (async, non-blocking)  │
+│                                                     │
+│  [deadline enforced — stages skip-or-defer on      │
+│   overrun; EWMA latency tracked per stage]         │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│  autopilot.Tick(state, measuredArrival)              │
+│                                                     │
+│  1. Anomaly gate: reject >10× EWMA estimate        │
+│  2. updateIdentification() — EWMA, var, burst      │
+│  3. forecastBacklog() — MPC queue model            │
+│  4. instabilityEngine.Score() → instScore          │
+│  5. modeProb() → governance mode                   │
+│  6. delay() → latency model                        │
+│  7. rollout.Step() → next CapacityActive           │
+│  8. safetyState() → safety margin                  │
+│  9. mpcState() → MPC inputs                        │
+│ 10. Return TelemetryOutput{Capacity, Backlog, ...} │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│  control.Authority.Evaluate(input)                   │
+│                                                     │
+│  1. Compute required capacity from utilisation     │
+│  2. Generate candidate bundle set                  │
+│  3. PlanTrajectory() — rank N candidates           │
+│  4. PID adjustment                                 │
+│  5. Cooldown enforcement (3-tick direction lock)   │
+│  6. Return AuthorityDecision{Bundle, Directive}    │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│  actuator.Submit(DirectiveSnapshot)                  │
+│  → LogOnlyBackend.Execute() [default]               │
+│  → HTTPBackend.Execute()    [production]            │
+└─────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Observability
+
+### Metrics — GET /metrics
+
+The `/metrics` endpoint serves Prometheus text format. All metrics are computed from live state — zero additional scraping, zero external dependencies.
+
+| Metric | Type | What it tells you |
+|---|---|---|
+| `loadequilibrium_request_rate{service}` | gauge | Live arrival rate per service (rps) |
+| `loadequilibrium_queue_depth{service}` | gauge | Current pending request count |
+| `loadequilibrium_latency_mean_ms{service}` | gauge | Mean observed latency |
+| `loadequilibrium_latency_p99_ms{service}` | gauge | P99 latency — SLA signal |
+| `loadequilibrium_applied_scale{service}` | gauge | Last scaling directive (1.0 = no change) |
+| `loadequilibrium_confidence_score{service}` | gauge | Signal quality [0,1] — below 0.3 means degraded mode |
+| `loadequilibrium_hazard_score{service}` | gauge | Physics-engine hazard [0,1] — above 0.7 means collapse risk |
+| `loadequilibrium_scale_decisions_total{direction}` | counter | scale_up / scale_down / hold counts |
+| `loadequilibrium_sla_breaches_total` | counter | Cumulative SLA breaches (target: 0) |
+| `loadequilibrium_ticks_total` | counter | Control ticks completed |
+| `loadequilibrium_tracked_services` | gauge | Active services in telemetry store |
+| `go_goroutines` | gauge | Runtime goroutine count |
+| `go_heap_alloc_bytes` | gauge | Live heap allocation |
+
+### Health — GET /health
+
+```json
+{ "status": "ok", "component": "api_headless", "clients": 3 }
+```
+
+Returns 200 when the process is alive and the WebSocket hub is operational. Used by Kubernetes liveness and readiness probes.
+
+### WebSocket — GET /ws
+
+Streams the live tick payload to connected dashboards in real time. Each tick broadcasts a JSON snapshot of all service windows, reasoning events, and the latest control decision. Supports up to `MAX_STREAM_CLIENTS` (default 50) concurrent connections.
+
+### Grafana Dashboard
+
+Provisioned automatically at startup. Five sections:
+
+1. **System Health** — SLA breach counter, tracked services, ticks, uptime, goroutines
+2. **Per-Service Traffic** — arrival rate and queue depth time series
+3. **Latency** — mean and P99 per service
+4. **Autopilot Decisions** — scale_up/scale_down/hold rates, applied scale factor
+5. **Signal Quality** — confidence score and hazard score per service
 
 ---
 
 ## API Reference
 
-### WebSocket Endpoint
-```
-ws://localhost:8080/ws
-```
-
-**Message Format**: JSON TickPayload (SchemaV3)  
-**Frequency**: 10 Hz (100ms intervals)  
-**Size**: 50-150 KB per message  
-**Auto-reconnect**: Exponential backoff (2s → 4s → 8s → 16s → 32s → 60s)
-
-**Payload Structure**:
-```json
-{
-  "type": "tick",
-  "seq": 12345,
-  "ts": "2024-04-19T12:34:56Z",
-  "bundles": {
-    "service-id": {
-      "queue": { "utilisation": 0.67, "saturation_horizon": 120 },
-      "stability": { "collapse_risk": 0.25, "collapse_zone": "warning" },
-      "signal": { "fast_ewma": 1234.2, "spike_detected": false },
-      "stochastic": { "burst_amplification": 1.8, "arrival_co_v": 0.35 }
-    }
-  },
-  "topology": { "nodes": [...], "edges": [...], "critical_path": {...} },
-  "directives": { "service-id": { "scale_factor": 1.05, "target_utilisation": 0.70 } },
-  "events": [...],
-  "objective": { "composite_score": 0.75, "cascade_failure_probability": 0.18 },
-  "control_plane": { "tick": 12345, "actuation_enabled": true, "policy_preset": "balanced" }
-}
-```
-
-### REST Endpoints
-
-#### Control Endpoints (Used by Dashboard)
-```http
-POST /api/v1/control/toggle              # Toggle actuation on/off
-POST /api/v1/control/chaos-run           # Inject chaos scenario
-POST /api/v1/policy/update               # Change policy preset (balanced/conservative/aggressive)
-POST /api/v1/alerts/ack                  # Acknowledge alert by ID
-```
-
-#### Other Endpoints
-```http
-POST /api/v1/control/replay-burst
-POST /api/v1/runtime/step
-POST /api/v1/sandbox/trigger
-POST /api/v1/simulation/control
-POST /api/v1/intelligence/rollout
-```
-
-#### State
-```http
-POST /api/v1/ingest            # Telemetry MetricPoint or MetricPoint[]
-GET  /api/v1/snapshot          # Last full tick payload
-GET  /health                   # Health check
-```
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/ingest` | Bearer token | Push a telemetry point for a service |
+| `GET` | `/api/v1/snapshot` | — | Last cached tick output as REST (no WebSocket needed) |
+| `GET` | `/api/v1/runtime/step` | — | Trigger a manual control tick |
+| `POST` | `/api/v1/policy/update` | — | Update control policy parameters at runtime |
+| `POST` | `/api/v1/control/toggle` | — | Enable/disable autopilot |
+| `POST` | `/api/v1/control/chaos-run` | — | Inject a chaos experiment |
+| `POST` | `/api/v1/control/replay-burst` | — | Replay a historical burst scenario |
+| `POST` | `/api/v1/sandbox/trigger` | — | Run a sandbox experiment |
+| `POST` | `/api/v1/simulation/control` | — | Control the simulation engine |
+| `POST` | `/api/v1/intelligence/rollout` | — | Issue a policy gradient rollout |
+| `POST` | `/api/v1/alerts/ack` | — | Acknowledge a reasoning event |
+| `GET` | `/metrics` | — | Prometheus text format metrics |
+| `GET` | `/health` | — | Liveness probe |
+| `GET` | `/ws` | — | WebSocket stream |
 
 ---
 
-## Dashboard Modules
-
-| Route | Module | Purpose |
-|-------|--------|---------|
-| `/` | **Command Center** | Main observatory |
-| `/topology` | Topology Field | Live graph stability |
-| `/telemetry` | Telemetry Explorer | Full metrics breakdown |
-| `/cascade` | Cascade Risk | Failure propagation analysis |
-| `/runtime` | Runtime Engine | Tick pipeline diagnostics |
-| `/sandbox` | Sandbox | What-if simulation |
-| `/simulation` | Simulation | Forward prediction |
-| `/intelligence` | Autonomy | RL control plane |
-| `/policy` | Policy Engine | Stability policies |
-| `/replay` | Replay Dock | Timeline analysis |
-| `/actuator` | Actuator | Control plane status |
-| `/alerts` | Alerts | Active events |
-
----
-
----
-
-## Quick Start
-
-### Prerequisites
-```
-Go 1.21+
-Node.js 20+
-npm/pnpm
-Docker (optional)
-```
-
-### Local Development
-
-**Terminal 1: Start Backend**
-```bash
-cd completeproject
-go run cmd/loadequilibrium/main.go
-```
-
-Expected output:
-```
-[loadequilibrium] starting - VER_2.2_SYNC_CHECK
-[persistence] disabled (no DATABASE_URL)
-[http] listening on :8080
-[engine] started tick=2s window=30 maxSvc=200 workers=8
-```
-
-**Terminal 2: Start Dashboard**
-```bash
-cd completeproject/dashboard
-npm install
-npm run dev
-```
-
-Expected output:
-```
-VITE v5.4.19  ready in 354 ms
-
-➜  Local:   http://localhost:8080/
-➜  Network: http://172.28.80.1:8080/
-```
-
-**Open Dashboard**: http://localhost:8080
-
-You should see:
-- ✅ Green LED indicator (top-left, "Awaiting telemetry uplink" → "CONNECTED")
-- 📊 Service Matrix with utilisation and collapse risk
-- 🟢 System Overview health gauge
-- 📈 Real-time topology graph
-- 🚨 Active alerts with recommendations
-- ⚙️ Command Console for policy/actuation control
-
----
-
-## Configuration
-
-### Backend Environment Variables
-
-```bash
-# Port and networking
-PORT=8080                                    # API server port
-ACTUATOR_HTTP_ENDPOINT=http://...          # Control plane endpoint
-
-# System tuning
-MAX_SERVICES=200                            # Maximum services to track
-RING_BUFFER_DEPTH=1000                      # Telemetry history buffer
-STALE_SERVICE_AGE=30s                       # Service lifetime
-
-# Persistence (optional)
-DATABASE_URL=postgres://user:pass@host/db   # PostgreSQL connection
-
-# Scenario engine (for testing without real services)
-SCENARIO_MODE=off                           # on/off - generates synthetic traffic
-
-# Monitoring
-PROMETHEUS_ADDR=:9090                       # Prometheus metrics endpoint
-```
-
-### Dashboard Environment Variables
-
-Create `.env.local` in `dashboard/`:
-```bash
-# WebSocket connection (auto-converts http://localhost:8080 → ws://localhost:8080/ws)
-VITE_WS_URL=http://localhost:8080
-
-# REST API base URL
-VITE_API_URL=http://localhost:8080
-
-# Optional authentication
-VITE_INGEST_TOKEN=your-optional-token
-```
-
-**Note**: The dashboard automatically appends `/ws` to the WebSocket URL and converts `http://` → `ws://` or `https://` → `wss://`.
-
----
-
-## Core Concepts
-
-### Service Bundle (Per-Service Metrics)
-
-Every service has a 4-layer metric bundle:
-
-**Layer 1: Queue Theory (M/M/c Model)**
-- `arrival_rate` (λ): Incoming requests per second
-- `service_rate` (μ): Requests completed per second per worker
-- `concurrency` (c): Number of parallel workers
-- `utilisation` (ρ = λ/(μ×c)): [0, 1]
-  - ρ < 0.70: Safe (stability guaranteed)
-  - 0.70 ≤ ρ < 0.85: Warning (degradation risk)
-  - ρ ≥ 0.85: Critical (cascade imminent)
-- `queue_depth` (L_q): Requests waiting in queue
-- `latency` (P50, P95, P99): Response time percentiles
-
-**Layer 2: Stability Analysis**
-- `collapse_risk`: [0, 1] probability service degrades in 60s
-- `oscillation_risk`: Queue depth variance / mean
-- `margin_to_saturation`: (1 - ρ) headroom before overload
-- `spike_detected`: CUSUM anomaly detection flag
-
-**Layer 3: Stochastic Effects**
-- `burst_amplification`: How much traffic spikes grow
-- `risk_propagation`: Upstream risk influence
-- `sla_violations_predicted`: Estimated violations in 60s
-
-**Layer 4: Signal Processing**
-- `ewma`: Exponential moving average of metrics
-- `cusum`: Cumulative sum for anomaly detection
-- `trend`: Rising/stable/falling trajectory
-
-### Network Equilibrium
-
-Services are coupled (A's queue affects B's arrivals). LoadEquilibrium solves for equilibrium using **Gauss-Seidel iteration**:
-
-```
-For each service i:
-  ρ_i = (λ_external_i + Σ requests_from_upstream) / (μ_i × c_i)
-
-Iterate until all ρ values converge
-```
-
-Result: Accurate system-wide utilization + cascade risk forecasts.
-
-### Cascade Failure Prediction
-
-3-layer detection:
-1. **Per-Service**: Does THIS service collapse?
-2. **Topology Coupling**: Does upstream risk propagate?
-3. **Network Cascade**: Does entire system fail?
-
-```
-cascade_probability = 1 - ∏(1 - collapse_risk_i) × topology_amplification
-```
-
-When cascade_probability > 0.70 → System triggers emergency controls.
-
----
-
-## Dashboard Components
-
-### System Status Bar
-- Composite health score [0, 100]
-- Cascade failure probability
-- Active services count
-- P99 latency (network-wide)
-- WebSocket connection status (CONNECTED/DISCONNECTED)
-
-### Objective Metrics Panel
-- Composite score (overall system health)
-- Cascade failure probability (system-wide risk)
-- Predicted P99 latency next 60s
-- Predicted SLA violations
-- Stability envelope (prediction confidence)
-
-### Health Timeline
-- 6-second history of:
-  - Composite score (cyan area)
-  - Cascade probability (red area)
-- Live update every 100ms
-
-### Bundle Metrics Panel
-- Top 20 services ranked by collapse_risk
-- Per-service breakdown:
-  - Utilisation indicator (ρ)
-  - Collapse risk color coding
-  - P99 latency
-  - Trend (up/down/stable)
-- Expandable to show all 4 bundle layers
-
-### Topology Insights Panel
-- Total services and connections
-- Critical path (bottleneck services)
-- System fragility index [0, 1]
-- High-risk connections (error rate > 1% or latency > 100ms)
-
-### Cascade Prediction Panel
-- 60-second probability forecast (LineChart)
-- Current cascade risk
-- Peak risk prediction
-- Max affected services count
-
-### Alerts Queue
-- Dynamic alert generation:
-  - Cascade risk > 70% → CRITICAL
-  - Health < 30% → CRITICAL
-  - Utilisation > 90% → WARNING
-  - Latency > 500ms → WARNING
-- Top 5 active alerts with recommendations
-
-### Control Panel
-- Toggle RL policy: Enable/disable autonomous control
-- Trigger chaos mode: Inject failures for testing
-- Replay burst: Simulate stored traffic spike
-- Pause system: Stop processing for diagnostics
-
----
-
-## REST API Reference
-
-### Health Check
-```http
-GET /health
-
-Response: 200 OK
-{
-  "status": "ok",
-  "component": "api_headless",
-  "clients": 0
-}
-```
-
-### System Snapshot
-```http
-GET /api/v1/snapshot
-
-Response: 200 OK
-{
-  "seq": 12345,
-  "timestamp_ms": 1645230400000,
-  "objective": {...},
-  "bundles": {...},
-  "topology": {...},
-  "predictions": {...}
-}
-```
-
-### Submit Telemetry
-```http
-POST /api/v1/ingest
-Content-Type: application/json
-
-[
-  {
-    "service_id": "auth-svc",
-    "arrival_rate": 150.5,
-    "service_time_ms": 45.2,
-    "concurrency": 8,
-    "error_rate": 0.001,
-    "p99_latency_ms": 250
-  }
-]
-
-Response: 202 Accepted
-```
-
-### Control: Toggle Policy
-```http
-POST /api/v1/control/toggle
-Content-Type: application/json
-
-{ "enabled": true }
-
-Response: 200 OK
-```
-
-### Control: Run Chaos Test
-```http
-POST /api/v1/control/chaos-run
-Content-Type: application/json
-
-{
-  "target_service": "payment-svc",
-  "failure_mode": "latency_spike",
-  "duration_ms": 5000
-}
-
-Response: 200 OK
-```
-
-### Control: Replay Burst
-```http
-POST /api/v1/control/replay-burst
-Content-Type: application/json
-
-{
-  "burst_id": "black-friday-2024",
-  "scale_factor": 1.5
-}
-
-Response: 200 OK
-```
-
-### Intelligence: Rollout Policy
-```http
-POST /api/v1/intelligence/rollout
-Content-Type: application/json
-
-{
-  "policy_version": "v2.1",
-  "rollout_percentage": 50
-}
-
-Response: 200 OK
-```
-
-### Acknowledge Alert
-```http
-POST /api/v1/alerts/ack
-Content-Type: application/json
-
-{
-  "alert_id": "cascade-critical-12345",
-  "acknowledged_by": "ops-team"
-}
-
-Response: 200 OK
-```
-
----
-
-## WebSocket API
-
-### Connection
-```javascript
-const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:8080';
-const protocol = wsUrl.startsWith('https') ? 'wss' : 'ws';
-const base = wsUrl.replace(/^https?/, protocol);
-const ws = new WebSocket(`${base}/ws`);
-
-ws.onmessage = (event) => {
-  const tick = JSON.parse(event.data);
-  if (tick.type === 'tick') {
-    console.log('Sequence:', tick.seq);
-    console.log('Services:', Object.keys(tick.bundles));
-    console.log('Health:', tick.objective.composite_score);
-    console.log('Cascade Risk:', tick.objective.cascade_failure_probability);
-  }
-};
-```
-
-### Message Rate
-- **Frequency**: 10 Hz (every 100ms)
-- **Size**: 50-150 KB per message (gzipped: 12-30 KB)
-- **Bandwidth**: ~500 KB/s per client (uncompressed)
-- **Format**: JSON TickPayload (SchemaV3)
-- **Compression**: Transparent via WebSocket (modern browsers)
-
-### Auto-Reconnect (Built into Dashboard)
-Dashboard hook (`useWebSocket.ts`) implements exponential backoff:
-- Initial: 2 seconds
-- Multiplier: 2x
-- Max: 60 seconds
-- No maximum retry attempts
+## Configuration Reference
+
+All configuration is via environment variables. Defaults are production-safe.
+
+### Core Engine
+
+| Variable | Default | Description |
+|---|---|---|
+| `LISTEN_ADDR` | `:8080` | HTTP server bind address |
+| `TICK_INTERVAL` | `2s` | Control tick frequency |
+| `TICK_DEADLINE` | `1800ms` | Max time per tick before adaptive stretch |
+| `MIN_TICK_INTERVAL` | `1s` | Floor for adaptive tick stretching |
+| `MAX_TICK_INTERVAL` | `10s` | Ceiling for adaptive tick stretching |
+| `TICK_ADAPT_STEP` | `1.25` | Multiplicative stretch factor on overrun |
+| `WORKER_POOL_SIZE` | `8` | Parallel workers for window computation |
+
+### Telemetry
+
+| Variable | Default | Description |
+|---|---|---|
+| `RING_BUFFER_DEPTH` | `300` | Samples retained per service |
+| `MAX_SERVICES` | `200` | Maximum tracked services |
+| `STALE_SERVICE_AGE` | `5m` | Prune threshold for inactive services |
+| `INGEST_TOKEN` | `` | Bearer token for POST /api/v1/ingest — **required** |
+
+### Control Policy
+
+| Variable | Default | Description |
+|---|---|---|
+| `UTILISATION_SETPOINT` | `0.70` | Target utilisation (70% leaves 30% headroom) |
+| `COLLAPSE_THRESHOLD` | `0.90` | Utilisation above which collapse risk is flagged |
+| `EWMA_FAST_ALPHA` | `0.30` | Fast EWMA decay — responds in ~3 ticks |
+| `EWMA_SLOW_ALPHA` | `0.10` | Slow EWMA decay — responds in ~10 ticks |
+| `SPIKE_Z_SCORE` | `3.0` | Z-score threshold for spike detection |
+| `PID_KP` | `-1.5` | Proportional gain (negative: reduce on error) |
+| `PID_KI` | `-0.3` | Integral gain |
+| `PID_KD` | `-0.1` | Derivative gain |
+| `PID_DEADBAND` | `0.02` | Suppress output for errors < 2% |
+| `PID_INTEGRAL_MAX` | `2.0` | Anti-windup clamp |
+
+### Simulation
+
+| Variable | Default | Description |
+|---|---|---|
+| `SIM_BUDGET` | `45ms` | Wall-clock budget per tick for simulation |
+| `SIM_HORIZON_MS` | `60000` | Simulation lookahead (60 seconds) |
+| `SIM_SHOCK_FACTOR` | `2.0` | Worst-case load multiplier in simulation |
+| `SIM_STOCHASTIC_MODE` | `exponential` | Arrival distribution: exponential, poisson |
+
+### Prediction & Safety
+
+| Variable | Default | Description |
+|---|---|---|
+| `ARRIVAL_ESTIMATOR_MODE` | `ewma` | Arrival estimator: ewma, blend |
+| `PREDICTIVE_HORIZON_TICKS` | `5` | Ticks ahead for backlog forecast |
+| `SAFETY_MODE_THRESHOLD` | `3` | Consecutive overruns before safe mode |
+| `SLA_LATENCY_THRESHOLD_MS` | `500.0` | Latency SLA breach threshold (ms) |
+| `STALENESS_BYPASS_THRESHOLD` | `0.70` | Confidence below which staleness bypass activates |
+
+### Persistence
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `` | PostgreSQL DSN — if empty, persistence is disabled |
+| `PERSIST_INTERVAL` | `30s` | How often snapshots are flushed to DB |
 
 ---
 
 ## Deployment
 
-### Docker
+### Docker Compose (Local / Single-Node)
 
-**Build Image**
 ```bash
-docker build -t loadequilibrium:latest .
+# 1. Copy the env file template
+cp .env.example .env   # set INGEST_TOKEN and DATABASE_URL
+
+# 2. Start everything
+docker compose up -d
+
+# 3. Verify
+curl http://localhost:8080/health
+# Open http://localhost:3000  (Grafana — admin/changeme)
+# Open http://localhost:9090  (Prometheus)
 ```
 
-**Run Container**
-```bash
-docker run \
-  -e PORT=8080 \
-  -e SCENARIO_MODE=on \
-  -e MAX_SERVICES=200 \
-  -p 8080:8080 \
-  loadequilibrium:latest
-```
-
-**Build & Run Dashboard** (in separate container or host)
-```bash
-# In dashboard/ directory
-docker build -t loadequilibrium-dashboard:latest .
-docker run \
-  -e VITE_WS_URL=http://backend:8080 \
-  -e VITE_API_URL=http://backend:8080 \
-  -p 3000:8080 \
-  loadequilibrium-dashboard:latest
-```
-
-### Docker Compose
-
-**Full Stack**
-```bash
-docker-compose up
-```
-
-Services:
-- `loadequilibrium`: Backend (port 8080)
-- `dashboard`: Frontend (port 3000, Vite dev server)
-- `prometheus`: Metrics (port 9090, optional)
+Services start in dependency order: postgres → loadequilibrium → prometheus → grafana.
 
 ### Kubernetes
 
 ```bash
-kubectl apply -f k8s/
+# 1. Set real secrets (never commit the YAML values)
+kubectl create secret generic loadequilibrium-secrets \
+  --from-literal=database-url='postgres://le:PASS@postgres-svc:5432/le?sslmode=require' \
+  --from-literal=ingest-token='your-real-token' \
+  -n loadequilibrium
+
+# 2. Apply all manifests in order
+kubectl apply -f k8s/00-namespace.yml
+kubectl apply -f k8s/01-secrets.yml        # replace with your real secrets first
+kubectl apply -f k8s/02-configmap.yml
+kubectl apply -f k8s/03-postgres.yml
+kubectl apply -f k8s/04-deployment.yml
+kubectl apply -f k8s/05-prometheus.yml
+kubectl apply -f k8s/06-grafana.yml
+kubectl apply -f k8s/07-ingress.yml        # update hostnames first
+
+# 3. Watch rollout
+kubectl rollout status deployment/loadequilibrium -n loadequilibrium
+
+# 4. Access (before ingress is ready)
+kubectl port-forward svc/loadequilibrium-svc 8080:80 -n loadequilibrium
+kubectl port-forward svc/grafana-svc 3000:3000 -n loadequilibrium
 ```
 
-Includes:
-- Deployment for backend
-- Service (ClusterIP + NodePort)
-- ConfigMap for settings
-- HorizontalPodAutoscaler
+**Important**: loadequilibrium is a **singleton control-plane**. Do not set replicas > 1 on the Deployment. The control loop maintains in-memory state that is not distributed. If you need HA, run it in active-passive mode with a shared PostgreSQL state backend.
+
+### CI/CD (GitHub Actions)
+
+The pipeline in `.github/workflows/ci.yml` runs automatically:
+
+```
+On every pull request:
+  lint (go vet + gofmt) → unit tests (race detector) → system tests (10/10 autopilot scenarios)
+
+On merge to main (after all tests pass):
+  build Docker image → push to GHCR → SSH deploy to production server
+```
+
+**Secrets required in GitHub:**
+
+| Secret | Where | Value |
+|---|---|---|
+| `DEPLOY_HOST` | Repository secrets | Server IP or hostname |
+| `DEPLOY_USER` | Repository secrets | SSH username (docker group) |
+| `DEPLOY_KEY` | Repository secrets | SSH private key (full PEM) |
+| `INGEST_TOKEN` | Environment: production | Production auth token |
+| `DATABASE_URL` | Environment: production | Production Postgres DSN |
 
 ---
 
-## Monitoring & Observability
+## System Tests
 
-### Prometheus Metrics
+The autopilot ships with a **10-scenario production-readiness test suite** that validates control behaviour under real conditions — not mocked:
 
-```
-loadequilibrium_cascade_probability        # System-wide cascade risk
-loadequilibrium_service_utilisation{service_id}
-loadequilibrium_sla_violations_predicted   # Violations in next 60s
-loadequilibrium_control_actions_total{action_type}
-loadequilibrium_tick_duration_ms           # Tick execution time
-```
+| Scenario | What it validates |
+|---|---|
+| `burst_load_recovery` | 3× sudden load spike — recovers within 8 ticks, no SLA breach |
+| `rising_load_tracking` | Gradual ramp from 20→80 rps — tracks without overshoot |
+| `queue_saturation_emergency` | 11× instantaneous overload — emergency ramp, max backlog < 130 |
+| `retry_storm_cascade` | Exponential retry amplification — identifies as burst, not instability |
+| `noisy_signal_ewma` | High-variance sensor data — EWMA smoothing prevents false decisions |
+| `scale_down_intelligence` | Load drops — scales down slowly (1.5/tick), no premature cutback |
+| `oscillating_load_damping` | Sinusoidal load — direction cooldown prevents hunting |
+| `sustained_high_load_sla` | 90% utilisation sustained — holds stable without SLA breach |
+| `mpc_autopilot_alignment` | MPC prediction vs actual — < 5% divergence |
+| `signal_integrity_nan_spike` | Injected NaN/Inf — anomaly gate absorbs, no crash |
 
-### Dashboard Alerts
-
-| Condition | Level | Action |
-|-----------|-------|--------|
-| cascade_probability > 0.70 | CRITICAL | Emergency controls activate |
-| service_utilisation > 0.85 | WARNING | Pre-scale notification |
-| sla_violations_predicted > 5 | WARNING | Alert ops team |
-| topology_fragility > 0.8 | INFO | Advisory |
-
-### Logs
-
-```
-[engine]      10Hz tick events, state transitions
-[api]         REST/WebSocket activity, client connections
-[control]     Policy decisions, actions executed
-[topology]    Graph analysis, critical path changes
-[dynamics]    Queue theory calculations, convergence steps
-```
-
----
-
-## Performance Characteristics
-
-| Metric | Value |
-|--------|-------|
-| Tick Frequency | 10 Hz (100ms) |
-| TickPayload Size | 50-150 KB |
-| WebSocket Broadcast Latency | <50ms |
-| REST Response Time | <200ms |
-| Monte-Carlo Simulation (60s horizon) | <30ms |
-| Network Equilibrium Solve | <15ms |
-| Memory per Service | ~5 KB |
-| Max Services | 200 (configurable) |
-| Max WebSocket Clients | 100 (tunable) |
-| Throughput @ 200 services | 50-100 Mbps |
-
----
-
-## Development Commands
+**Gate**: all 10 must pass (`STABLE_PRODUCTION_GRADE`, 0 SLA breaches) or the CI build fails.
 
 ```bash
-# Build
-make build                         # Compile backend binary
-cd dashboard && npm run build      # Vite production build
-
-# Run
-make run                           # Start backend
-cd dashboard && npm run dev        # Vite dev server with HMR
-
-# Test
-make test                          # Unit tests (Go)
-cd dashboard && npm run test       # Vitest tests (React)
-
-# Lint
-make lint                          # Go lint + fmt
-cd dashboard && npm run lint       # ESLint
-
-# Preview
-cd dashboard && npm run preview    # Preview production build locally
+go build -o system_test_runner ./cmd/system_test_runner/
+./system_test_runner 2>/dev/null
 ```
 
 ---
 
-## Troubleshooting
+## Architecture Decisions
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| "Awaiting telemetry uplink" indicator | Backend not running or WebSocket failed | Run `go run cmd/loadequilibrium/main.go` and check VITE_WS_URL |
-| No services in Service Matrix | Scenario mode off, no telemetry submitted | Set `SCENARIO_MODE=on` or POST telemetry to /api/v1/ingest |
-| Dashboard fails to start | Port 8080 already in use or VITE_WS_URL not set | Change port in vite.config.ts or set VITE_WS_URL=http://localhost:8080 |
-| WebSocket connection fails | CORS or port mismatch | Verify backend port matches VITE_WS_URL |
-| Control buttons don't work | VITE_API_URL not set or API not responding | Set VITE_API_URL=http://localhost:8080 in .env.local |
-| High memory usage | Too many services tracked | Reduce `MAX_SERVICES` or increase `STALE_SERVICE_AGE` |
-| TypeScript errors | Type mismatch with backend | Ensure backend is running SchemaV3 (check ARCHITECTURE.md) |
+**Zero external dependencies** — the entire system is pure Go stdlib. No client libraries for Prometheus, no ORM, no framework. This means no dependency supply-chain risk, trivially fast builds, and a 7MB binary.
 
----
+**Async persistence, sync control** — PostgreSQL writes are fully off the hot path. The control tick never waits for I/O. If the database is unreachable, the system continues operating and logs the gap.
 
-## Architecture Deep Dive
+**Drop-oldest simulation** — when the simulation engine cannot finish within `SIM_BUDGET`, it drops the oldest pending result rather than blocking. The control loop always has *some* simulation output, even if it is one tick stale.
 
-For comprehensive system design details, see [ARCHITECTURE.md](ARCHITECTURE.md):
-- Queue theory foundation (M/M/c models)
-- Cascade failure prediction algorithm
-- Network equilibrium solving (Gauss-Seidel)
-- Model Predictive Control (MPC)
-- Reinforcement Learning policy
-- Safety constraints and projection
-
----
-
-## Performance Tips
-
-1. **For 200+ services**: Increase `RING_BUFFER_DEPTH` to 2000
-2. **For <100ms latency requirement**: Run backend on dedicated CPU
-3. **For multiple dashboards**: Use load balancer for WebSocket connections
-4. **For historical analysis**: Enable `DATABASE_URL` for persistence
-5. **For testing**: Enable `SCENARIO_MODE=on` for synthetic data generation
+**Hysteresis everywhere** — mode transitions (Normal → Degraded → Emergency), reasoning event cooldowns, PID deadband, and direction-change cooldown all use hysteresis. This is the primary mechanism for preventing the oscillation that would otherwise arise from a purely threshold-reactive system.
 
 ---
 
 ## License
 
-Commercial. See LICENSE file for terms.
-
----
-
-## Support
-
-For issues, feature requests, or documentation improvements:
-- Check [Troubleshooting](#troubleshooting) section
-- Review [ARCHITECTURE.md](ARCHITECTURE.md) for design details
-- Examine logs: `docker logs loadequilibrium` or terminal output
-
-# Run dashboard
-cd dashboard
-pnpm install
-pnpm dev
-```
-
-Dashboard will be available at: `http://localhost:3000`
-
-### Docker Deployment
-
-```bash
-# Full stack deployment
-make docker-up
-
-# Services:
-# • Engine:     http://localhost:8080
-# • Prometheus: http://localhost:9090
-
-# View logs
-make docker-logs
-
-# Stop stack
-make docker-down
-```
-
----
-
-## Testing & Validation
-
-LOADEQUILIBRIUM includes a full validation test suite:
-
-```bash
-# Quick 10 minute validation
-make elite-test-quick
-
-# Full 25 minute production grade validation
-make elite-test
-
-# Validate full stack integration
-make elite-test-validate
-
-# View test results
-make elite-test-results
-```
-
-Test reports are written to:
-- `ELITE_TEST_5_5_RESULTS.md`
-- `TESTING_VALIDATION_REPORT.md`
-
----
-
-## Performance Specifications
-
-| Metric | Value |
-|--------|-------|
-| Tick Rate | 10Hz (100ms) / configurable 1-100Hz |
-| Services | 1 - 10,000 |
-| Telemetry Latency | < 1ms end-to-end |
-| Prediction Horizon | 120 seconds |
-| Concurrent WebSocket Clients | 50 |
-| Memory Footprint | < 512MB @ 1000 services |
-| CPU Utilisation | < 1 core @ 1000 services |
-| Tick Deadline | 1800ms default |
-
----
-
-## Configuration
-
-All configuration is done via environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `TICK_INTERVAL` | `2s` | Engine tick interval |
-| `TICK_DEADLINE` | `1800ms` | Hard tick deadline |
-| `MAX_SERVICES` | `200` | Maximum tracked services |
-| `SIM_HORIZON_MS` | `60000` | Simulation horizon |
-| `UTILISATION_SETPOINT` | `0.70` | Target system load |
-| `COLLAPSE_THRESHOLD` | `0.90` | Cascade risk threshold |
-| `INGEST_TOKEN` | - | API authentication token |
-| `DATABASE_URL` | - | Postgres connection string |
-
----
-
-## Developer Onboarding
-
-### Core Concepts
-
-1. **Tick Loop** - All operations run inside a deterministic 10Hz tick loop
-2. **Pipeline Stages** - Each tick executes sequential pipeline stages
-3. **Telemetry Ring Buffer** - All state is kept in memory ring buffer
-4. **Conservation Physics** - All calculations follow strict conservation laws
-5. **Stability Envelope** - Hard boundaries guarantee system stability
-
-### Development Workflow
-
-```bash
-# Run backend with debug logging
-LOG_LEVEL=debug make run
-
-# Run dashboard in dev mode
-cd dashboard && pnpm dev
-
-# Run unit tests
-go test ./internal/...
-
-# Run integration tests
-make elite-test-quick
-```
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-| Problem | Solution |
-|---------|----------|
-| WebSocket disconnects | Increase `MAX_CLIENTS` or reduce connection load |
-| Tick overruns | Reduce `SIM_HORIZON_MS` or reduce service count |
-| High memory usage | Reduce `RING_BUFFER_DEPTH` |
-| Dashboard not connecting | Verify API endpoint in `dashboard/src/hooks/useWebSocket.ts` |
-
-### Logs
-
-```bash
-# Engine logs
-make docker-logs
-
-# All container logs
-make docker-logs-all
-```
-
----
-
-## Validation Reports
-
-Full formal validation documentation:
-- [ELITE TEST 5/5 Final Proof](./ELITE_TEST_5_5_FINAL_PROOF.md)
-- [Testing Validation Report](./TESTING_VALIDATION_REPORT.md)
-- [Dashboard Integration Proof](./DASHBOARD_INTEGRATION_PROOF.md)
-- [Control Binding Proof](./CONTROL_BINDING_PROOF.md)
-- [Implementation Summary](./IMPLEMENTATION_SUMMARY.md)
-
----
-
-## Enterprise Usage
-
-LOADEQUILIBRIUM is designed for:
-- High frequency transaction systems
-- Microservice architectures > 50 services
-- Real-time data pipelines
-- Systems requiring 99.999% uptime
-- Infrastructure teams operating at scale
-
-Enterprise support, custom integration, and training available.
-
----
-
-## Roadmap
-
-✅ **v2.2** - Current stable version
-🔄 **v2.3** - Multi cluster support
-🔄 **v2.4** - Extended prediction horizon
-🔄 **v3.0** - Distributed runtime
-
----
-
-> Stability at scale. Autonomously.
-
----
-
-*Version 2.2_SYNC_CHECK | Generated 2026-04-08*
+See `LICENSE` for terms.

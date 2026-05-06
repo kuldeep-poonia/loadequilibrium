@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loadequilibrium
+  labels:
+    app.kubernetes.io/name: loadequilibrium
+    app.kubernetes.io/managed-by: kubectl

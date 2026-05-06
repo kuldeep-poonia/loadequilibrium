@@ -1,6 +1,9 @@
 services:
   loadequilibrium:
     build: .
+    # In production the CI/CD pipeline pushes ghcr.io/<org>/loadequilibrium:latest.
+    # Uncomment the line below (and remove `build: .`) to deploy from the registry:
+    # image: ghcr.io/<your-org>/loadequilibrium:latest
     ports:
       - "8080:8080"
     environment:
@@ -24,6 +27,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   postgres:
@@ -43,17 +52,46 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.53.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle        # POST /-/reload to hot-reload config
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
     ports:
       - "9090:9090"
+    depends_on:
+      loadequilibrium:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: changeme          # override in production
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadequilibrium.json
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:
   pgdata:
+  promdata:
+  grafanadata:

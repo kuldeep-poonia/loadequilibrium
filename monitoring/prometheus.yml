@@ -1,0 +1,28 @@
+global:
+  scrape_interval:     2s   # matches TICK_INTERVAL — one scrape per control tick
+  evaluation_interval: 2s
+
+# ── Alerting rules ────────────────────────────────────────────────────────────
+# Uncomment and populate if you connect an Alertmanager.
+# rule_files:
+#   - /etc/prometheus/alerts.yml
+
+# ── Scrape targets ────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # loadequilibrium main process — exposes /metrics (Prometheus text format)
+  - job_name: loadequilibrium
+    static_configs:
+      - targets: ["loadequilibrium:8080"]
+    metrics_path: /metrics
+    scrape_timeout: 1s
+    # Re-label: attach git SHA from a label file if present (written by CI deploy)
+    # relabel_configs:
+    #   - source_labels: [__address__]
+    #     target_label: instance
+
+  # Prometheus self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+    scrape_timeout: 5s

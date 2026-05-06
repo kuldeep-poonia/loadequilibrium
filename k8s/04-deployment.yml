@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadequilibrium
+  namespace: loadequilibrium
+  labels:
+    app.kubernetes.io/name: loadequilibrium
+    app.kubernetes.io/version: latest
+  annotations:
+    # CI/CD updates this on every deploy:  kubectl set image ...
+    deployment.kubernetes.io/revision: "1"
+spec:
+  replicas: 1         # loadequilibrium is a singleton control-plane — do not scale >1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0   # zero-downtime: new pod must pass readiness before old dies
+  selector:
+    matchLabels:
+      app: loadequilibrium
+  template:
+    metadata:
+      labels:
+        app: loadequilibrium
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+        prometheus.io/path:   "/metrics"
+    spec:
+      # Run as the non-root 'le' user defined in the Dockerfile
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+
+      # Wait for postgres to be reachable before starting
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres-svc:5432..."
+              until nc -z postgres-svc 5432; do
+                sleep 2
+              done
+              echo "Postgres is ready."
+
+      containers:
+        - name: loadequilibrium
+          image: ghcr.io/your-org/loadequilibrium:latest   # replaced by CI on deploy
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # Non-secret config from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: loadequilibrium-config
+
+          # Secrets injected individually
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: loadequilibrium-secrets
+                  key: database-url
+            - name: INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: loadequilibrium-secrets
+                  key: ingest-token
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          # Graceful shutdown: SIGTERM → tick finishes → exit
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadequilibrium-svc
+  namespace: loadequilibrium
+  labels:
+    app.kubernetes.io/name: loadequilibrium
+spec:
+  selector:
+    app: loadequilibrium
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP

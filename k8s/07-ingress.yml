@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — exposes the three HTTP services on a single hostname via path routing.
+# Requires an ingress controller to be installed (nginx, traefik, etc.).
+#
+# Install nginx ingress controller (if not present):
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+#
+# Update the host values below before applying.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: loadequilibrium-ingress
+  namespace: loadequilibrium
+  labels:
+    app.kubernetes.io/name: loadequilibrium
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # keep WebSocket alive
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  ingressClassName: nginx    # change to your controller class (traefik, etc.)
+  rules:
+    # ── Main API + WebSocket ─────────────────────────────────────────────────
+    - host: le.example.com      # ← CHANGE THIS
+      http:
+        paths:
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: loadequilibrium-svc
+                port:
+                  number: 80
+
+    # ── Grafana dashboard ────────────────────────────────────────────────────
+    - host: grafana.example.com   # ← CHANGE THIS
+      http:
+        paths:
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: grafana-svc
+                port:
+                  number: 3000
+
+    # ── Prometheus (restrict to internal/VPN — do not expose publicly) ───────
+    - host: prometheus.example.com   # ← CHANGE THIS — put behind auth/VPN
+      http:
+        paths:
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: prometheus-svc
+                port:
+                  number: 9090

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
+	"github.com/loadequilibrium/loadequilibrium/internal/metrics"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
 	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
@@ -27,14 +28,19 @@ type Server struct {
 	scen     *scenario.SuperpositionEngine
 	mux      *http.ServeMux
 	upgrader ws.Upgrader
+	metrics  *metrics.Handler
+	Counters *metrics.Counters // exported so runtime can increment scale/tick counters
 }
 
 func NewServer(store *telemetry.Store, hub *streaming.Hub, token string) *Server {
+	counters := &metrics.Counters{}
 	s := &Server{
-		store: store,
-		hub:   hub,
-		token: token,
-		mux:   http.NewServeMux(),
+		store:    store,
+		hub:      hub,
+		token:    token,
+		mux:      http.NewServeMux(),
+		Counters: counters,
+		metrics:  metrics.NewHandler(store, counters),
 		upgrader: ws.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -93,6 +99,9 @@ func (s *Server) routes() {
 			"clients":   s.hub.ClientCount(),
 		})
 	})
+
+	// Prometheus metrics — scraped by prometheus.yml every 2s
+	s.mux.Handle("/metrics", s.metrics)
 }
 
 // corsMiddleware adds CORS headers for dashboard access

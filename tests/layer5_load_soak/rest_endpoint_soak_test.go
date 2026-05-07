@@ -5,10 +5,12 @@ package layer5
 // Tests:   L5-API-001
 // Package: github.com/loadequilibrium/loadequilibrium/internal/api
 // Real functions used:
+//   testsupport.NewAPIRuntime(t, ...) *APIRuntime
 //   api.NewServer(store *telemetry.Store, hub *streaming.Hub, token string) *Server
 //   (*Server).Handler() http.Handler
-//   (*Server).SetOrchestrator(orch *runtime.Orchestrator)   [intentionally not called — tests actuator==nil path]
-//   (*Server).SetActuator(act *actuator.CoalescingActuator) [intentionally not called]
+//   (*Server).SetOrchestrator(orch *runtime.Orchestrator)
+//   (*Server).SetActuator(act *actuator.CoalescingActuator)
+//   (*Server).SetScenarios(scen *scenario.SuperpositionEngine)
 // Real endpoints (from server.go routes()):
 //   GET  /health
 //   GET  /api/v1/snapshot
@@ -25,15 +27,15 @@ package layer5
 // RUN: go test ./tests/layer5_load_soak/ -run TestL5_API_001 -count=1 -timeout=600s -v
 //
 // WHAT THIS TEST DOES:
-//   Starts a real httptest.Server backed by api.NewServer.
+//   Starts a real httptest.Server backed by production-style API runtime wiring.
 //   Sends N concurrent requests to every endpoint for 5 minutes.
 //   Measures p50/p95/p99/p100 latency per endpoint.
 //   Verifies no endpoint returns 5xx, no request panics the server,
 //   and p99 stays under 50ms for fast endpoints.
 //
-// NOTE: Control endpoints (/api/v1/control/*) return 503 when actuator==nil.
-//       This is correct production behaviour — tested and recorded explicitly.
-//       The test does NOT inject a mock actuator; it validates the degraded path.
+// NOTE: Runtime/control endpoints must be wired with orchestrator, actuator, and
+//       scenarios. A partial api.NewServer(store, hub, "") setup is invalid for
+//       this layer because it exercises nil dependency guards instead of the API.
 
 import (
 	"bytes"
@@ -42,29 +44,29 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/loadequilibrium/loadequilibrium/internal/api"
-	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
-	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
+	"github.com/loadequilibrium/loadequilibrium/internal/testsupport"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // L5-API-001 — All REST endpoints under sustained concurrent load for 5 minutes
 //
 // AIM:   Every endpoint must respond within SLA under 50 concurrent workers.
-//        No 5xx errors on endpoints that do not require optional dependencies.
-//        p99 latency < 50ms for all endpoints.
-//        Zero server panics (server stays up for full 5 minutes).
+//
+//	No 5xx errors on endpoints that do not require optional dependencies.
+//	p99 latency < 50ms for all endpoints.
+//	Zero server panics (server stays up for full 5 minutes).
 //
 // THRESHOLD: p99_latency_ms < 50, server_panics == 0, 5xx_on_always_available_endpoints == 0
 // ON EXCEED: API server cannot sustain operator dashboard requests under normal
-//            production concurrent access — dashboard freezes or returns errors.
+//
+//	production concurrent access — dashboard freezes or returns errors.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 	if testing.Short() {
@@ -82,17 +84,12 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 		p99Threshold = 50.0 // ms
 	)
 
-	// ── Build real server — no actuator, no orchestrator injected ─────────────
-	store := telemetry.NewStore(256, 50, 5*time.Minute)
-	hub   := streaming.NewHub()
-	hub.SetMaxClients(100)
-
-	// Token is empty string — auth is disabled per config.go IngestToken default.
-	srv := api.NewServer(store, hub, "")
-	httpSrv := httptest.NewServer(srv.Handler())
-	defer httpSrv.Close()
-
-	base := httpSrv.URL
+	rt := testsupport.NewAPIRuntime(t,
+		testsupport.WithRingBufferDepth(256),
+		testsupport.WithMaxServices(50),
+		testsupport.WithMaxStreamClients(100),
+	)
+	base := rt.HTTPServer.URL
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
@@ -107,7 +104,6 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 		path   string
 		body   string // JSON body for POST requests; empty for GET
 		// acceptedStatuses: list of HTTP status codes that are considered PASS.
-		// Control endpoints return 503 when actuator==nil — this is expected.
 		acceptedStatuses map[int]bool
 	}
 
@@ -124,68 +120,65 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 			// 503 is accepted here because hub has no payload yet (orchestrator not running).
 			acceptedStatuses: map[int]bool{200: true, 503: true},
 		},
-		// Control endpoints — actuator==nil → always 503.
-		// This is correct degraded behaviour. Recorded as "expected_503".
 		{
 			method:           "POST",
 			path:             "/api/v1/control/toggle",
-			acceptedStatuses: map[int]bool{200: true, 503: true},
+			acceptedStatuses: map[int]bool{http.StatusOK: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/control/chaos-run",
-			acceptedStatuses: map[int]bool{200: true, 503: true},
+			acceptedStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/control/replay-burst",
-			acceptedStatuses: map[int]bool{200: true, 503: true},
+			acceptedStatuses: map[int]bool{http.StatusAccepted: true},
 		},
-		// Domain endpoints — always return 200 "accepted".
 		{
 			method:           "POST",
 			path:             "/api/v1/policy/update",
 			body:             `{"preset":"conservative"}`,
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusOK: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/runtime/step",
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusOK: true, http.StatusConflict: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/sandbox/trigger",
 			body:             `{"type":"burst"}`,
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/simulation/control",
 			body:             `{"action":"start"}`,
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/intelligence/rollout",
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			method:           "POST",
 			path:             "/api/v1/alerts/ack",
 			body:             `{"alert_id":"test-alert-001"}`,
-			acceptedStatuses: map[int]bool{200: true},
+			acceptedStatuses: map[int]bool{http.StatusOK: true},
 		},
 	}
 
 	// ── Per-endpoint metric accumulators ─────────────────────────────────────
 	type endpointMetrics struct {
-		mu            sync.Mutex
-		latenciesMs   []float64
-		statusCounts  map[int]int64
+		mu               sync.Mutex
+		latenciesMs      []float64
+		statusCounts     map[int]int64
 		unexpectedStatus int64
-		panics        int64
-		requests      int64
+		panics           int64
+		requests         int64
 	}
 
 	metrics := make([]*endpointMetrics, len(endpoints))
@@ -195,7 +188,7 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 		}
 	}
 
-	// ── Run soak 
+	// ── Run soak
 	ctx, cancel := testContextWithTimeout(soakDuration)
 	defer cancel()
 
@@ -258,9 +251,13 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 		}(w)
 	}
 
-	wg.Wait()
+	<-ctx.Done()
+	cancel()
+	if !waitForL5Workers(&wg, 10*time.Second) {
+		t.Fatal("L5-API-001: timed out waiting for REST workers to stop after context cancellation")
+	}
 
-	// ── Collect results per endpoint 
+	// ── Collect results per endpoint
 	durationMs := time.Since(start).Milliseconds()
 
 	overallPassed := true
@@ -409,12 +406,13 @@ func TestL5_API_001_RESTEndpointSoak(t *testing.T) {
 // L5-API-001b — Server stays alive and correct after 10,000 requests
 //
 // AIM:   A lighter correctness-under-load test. Send 10,000 requests to each
-//        always-available endpoint and verify:
-//        1. /health always returns 200 with valid JSON
-//        2. /api/v1/snapshot returns 200 or 503 (never 500)
-//        3. All POST domain endpoints always return 200 with "accepted" status
-//        4. Wrong method returns 405
-//        5. Server never panics
+//
+//	always-available endpoint and verify:
+//	1. /health always returns 200 with valid JSON
+//	2. /api/v1/snapshot returns 200 or 503 (never 500)
+//	3. Runtime/control POST endpoints return their documented non-5xx statuses
+//	4. Wrong method returns 405
+//	5. Server never panics
 //
 // Runs without -short flag skip because it completes in ~30 seconds.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -427,13 +425,12 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 		workers             = 20
 	)
 
-	store := telemetry.NewStore(256, 50, 5*time.Minute)
-	hub   := streaming.NewHub()
-	srv   := api.NewServer(store, hub, "")
-	httpSrv := httptest.NewServer(srv.Handler())
-	defer httpSrv.Close()
-
-	base   := httpSrv.URL
+	rt := testsupport.NewAPIRuntime(t,
+		testsupport.WithRingBufferDepth(256),
+		testsupport.WithMaxServices(50),
+		testsupport.WithMaxStreamClients(100),
+	)
+	base := rt.HTTPServer.URL
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
@@ -443,11 +440,11 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 	}
 
 	type check struct {
-		name     string
-		method   string
-		path     string
-		body     string
-		wantField string // JSON field that must be "accepted" or "ok"
+		name         string
+		method       string
+		path         string
+		body         string
+		wantField    string
 		wantStatuses map[int]bool
 	}
 
@@ -467,12 +464,12 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 		},
 		{
 			name: "runtime_step", method: "POST", path: "/api/v1/runtime/step",
-			wantField: "status", wantStatuses: map[int]bool{200: true},
+			wantField: "status", wantStatuses: map[int]bool{http.StatusOK: true, http.StatusConflict: true},
 		},
 		{
 			name: "sandbox_trigger", method: "POST", path: "/api/v1/sandbox/trigger",
 			body: `{"type":"stress"}`, wantField: "status",
-			wantStatuses: map[int]bool{200: true},
+			wantStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			name: "sim_control", method: "POST", path: "/api/v1/simulation/control",
@@ -481,7 +478,7 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 		},
 		{
 			name: "intel_rollout", method: "POST", path: "/api/v1/intelligence/rollout",
-			wantField: "status", wantStatuses: map[int]bool{200: true},
+			wantField: "status", wantStatuses: map[int]bool{http.StatusAccepted: true},
 		},
 		{
 			name: "alerts_ack", method: "POST", path: "/api/v1/alerts/ack",
@@ -559,8 +556,9 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 					return
 				}
 
-				// Validate JSON body for endpoints that must return "accepted".
-				if c.wantField != "" && resp.StatusCode == 200 {
+				if c.wantField != "" && (resp.StatusCode == http.StatusOK ||
+					resp.StatusCode == http.StatusAccepted ||
+					resp.StatusCode == http.StatusConflict) {
 					var payload map[string]interface{}
 					if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 						atomic.AddInt64(&results[ci].jsonMismatch, 1)
@@ -571,9 +569,10 @@ func TestL5_API_001b_ServerCorrectnessUnderLoad(t *testing.T) {
 						atomic.AddInt64(&results[ci].jsonMismatch, 1)
 						return
 					}
-					// /health returns "ok"; domain endpoints return "accepted".
 					valStr, _ := val.(string)
-					if valStr != "ok" && valStr != "accepted" {
+					switch valStr {
+					case "ok", "accepted", "applied", "scheduled", "executed", "busy":
+					default:
 						atomic.AddInt64(&results[ci].jsonMismatch, 1)
 					}
 				}

@@ -1,0 +1,101 @@
+[
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 8.632,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 8006110,
+      "throughput_rps": 26686.41065041816,
+      "duration_ms": 300007,
+      "error_messages": [
+        "total_requests=8006110 total_unexpected=0 worst_p99=8.63ms"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=8.63ms across all endpoints"
+    },
+    "run_at": "2026-05-07T02:38:12Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 11299
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "all correct"
+    },
+    "run_at": "2026-05-07T02:38:23Z",
+    "go_version": "go1.26.0"
+  }
+]

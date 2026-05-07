@@ -1,6 +1,5 @@
 package layer5
 
-
 // RUN: go test ./tests/layer5_load_soak/ -run TestL5_TEL -count=1 -timeout=3600s -v
 
 import (
@@ -14,7 +13,6 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 )
-
 
 // L5-TEL-001 — Store.Ingest sustained throughput: 10,000 events/s for 30 minutes
 //
@@ -53,8 +51,7 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 	var (
 		ingestsTotal     int64
 		windowReadsTotal int64
-		windowReadLatMs  []float64
-		windowReadMu     sync.Mutex
+		windowReadLat    = newL5LatencyRecorder(200_000)
 		pruneCount       int64
 	)
 
@@ -69,7 +66,7 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// ── Ingest goroutine: 10 events per 1ms tick = 10,000/s 
+	// ── Ingest goroutine: 10 events per 1ms tick = 10,000/s
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -104,31 +101,30 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 		}
 	}()
 
-	// ── Concurrent AllWindows readers 
+	// ── Concurrent AllWindows readers
 	for w := 0; w < windowReadWorkers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 				}
 				t0 := time.Now()
 				windows := store.AllWindows(100, 30*time.Second)
 				latMs := float64(time.Since(t0).Microseconds()) / 1000.0
 				_ = windows
 				atomic.AddInt64(&windowReadsTotal, 1)
-				windowReadMu.Lock()
-				windowReadLatMs = append(windowReadLatMs, latMs)
-				windowReadMu.Unlock()
-				time.Sleep(10 * time.Millisecond)
+				windowReadLat.Record(latMs)
 			}
 		}()
 	}
 
-	// ── Periodic pruner 
+	// ── Periodic pruner
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -145,7 +141,7 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 		}
 	}()
 
-	// ── Heap sampler 
+	// ── Heap sampler
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -174,16 +170,17 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	<-ctx.Done()
+	ingestCancel()
+	if !waitForL5Workers(&wg, 10*time.Second) {
+		t.Fatal("L5-TEL-001: timed out waiting for ingest/read/prune/sampler goroutines to stop")
+	}
 
-	// ── Final measurements 
+	// ── Final measurements
 	heapFinal := heapBytes()
 	heapGrowth := float64(heapFinal) / float64(heapBaseline+1)
 
-	windowReadMu.Lock()
-	lats := make([]float64, len(windowReadLatMs))
-	copy(lats, windowReadLatMs)
-	windowReadMu.Unlock()
+	lats := windowReadLat.Snapshot()
 
 	windowPct := computePercentiles(lats)
 	finalServiceCount := len(store.ServiceIDs())
@@ -253,11 +250,11 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 		},
 		OnExceed: "Store retains MetricPoints beyond ring buffer capacity → heap grows with ingestion volume → OOM kill",
 		Questions: L5Questions{
-			WhatWasTested:       fmt.Sprintf("Store.Ingest at %d events/s for %s, %d concurrent AllWindows readers", targetEventsPerSec, soakDuration, windowReadWorkers),
-			WhyThisThreshold:    "1.5x: ring buffers fixed-size, heap stabilises after warm-up; >1.5x means entries retained beyond capacity",
-			WhatHappensIfFails:  "Memory grows proportional to ingestion volume → OOM kill in production",
-			HowLoadWasGenerated: fmt.Sprintf("1ms ticker × 10 events/tick = %d events/s across %d services", targetEventsPerSec, serviceCount),
-			HowMetricsMeasured:  "runtime.MemStats.HeapInuse sampled every 30s with forced GC",
+			WhatWasTested:        fmt.Sprintf("Store.Ingest at %d events/s for %s, %d concurrent AllWindows readers", targetEventsPerSec, soakDuration, windowReadWorkers),
+			WhyThisThreshold:     "1.5x: ring buffers fixed-size, heap stabilises after warm-up; >1.5x means entries retained beyond capacity",
+			WhatHappensIfFails:   "Memory grows proportional to ingestion volume → OOM kill in production",
+			HowLoadWasGenerated:  fmt.Sprintf("1ms ticker × 10 events/tick = %d events/s across %d services", targetEventsPerSec, serviceCount),
+			HowMetricsMeasured:   "runtime.MemStats.HeapInuse sampled every 30s with forced GC",
 			WorstCaseDescription: fmt.Sprintf("heap_growth=%.4fx window_p99=%.2fms", heapGrowth, windowPct.P99Ms),
 		},
 		RunAt: l5Now(), GoVersion: l5GoVer(),
@@ -274,7 +271,6 @@ func TestL5_TEL_001_StoreIngestSoak(t *testing.T) {
 	t.Logf("L5-TEL-001 PASS | ingests=%d heap_growth=%.4fx window_p99=%.2fms",
 		finalIngests, heapGrowth, windowPct.P99Ms)
 }
-
 
 // L5-TEL-002 — Hub.GetLastPayload latency under 100 concurrent readers + 10Hz broadcast
 //
@@ -304,11 +300,10 @@ func TestL5_TEL_002_SnapshotReadLatencyUnderConcurrentBroadcast(t *testing.T) {
 	})
 
 	var (
-		readLatenciesMs []float64
-		latMu           sync.Mutex
-		readsDone       int64
-		nilReads        int64
-		panics          int64
+		readLatencies = newL5LatencyRecorder(200_000)
+		readsDone     int64
+		nilReads      int64
+		panics        int64
 	)
 
 	ctx, cancel := testContextWithTimeout(time.Duration(testDurationS) * time.Second)
@@ -339,9 +334,7 @@ func TestL5_TEL_002_SnapshotReadLatencyUnderConcurrentBroadcast(t *testing.T) {
 				if p == nil {
 					atomic.AddInt64(&nilReads, 1)
 				}
-				latMu.Lock()
-				readLatenciesMs = append(readLatenciesMs, latMs)
-				latMu.Unlock()
+				readLatencies.Record(latMs)
 			}
 		}(r)
 	}
@@ -366,22 +359,23 @@ func TestL5_TEL_002_SnapshotReadLatencyUnderConcurrentBroadcast(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	<-ctx.Done()
+	cancel()
+	if !waitForL5Workers(&wg, 10*time.Second) {
+		t.Fatal("L5-TEL-002: timed out waiting for readers/broadcaster to stop")
+	}
 
-	latMu.Lock()
-	lats := make([]float64, len(readLatenciesMs))
-	copy(lats, readLatenciesMs)
-	latMu.Unlock()
+	lats := readLatencies.Snapshot()
 
 	pct := computePercentiles(lats)
 	passed := pct.P99Ms < p99Threshold && panics == 0
 	durationMs := time.Since(start).Milliseconds()
 
 	writeL5Result(L5Record{
-		TestID: "L5-TEL-002",
-		Layer:  5,
-		Name:   fmt.Sprintf("Hub.GetLastPayload: %d readers + %dHz broadcast for %ds", readers, broadcastHz, testDurationS),
-		Aim:    fmt.Sprintf("%d concurrent GetLastPayload callers while Broadcast at %dHz: p99 < %.0fms", readers, broadcastHz, p99Threshold),
+		TestID:           "L5-TEL-002",
+		Layer:            5,
+		Name:             fmt.Sprintf("Hub.GetLastPayload: %d readers + %dHz broadcast for %ds", readers, broadcastHz, testDurationS),
+		Aim:              fmt.Sprintf("%d concurrent GetLastPayload callers while Broadcast at %dHz: p99 < %.0fms", readers, broadcastHz, p99Threshold),
 		PackagesInvolved: []string{"internal/streaming"},
 		FunctionsTested:  []string{"(*Hub).GetLastPayload", "(*Hub).Broadcast"},
 		Threshold: L5Threshold{
@@ -389,13 +383,13 @@ func TestL5_TEL_002_SnapshotReadLatencyUnderConcurrentBroadcast(t *testing.T) {
 			Rationale: "/api/v1/snapshot calls GetLastPayload — must be fast for dashboard first-load",
 		},
 		Result: L5ResultData{
-			Status:        l5Status(passed),
-			ActualValue:   pct.P99Ms,
-			ActualUnit:    "p99_ms",
-			SampleCount:   int(readsDone),
-			Percentiles:   &pct,
-			ErrorCount:    panics,
-			DurationMs:    durationMs,
+			Status:      l5Status(passed),
+			ActualValue: pct.P99Ms,
+			ActualUnit:  "p99_ms",
+			SampleCount: int(readsDone),
+			Percentiles: &pct,
+			ErrorCount:  panics,
+			DurationMs:  durationMs,
 			ErrorMessages: []string{fmt.Sprintf(
 				"reads=%d nil=%d panics=%d p50=%.3fms p99=%.3fms p100=%.3fms",
 				readsDone, nilReads, panics, pct.P50Ms, pct.P99Ms, pct.P100Ms,
@@ -403,11 +397,11 @@ func TestL5_TEL_002_SnapshotReadLatencyUnderConcurrentBroadcast(t *testing.T) {
 		},
 		OnExceed: "GetLastPayload blocks → /snapshot HTTP responses pile up → dashboard first-load timeout",
 		Questions: L5Questions{
-			WhatWasTested:       fmt.Sprintf("%d goroutines tight-looping GetLastPayload for %ds while 1 broadcaster at %dHz", readers, testDurationS, broadcastHz),
-			WhyThisThreshold:    "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
-			WhatHappensIfFails:  "REST /snapshot endpoint latency > 1ms → dashboard HTTP timeout on initial load",
-			HowLoadWasGenerated: fmt.Sprintf("%d readers in tight loop + %dHz broadcaster", readers, broadcastHz),
-			HowMetricsMeasured:  "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
+			WhatWasTested:        fmt.Sprintf("%d goroutines tight-looping GetLastPayload for %ds while 1 broadcaster at %dHz", readers, testDurationS, broadcastHz),
+			WhyThisThreshold:     "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
+			WhatHappensIfFails:   "REST /snapshot endpoint latency > 1ms → dashboard HTTP timeout on initial load",
+			HowLoadWasGenerated:  fmt.Sprintf("%d readers in tight loop + %dHz broadcaster", readers, broadcastHz),
+			HowMetricsMeasured:   "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
 			WorstCaseDescription: fmt.Sprintf("p99=%.3fms reads=%d", pct.P99Ms, readsDone),
 		},
 		RunAt: l5Now(), GoVersion: l5GoVer(),

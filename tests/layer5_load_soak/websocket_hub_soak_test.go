@@ -1,6 +1,5 @@
 package layer5
 
-
 // RUN:
 //   go test ./tests/layer5_load_soak/ -run TestL5_WS_001 -count=1 -timeout=1200s -v
 
@@ -11,18 +10,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/loadequilibrium/loadequilibrium/internal/api"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
-	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
+	"github.com/loadequilibrium/loadequilibrium/internal/testsupport"
 )
-
 
 // L5-WS-001 — WebSocket hub: 50 clients for 30 minutes, delivery latency SLA
 //
@@ -46,21 +42,20 @@ func TestL5_WS_001_HubDeliveryLatencySoak(t *testing.T) {
 	const (
 		clientCount  = 50
 		soakDuration = 30 * time.Minute
-		broadcastHz  = 1  // 1 payload per second
+		broadcastHz  = 1 // 1 payload per second
 		p99Threshold = 100.0
 		p95Threshold = 50.0
 	)
 
-	// ── Build real server and hub 
-	store  := telemetry.NewStore(256, 50, 5*time.Minute)
-	hub    := streaming.NewHub()
-	hub.SetMaxClients(clientCount + 10)
+	rt := testsupport.NewAPIRuntime(t,
+		testsupport.WithRingBufferDepth(256),
+		testsupport.WithMaxServices(50),
+		testsupport.WithMaxStreamClients(clientCount+10),
+		testsupport.WithStartedOrchestrator(false),
+	)
+	hub := rt.Hub
 
-	srv    := api.NewServer(store, hub, "")
-	httpSrv := httptest.NewServer(srv.Handler())
-	defer httpSrv.Close()
-
-	wsAddr := "ws://" + strings.TrimPrefix(httpSrv.URL, "http://") + "/ws"
+	wsAddr := "ws://" + strings.TrimPrefix(rt.HTTPServer.URL, "http://") + "/ws"
 
 	// ── Connect all clients
 	type wsClient struct {
@@ -89,10 +84,10 @@ func TestL5_WS_001_HubDeliveryLatencySoak(t *testing.T) {
 
 	// ── Measure latencies per client ──────────────────────────────────────────
 	var (
-		totalDelivered    int64
-		totalDropped      int64
-		allLatenciesMu    sync.Mutex
-		allLatenciesMs    []float64
+		totalDelivered int64
+		totalDropped   int64
+		allLatenciesMu sync.Mutex
+		allLatenciesMs []float64
 	)
 
 	// Start reader goroutines — one per client.
@@ -137,9 +132,9 @@ func TestL5_WS_001_HubDeliveryLatencySoak(t *testing.T) {
 
 	// ── Broadcast at 1Hz for soak duration ───────────────────────────────────
 	broadcastTicker := time.NewTicker(time.Duration(1000/broadcastHz) * time.Millisecond)
-	soakTimer       := time.After(soakDuration)
-	broadcastCount  := 0
-	initialClients  := hub.ClientCount()
+	soakTimer := time.After(soakDuration)
+	broadcastCount := 0
+	initialClients := hub.ClientCount()
 
 	for {
 		select {
@@ -150,7 +145,7 @@ func TestL5_WS_001_HubDeliveryLatencySoak(t *testing.T) {
 				Type:         streaming.MsgTick,
 				TickHealthMs: float64(broadcastCount) * 0.001,
 				RuntimeMetrics: streaming.RuntimeMetrics{
-					AvgPruneMs:     float64(broadcastCount % 100) * 0.01,
+					AvgPruneMs:     float64(broadcastCount%100) * 0.01,
 					AvgModellingMs: float64(broadcastCount%50) * 0.02,
 				},
 			}
@@ -172,13 +167,13 @@ func TestL5_WS_001_HubDeliveryLatencySoak(t *testing.T) {
 soakDone:
 	broadcastTicker.Stop()
 
-	// Close all client connections to unblock reader goroutines.
+	// Close all client connections to unblock reader goroutines deterministically.
 	for _, c := range clients {
 		c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	}
-	readerWg.Wait()
-	for _, c := range clients {
 		c.conn.Close()
+	}
+	if !waitForL5Workers(&readerWg, 5*time.Second) {
+		t.Fatal("L5-WS-001: timed out waiting for WebSocket reader goroutines to stop")
 	}
 
 	// ── Compute metrics ───────────────────────────────────────────────────────
@@ -221,14 +216,14 @@ soakDone:
 			Rationale: "Dashboard must receive tick payloads within 100ms p99 to show near-real-time metrics",
 		},
 		Result: L5ResultData{
-			Status:        l5Status(passed),
-			ActualValue:   pct.P99Ms,
-			ActualUnit:    "p99_delivery_ms",
-			SampleCount:   int(delivered),
-			Percentiles:   &pct,
-			ErrorCount:    dropped,
-			ErrorRate:     float64(dropped) / float64(max64(int64(broadcastCount)*int64(clientCount), 1)),
-			DurationMs:    durationMs,
+			Status:      l5Status(passed),
+			ActualValue: pct.P99Ms,
+			ActualUnit:  "p99_delivery_ms",
+			SampleCount: int(delivered),
+			Percentiles: &pct,
+			ErrorCount:  dropped,
+			ErrorRate:   float64(dropped) / float64(max64(int64(broadcastCount)*int64(clientCount), 1)),
+			DurationMs:  durationMs,
 			ErrorMessages: []string{fmt.Sprintf(
 				"broadcasts=%d clients=%d delivered=%d expected=%d dropped_clients=%d",
 				broadcastCount, clientCount, delivered, expectedDeliveries, dropped,
@@ -267,8 +262,9 @@ soakDone:
 // L5-WS-001b — Hub max client cap enforced: beyond cap returns 503
 //
 // AIM:   With maxClients=5, the 6th connection attempt must receive HTTP 503.
-//        Existing 5 connections must continue receiving broadcasts.
-//        No panic when cap is hit.
+//
+//	Existing 5 connections must continue receiving broadcasts.
+//	No panic when cap is hit.
 //
 // THRESHOLD: rejected_6th_client == true (503), existing_clients_unaffected == true
 // ON EXCEED: Hub accepts unlimited clients → server OOM under connection flood.
@@ -278,15 +274,15 @@ func TestL5_WS_001b_HubMaxClientCapEnforced(t *testing.T) {
 
 	const maxClients = 5
 
-	store  := telemetry.NewStore(64, 10, time.Minute)
-	hub    := streaming.NewHub()
-	hub.SetMaxClients(maxClients)
+	rt := testsupport.NewAPIRuntime(t,
+		testsupport.WithRingBufferDepth(64),
+		testsupport.WithMaxServices(10),
+		testsupport.WithMaxStreamClients(maxClients),
+		testsupport.WithStartedOrchestrator(false),
+	)
+	hub := rt.Hub
 
-	srv     := api.NewServer(store, hub, "")
-	httpSrv := httptest.NewServer(srv.Handler())
-	defer httpSrv.Close()
-
-	wsURL := "ws://" + strings.TrimPrefix(httpSrv.URL, "http://") + "/ws"
+	wsURL := "ws://" + strings.TrimPrefix(rt.HTTPServer.URL, "http://") + "/ws"
 
 	// Connect exactly maxClients clients.
 	accepted := make([]net.Conn, 0, maxClients)
@@ -352,10 +348,10 @@ func TestL5_WS_001b_HubMaxClientCapEnforced(t *testing.T) {
 	}
 
 	writeL5Result(L5Record{
-		TestID: "L5-WS-001b",
-		Layer:  5,
-		Name:   "Hub max client cap enforced at connection time",
-		Aim:    fmt.Sprintf("With maxClients=%d, the %dth connection must be rejected (HTTP 503)", maxClients, maxClients+1),
+		TestID:           "L5-WS-001b",
+		Layer:            5,
+		Name:             "Hub max client cap enforced at connection time",
+		Aim:              fmt.Sprintf("With maxClients=%d, the %dth connection must be rejected (HTTP 503)", maxClients, maxClients+1),
 		PackagesInvolved: []string{"internal/streaming", "internal/api"},
 		FunctionsTested: []string{
 			"(*Hub).SetMaxClients", "(*Hub).HandleUpgrade (cap enforcement)",
@@ -368,8 +364,13 @@ func TestL5_WS_001b_HubMaxClientCapEnforced(t *testing.T) {
 			Rationale: "Unbounded client acceptance leads to OOM under connection flood",
 		},
 		Result: L5ResultData{
-			Status:        l5Status(passed),
-			ActualValue:   func() float64 { if rejected { return 1 }; return 0 }(),
+			Status: l5Status(passed),
+			ActualValue: func() float64 {
+				if rejected {
+					return 1
+				}
+				return 0
+			}(),
 			ActualUnit:    "rejected",
 			SampleCount:   maxClients + 1,
 			DurationMs:    durationMs,
@@ -489,7 +490,7 @@ func (b *l5BufConn) SetReadDeadline(t time.Time) error  { return b.conn.SetReadD
 func (b *l5BufConn) SetWriteDeadline(t time.Time) error { return b.conn.SetWriteDeadline(t) }
 func (b *l5BufConn) LocalAddr() net.Addr                { return b.conn.LocalAddr() }
 func (b *l5BufConn) RemoteAddr() net.Addr               { return b.conn.RemoteAddr() }
-func (b *l5BufConn) SetDeadline(t time.Time) error       { return b.conn.SetDeadline(t) }
+func (b *l5BufConn) SetDeadline(t time.Time) error      { return b.conn.SetDeadline(t) }
 
 func l5ReadWSFrame(conn net.Conn) ([]byte, error) {
 	var header [2]byte
@@ -532,7 +533,7 @@ func l5ReadWSFrame(conn net.Conn) ([]byte, error) {
 			data[i] = b ^ maskKey[i%4]
 		}
 	}
-	
+
 	opcode := header[0] & 0x0f
 	if opcode == 0x9 {
 		// Reply with masked Pong (FIN=1, opcode=0xA, MASK=1, payloadLen=0, maskKey=[0,0,0,0])

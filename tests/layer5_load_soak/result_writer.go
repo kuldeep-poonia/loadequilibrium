@@ -4,6 +4,7 @@ package layer5
 // Module: github.com/loadequilibrium/loadequilibrium
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-// ─── Result schema 
+// ─── Result schema
 
 type L5Threshold struct {
 	Metric    string  `json:"metric"`
@@ -32,16 +33,16 @@ type L5Percentiles struct {
 }
 
 type L5ResultData struct {
-	Status          string         `json:"status"`
-	ActualValue     float64        `json:"actual_value"`
-	ActualUnit      string         `json:"actual_unit"`
-	SampleCount     int            `json:"sample_count"`
-	Percentiles     *L5Percentiles `json:"percentiles,omitempty"`
-	ThroughputRps   float64        `json:"throughput_rps,omitempty"`
-	ErrorCount      int64          `json:"error_count,omitempty"`
-	ErrorRate       float64        `json:"error_rate,omitempty"`
-	DurationMs      int64          `json:"duration_ms"`
-	ErrorMessages   []string       `json:"error_messages,omitempty"`
+	Status        string         `json:"status"`
+	ActualValue   float64        `json:"actual_value"`
+	ActualUnit    string         `json:"actual_unit"`
+	SampleCount   int            `json:"sample_count"`
+	Percentiles   *L5Percentiles `json:"percentiles,omitempty"`
+	ThroughputRps float64        `json:"throughput_rps,omitempty"`
+	ErrorCount    int64          `json:"error_count,omitempty"`
+	ErrorRate     float64        `json:"error_rate,omitempty"`
+	DurationMs    int64          `json:"duration_ms"`
+	ErrorMessages []string       `json:"error_messages,omitempty"`
 }
 
 type L5Questions struct {
@@ -68,7 +69,7 @@ type L5Record struct {
 	GoVersion        string       `json:"go_version"`
 }
 
-// ─── Writer 
+// ─── Writer
 
 var (
 	l5Mu      sync.Mutex
@@ -90,7 +91,7 @@ func writeL5Result(r L5Record) {
 	}
 }
 
-// ─── Helpers 
+// ─── Helpers
 
 func l5Now() string   { return time.Now().UTC().Format(time.RFC3339) }
 func l5GoVer() string { return runtime.Version() }
@@ -140,27 +141,67 @@ func heapBytes() uint64 {
 	return ms.HeapInuse
 }
 
-type testCtx struct {
-	done <-chan struct{}
+func testContextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
 }
 
-func (t testCtx) Done() <-chan struct{} {
-	return t.done
-}
-
-// testContextWithTimeout returns a context that expires after d.
-// Defined here to avoid importing context in every file.
-func testContextWithTimeout(d time.Duration) (testCtx, func()) {
+func waitForL5Workers(wg *sync.WaitGroup, timeout time.Duration) bool {
 	done := make(chan struct{})
-	timer := time.AfterFunc(d, func() {
+	go func() {
+		wg.Wait()
 		close(done)
-	})
-	return testCtx{done: done}, func() {
-		timer.Stop()
-		select {
-		case <-done:
-		default:
-			close(done)
-		}
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
+}
+
+type l5LatencyRecorder struct {
+	mu     sync.Mutex
+	values []float64
+	next   int
+	full   bool
+}
+
+func newL5LatencyRecorder(capacity int) *l5LatencyRecorder {
+	if capacity <= 0 {
+		capacity = 1
+	}
+	return &l5LatencyRecorder{
+		values: make([]float64, 0, capacity),
+	}
+}
+
+func (r *l5LatencyRecorder) Record(ms float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.values) < cap(r.values) {
+		r.values = append(r.values, ms)
+		return
+	}
+	r.values[r.next] = ms
+	r.next = (r.next + 1) % len(r.values)
+	r.full = true
+}
+
+func (r *l5LatencyRecorder) Snapshot() []float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.values) == 0 {
+		return nil
+	}
+	out := make([]float64, len(r.values))
+	if !r.full {
+		copy(out, r.values)
+		return out
+	}
+	copy(out, r.values[r.next:])
+	copy(out[len(r.values)-r.next:], r.values[:r.next])
+	return out
 }

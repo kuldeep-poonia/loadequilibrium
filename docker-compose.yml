@@ -1,9 +1,10 @@
 services:
+
+  # ─── Core control plane ──────────────────────────────────────────────────────
   loadequilibrium:
-    build: .
-    # In production the CI/CD pipeline pushes ghcr.io/<org>/loadequilibrium:latest.
-    # Uncomment the line below (and remove `build: .`) to deploy from the registry:
-    # image: ghcr.io/<your-org>/loadequilibrium:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
@@ -22,8 +23,8 @@ services:
       EWMA_FAST_ALPHA: "0.30"
       EWMA_SLOW_ALPHA: "0.10"
       SPIKE_Z_SCORE: "3.0"
-      INGEST_TOKEN: "changeme-set-in-production"
-      DATABASE_URL: "postgres://le:le@postgres:5432/le?sslmode=disable"
+      INGEST_TOKEN: "${INGEST_TOKEN:-changeme-set-in-production}"
+      DATABASE_URL: "${DATABASE_URL:-postgres://le:le@postgres:5432/le?sslmode=disable}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,7 +35,42 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    networks:
+      - internal
 
+  # ─── Automatic telemetry collector ────────────────────────────────────────
+  le-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+    ports:
+      - "9091:9091"
+    environment:
+      LE_COLLECTOR_LISTEN_ADDR: ":9091"
+      DOCKER_HOST: "unix:///var/run/docker.sock"
+      LE_INGEST_URL: "http://loadequilibrium:8080/api/v1/ingest"
+      INGEST_TOKEN: "${INGEST_TOKEN:-changeme-set-in-production}"
+      LE_DISCOVERY_INTERVAL: "15s"
+      LE_SCRAPE_INTERVAL: "2s"
+      LE_SCRAPE_TIMEOUT: "1500ms"
+      LE_BATCH_MAX_POINTS: "128"
+      LE_BATCH_MAX_AGE: "2s"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loadequilibrium:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9091/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ─── Postgres ─────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
@@ -53,45 +89,86 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    networks:
+      - internal
 
+  # ─── Dashboard (temporarily disabled) ─────────────────────────────────────
+  #
+  # dashboard:
+  #   build:
+  #     context: ./dashboard
+  #     dockerfile: Dockerfile
+  #     args:
+  #       NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     NODE_ENV: production
+  #     NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
+  #   depends_on:
+  #     loadequilibrium:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 30s
+  #   restart: unless-stopped
+  #   networks:
+  #     - internal
+
+  # ─── Prometheus ───────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.53.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
-      - --web.enable-lifecycle        # POST /-/reload to hot-reload config
+      - --web.enable-lifecycle
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - promdata:/prometheus
     ports:
       - "9090:9090"
     depends_on:
       loadequilibrium:
         condition: service_healthy
+      le-collector:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - internal
 
+  # ─── Grafana ──────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.0
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: changeme          # override in production
+      GF_SECURITY_ADMIN_PASSWORD: changeme
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadequilibrium.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadequilibrium-dashboard.json
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./monitoring/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./monitoring/grafana/loadequilibrium-dashboard.json:/var/lib/grafana/dashboards/loadequilibrium-dashboard.json:ro
       - grafanadata:/var/lib/grafana
     ports:
       - "3000:3000"
     depends_on:
       - prometheus
     restart: unless-stopped
+    networks:
+      - internal
 
 volumes:
   pgdata:
   promdata:
   grafanadata:
+
+networks:
+  internal:
+    driver: bridge

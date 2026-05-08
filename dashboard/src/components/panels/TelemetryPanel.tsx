@@ -16,6 +16,8 @@ import type { TelemetryPoint } from "@/hooks/useTelemetryHistory";
 import { Card, EmptyState } from "@/components/ui";
 import { ms, pct, rho } from "@/services/format";
 
+import { fixed } from "@/services/format";
+
 interface Props {
   tick: TickPayload;
   history: TelemetryPoint[];
@@ -227,9 +229,9 @@ export function TelemetryPanel({ tick, history }: Props) {
                 return (
                   <tr key={id} className="border-b border-surface-2 hover:bg-surface-2 transition-colors">
                     <td className="px-3 py-1.5 text-text-primary">{id}</td>
-                    <td className="px-3 py-1.5 text-text-secondary">{sig.fast_ewma.toFixed(4)}</td>
-                    <td className="px-3 py-1.5 text-text-secondary">{sig.slow_ewma.toFixed(4)}</td>
-                    <td className="px-3 py-1.5 text-text-secondary">{sig.ewma_variance.toFixed(6)}</td>
+                    <td className="px-3 py-1.5 text-text-secondary">{fixed(sig.fast_ewma, 4)}</td>
+                    <td className="px-3 py-1.5 text-text-secondary">{fixed(sig.slow_ewma, 4)}</td>
+                    <td className="px-3 py-1.5 text-text-secondary">{fixed(sig.ewma_variance, 6)}</td>
                     <td className="px-3 py-1.5">
                       {sig.spike_detected ? <span className="text-warning">⚡ YES</span> : <span className="text-text-tertiary">—</span>}
                     </td>

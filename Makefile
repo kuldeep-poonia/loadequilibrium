@@ -1,4 +1,4 @@
-.PHONY: build run clean docker-up docker-down elite-test elite-test-validate
+.PHONY: build build-collector run clean docker-up docker-down elite-test elite-test-validate
 
 GO ?= go
 BIN_DIR ?= bin
@@ -8,6 +8,10 @@ PYTHON ?= python3
 build:
 	mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 $(GO) build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY) ./cmd/loadequilibrium/
+
+build-collector:
+	mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build -ldflags="-s -w" -o $(BIN_DIR)/le-collector ./cmd/le-collector/
 
 run:
 	$(GO) run ./cmd/loadequilibrium/

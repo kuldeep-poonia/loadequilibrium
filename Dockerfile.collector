@@ -1,0 +1,16 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /build
+COPY go.mod ./
+COPY . .
+
+RUN go build -ldflags="-s -w" -o le-collector ./cmd/le-collector/
+
+FROM alpine:3.19
+
+WORKDIR /app
+COPY --from=builder /build/le-collector .
+
+EXPOSE 9091
+
+ENTRYPOINT ["./le-collector"]

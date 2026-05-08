@@ -21,8 +21,15 @@ scrape_configs:
     #   - source_labels: [__address__]
     #     target_label: instance
 
+  # LE Collector self-monitoring
+  - job_name: le-collector
+    static_configs:
+      - targets: ["le-collector:9091"]
+    metrics_path: /metrics
+    scrape_timeout: 1s
+
   # Prometheus self-monitoring
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
-    scrape_timeout: 5s
+    scrape_timeout: 1s

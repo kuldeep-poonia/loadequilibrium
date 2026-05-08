@@ -13,9 +13,12 @@ import {
 } from "recharts";
 import type { TickPayload } from "@/types/tick";
 import { Card, Badge, Button, EmptyState, ErrorBanner } from "@/components/ui";
-import { pct, ms } from "@/services/format";
+import { pct, ms, fixed } from "@/services/format";
 import { api } from "@/services/api";
 import { useMutation } from "@/hooks/useMutation";
+
+
+
 
 interface Props {
   tick: TickPayload;
@@ -195,8 +198,8 @@ export function IntelligencePanel({ tick }: Props) {
                   return (
                     <tr key={id} className="border-b border-surface-2 hover:bg-surface-2">
                       <td className="px-3 py-1.5 text-text-primary">{id}</td>
-                      <td className={`px-3 py-1.5 ${s.arrival_co_v > 1 ? "text-warning" : "text-text-secondary"}`}>{s.arrival_co_v.toFixed(4)}</td>
-                      <td className={`px-3 py-1.5 ${s.burst_amplification > 2 ? "text-danger" : "text-text-secondary"}`}>{s.burst_amplification.toFixed(4)}</td>
+                      <td className={`px-3 py-1.5 ${s.arrival_co_v > 1 ? "text-warning" : "text-text-secondary"}`}>{fixed(s.arrival_co_v, 4)}</td>
+                      <td className={`px-3 py-1.5 ${s.burst_amplification > 2 ? "text-danger" : "text-text-secondary"}`}>{fixed(s.burst_amplification, 4)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{pct(s.risk_propagation)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{pct(s.confidence)}</td>
                     </tr>
@@ -228,11 +231,12 @@ export function IntelligencePanel({ tick }: Props) {
                   return (
                     <tr key={id} className="border-b border-surface-2 hover:bg-surface-2">
                       <td className="px-3 py-1.5 text-text-primary">{id}</td>
-                      <td className={`px-3 py-1.5 ${q.utilisation > 0.9 ? "text-danger" : q.utilisation > 0.7 ? "text-warning" : "text-text-secondary"}`}>{q.utilisation.toFixed(4)}</td>
-                      <td className={`px-3 py-1.5 ${q.utilisation_trend > 0 ? "text-warning" : "text-success"}`}>{q.utilisation_trend > 0 ? "↑" : "↓"} {Math.abs(q.utilisation_trend).toFixed(4)}</td>
-                      <td className="px-3 py-1.5 text-text-secondary">{q.mean_queue_len.toFixed(2)}</td>
+                      <td className={`px-3 py-1.5 ${q.utilisation > 0.9 ? "text-danger" : q.utilisation > 0.7 ? "text-warning" : "text-text-secondary"}`}>{fixed(q.utilisation, 4)}</td>
+                      <td className={`px-3 py-1.5 ${q.utilisation_trend > 0 ? "text-warning" : "text-success"}`}>{(q.utilisation_trend ?? 0) > 0 ? "↑" : "↓"} {fixed(Math.abs(q.utilisation_trend ?? 0), 4)}
+</td>
+                      <td className="px-3 py-1.5 text-text-secondary">{fixed(q.mean_queue_len, 2)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{ms(q.adjusted_wait_ms)}</td>
-                      <td className={`px-3 py-1.5 ${q.burst_factor > 2 ? "text-warning" : "text-text-secondary"}`}>{q.burst_factor.toFixed(3)}</td>
+                      <td className={`px-3 py-1.5 ${q.burst_factor > 2 ? "text-warning" : "text-text-secondary"}`}>{fixed(q.burst_factor, 3)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{pct(q.upstream_pressure)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{pct(q.confidence)}</td>
                       <td className="px-3 py-1.5 text-text-tertiary">—</td>

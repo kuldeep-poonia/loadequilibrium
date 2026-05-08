@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import type { TickPayload } from "@/types/tick";
 import { Card, StatRow, EmptyState } from "@/components/ui";
-import { pct, ms } from "@/services/format";
+import { pct, ms, fixed } from "@/services/format";
 
 interface Props {
   tick: TickPayload;
@@ -41,7 +41,11 @@ export function ControlPanel({ tick }: Props) {
     };
   });
 
-  const scatterData = feedbackData.map((d) => ({ rho: +d.rho.toFixed(3), error: +d.error.toFixed(4), id: d.id }));
+  const scatterData = feedbackData.map((d) => ({
+  rho: +(d.rho ?? 0).toFixed(3),
+  error: +(d.error ?? 0).toFixed(4),
+  id: d.id,
+}));
 
   return (
     <div className="p-4 flex flex-col gap-3 animate-fadein overflow-y-auto">
@@ -114,13 +118,14 @@ export function ControlPanel({ tick }: Props) {
                   return (
                     <tr key={d.id} className="border-b border-surface-2 hover:bg-surface-2">
                       <td className="px-2 py-1.5 text-text-primary">{d.id}</td>
-                      <td className={`px-2 py-1.5 ${d.rho > 0.9 ? "text-danger" : d.rho > 0.7 ? "text-warning" : "text-text-secondary"}`}>{d.rho.toFixed(4)}</td>
-                      <td className="px-2 py-1.5 text-text-secondary">{d.target.toFixed(4)}</td>
-                      <td className={`px-2 py-1.5 ${Math.abs(d.error) > 0.1 ? "text-warning" : "text-text-secondary"}`}>{d.error.toFixed(4)}</td>
-                      <td className={`px-2 py-1.5 ${d.scale > 1.1 ? "text-brand" : "text-text-secondary"}`}>{d.scale.toFixed(4)}</td>
-                      <td className="px-2 py-1.5 text-text-secondary">{d.pid.toFixed(4)}</td>
-                      <td className={`px-2 py-1.5 ${d.cascadeAmp > 1 ? "text-warning" : "text-text-secondary"}`}>{d.cascadeAmp.toFixed(4)}</td>
-                      <td className="px-2 py-1.5 text-text-secondary">{d.feedbackGain.toFixed(4)}</td>
+                      <td className={`px-2 py-1.5 ${d.rho > 0.9 ? "text-danger" : d.rho > 0.7 ? "text-warning" : "text-text-secondary"}`}>{fixed(d.rho, 4)}</td>
+                      <td className="px-2 py-1.5 text-text-secondary">{fixed(d.target, 4)}
+</td>
+                      <td className={`px-2 py-1.5 ${Math.abs(d.error) > 0.1 ? "text-warning" : "text-text-secondary"}`}>{fixed(d.error, 4)}</td>
+                      <td className={`px-2 py-1.5 ${d.scale > 1.1 ? "text-brand" : "text-text-secondary"}`}>{fixed(d.scale, 4)}</td>
+                      <td className="px-2 py-1.5 text-text-secondary">{fixed(d.pid, 4)}</td>
+                      <td className={`px-2 py-1.5 ${d.cascadeAmp > 1 ? "text-warning" : "text-text-secondary"}`}>{fixed(d.cascadeAmp, 4)}</td>
+                      <td className="px-2 py-1.5 text-text-secondary">{fixed(d.feedbackGain, 4)}</td>
                       <td className={`px-2 py-1.5 ${d.hazard > 0.7 ? "text-danger" : "text-text-secondary"}`}>{d.hazard.toFixed(4)}</td>
                       <td className="px-2 py-1.5 text-text-secondary">{d.reservoir.toFixed(4)}</td>
                       <td className="px-2 py-1.5 text-text-secondary">{q.arrival_rate.toFixed(2)}</td>

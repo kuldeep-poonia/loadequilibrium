@@ -156,10 +156,10 @@ export function AutopilotPanel({ tick }: Props) {
                       <td className="px-3 py-1.5 text-text-secondary">{fixed(s.stability_margin)}</td>
                       <td className={`px-3 py-1.5 ${s.collapse_risk > 0.7 ? "text-danger" : "text-text-secondary"}`}>{pct(s.collapse_risk)}</td>
                       <td className="px-3 py-1.5 text-text-secondary">{pct(s.oscillation_risk)}</td>
-                      <td className={`px-3 py-1.5 font-bold ${zoneColor}`}>{s.collapse_zone.toUpperCase()}</td>
+                      <td className={`px-3 py-1.5 font-bold ${zoneColor}`}>{(s.collapse_zone ?? "unknown").toUpperCase()}</td>
                       <td className="px-3 py-1.5">{s.is_unstable ? <span className="text-danger">YES</span> : <span className="text-text-tertiary">—</span>}</td>
                       <td className={`px-3 py-1.5 ${s.trend_adjusted_margin < 0 ? "text-danger" : "text-text-secondary"}`}>{fixed(s.trend_adjusted_margin)}</td>
-                      <td className={`px-3 py-1.5 ${s.stability_derivative > 0 ? "text-warning" : "text-success"}`}>{s.stability_derivative.toFixed(4)}</td>
+                      <td className={`px-3 py-1.5 ${s.stability_derivative > 0 ? "text-warning" : "text-success"}`}>{fixed(s.stability_derivative, 4)}</td>
                       <td className="px-3 py-1.5 text-text-tertiary">{s.predicted_collapse_ms > 0 ? ms(s.predicted_collapse_ms) : "—"}</td>
                     </tr>
                   );

@@ -15,30 +15,30 @@ const (
 )
 
 type RuntimeState struct {
-    Plant   CongestionState
-    Rollout RolloutState
-    ID      IdentificationState
+	Plant   CongestionState
+	Rollout RolloutState
+	ID      IdentificationState
 
-    LastPlan []MPCControl
+	LastPlan []MPCControl
 
-    ForecastBacklog float64
+	ForecastBacklog float64
 
-    // PhysicalBacklog tracks the real queue depth using measured arrival minus
-    // actual service throughput. This is the ground truth signal; it avoids the
-    // predictor's virtual-capacity / CacheRelief damping that causes model-vs-
-    // reality divergence in heavy-burst scenarios.
-    PhysicalBacklog float64
+	// PhysicalBacklog tracks the real queue depth using measured arrival minus
+	// actual service throughput. This is the ground truth signal; it avoids the
+	// predictor's virtual-capacity / CacheRelief damping that causes model-vs-
+	// reality divergence in heavy-burst scenarios.
+	PhysicalBacklog float64
 
-    Time float64
-    Mode AutonomyMode
+	Time float64
+	Mode AutonomyMode
 
-    OverrideHistory     []float64
-    LastFallbackCap     float64
-    SafetyTight         float64
-    ModeStableCount     int
+	OverrideHistory []float64
+	LastFallbackCap float64
+	SafetyTight     float64
+	ModeStableCount int
 
-    MetaPersistence float64
-    Engine          EngineState
+	MetaPersistence float64
+	Engine          EngineState
 }
 type EngineState struct {
 	memory      *RegimeMemory
@@ -52,9 +52,9 @@ type RuntimeTelemetry struct {
 	// actual service throughput, accumulated per tick. Use this for SLA
 	// evaluation, authority decisions, and summary metrics.
 	PhysicalBacklog float64
-	Backlog  float64
-	Latency  float64
-	Capacity float64
+	Backlog         float64
+	Latency         float64
+	Capacity        float64
 
 	Confidence    float64
 	MPCConfidence float64
@@ -123,39 +123,39 @@ func (r *RuntimeOrchestrator) forecastBacklog(
 probabilistic autonomy mode
 */
 func (r *RuntimeOrchestrator) modeProb(
-    backlog float64,
-    conf float64,
-    overrideRate float64,
+	backlog float64,
+	conf float64,
+	overrideRate float64,
 ) AutonomyMode {
 
-    risk :=
-        math.Tanh(
-            backlog/r.SLA_Backlog +
-                (1 - conf) +
-                overrideRate,
-        )
+	risk :=
+		math.Tanh(
+			backlog/r.SLA_Backlog +
+				(1 - conf) +
+				overrideRate,
+		)
 
-    // Hysteresis bands: require risk to exceed threshold by a margin
-    // before escalating, and drop below by a margin before de-escalating.
-    // Prevents mode thrashing when risk oscillates near a boundary.
-    const (
-        criticalEntry  = 0.80
-        criticalExit   = 0.70
-        guardedEntry   = 0.55
-        guardedExit    = 0.45
-        stableEntry    = 0.30
-    )
+	// Hysteresis bands: require risk to exceed threshold by a margin
+	// before escalating, and drop below by a margin before de-escalating.
+	// Prevents mode thrashing when risk oscillates near a boundary.
+	const (
+		criticalEntry = 0.80
+		criticalExit  = 0.70
+		guardedEntry  = 0.55
+		guardedExit   = 0.45
+		stableEntry   = 0.30
+	)
 
-    if risk > criticalEntry {
-        return ModeCritical
-    }
-    if risk > guardedEntry {
-        return ModeGuarded
-    }
-    if risk < stableEntry {
-        return ModeStable
-    }
-    return ModeRecovery
+	if risk > criticalEntry {
+		return ModeCritical
+	}
+	if risk > guardedEntry {
+		return ModeGuarded
+	}
+	if risk < stableEntry {
+		return ModeStable
+	}
+	return ModeRecovery
 }
 
 /*
@@ -212,31 +212,31 @@ func (r *RuntimeOrchestrator) Tick(
 
 	next := s
 
-    if next.Engine.memory == nil {
-        next.Engine.memory = NewRegimeMemory(128)
-    }
+	if next.Engine.memory == nil {
+		next.Engine.memory = NewRegimeMemory(128)
+	}
 
-    // ── ARRIVAL SANITY GATE ──────────────────────────────────────────────
-    // Reject genuine sensor faults (NaN injections, infinite spikes).
-    // The 10× threshold is intentionally tight: queue_saturation_emergency uses 11×
-    // load jump (220/20=11), so tick=1 arrival IS clamped to 3×estimate=60.
-    //
-    // This is a FEATURE, not a bug: the clamp limits tick=1 backlog accumulation to
-    // ~22 units (from 60 arrival) instead of ~198 (from 220 arrival). This 1-tick
-    // grace period lets the ramp catch up before SLA=250 is breached. Without it,
-    // the first tick accumulates 200 units and SLA is breached by tick=2.
-    //
-    // signal_integrity_nan_spike tests 1000000 arrival (33333× estimate) → clamped
-    // to 3×30=90, which is correct protective behavior.
-    if measuredArrival < 0 {
-        measuredArrival = 0
-    }
-    if s.ID.ArrivalEstimate > 1.0 {
-        anomalyThreshold := s.ID.ArrivalEstimate * 10.0
-        if measuredArrival > anomalyThreshold {
-            measuredArrival = s.ID.ArrivalEstimate * 3.0
-        }
-    }
+	// ── ARRIVAL SANITY GATE ──────────────────────────────────────────────
+	// Reject genuine sensor faults (NaN injections, infinite spikes).
+	// The 10× threshold is intentionally tight: queue_saturation_emergency uses 11×
+	// load jump (220/20=11), so tick=1 arrival IS clamped to 3×estimate=60.
+	//
+	// This is a FEATURE, not a bug: the clamp limits tick=1 backlog accumulation to
+	// ~22 units (from 60 arrival) instead of ~198 (from 220 arrival). This 1-tick
+	// grace period lets the ramp catch up before SLA=250 is breached. Without it,
+	// the first tick accumulates 200 units and SLA is breached by tick=2.
+	//
+	// signal_integrity_nan_spike tests 1000000 arrival (33333× estimate) → clamped
+	// to 3×30=90, which is correct protective behavior.
+	if measuredArrival < 0 {
+		measuredArrival = 0
+	}
+	if s.ID.ArrivalEstimate > 1.0 {
+		anomalyThreshold := s.ID.ArrivalEstimate * 10.0
+		if measuredArrival > anomalyThreshold {
+			measuredArrival = s.ID.ArrivalEstimate * 3.0
+		}
+	}
 
 	// 1. Feature extraction
 	backlogGrowth := s.Plant.Backlog - s.Engine.prevBacklog
@@ -264,18 +264,17 @@ func (r *RuntimeOrchestrator) Tick(
 	// ---------- MPC ----------
 	// Compute MPC FIRST so we have target capacity for decision logic
 	mpcInput := r.mpcState(s)
-    mpcPrevPlan := s.LastPlan
-    if midCap := next.Engine.memory.GetMidRangeCap(); midCap > 0 {
-        // Blend current capacity toward mid-range; MPC will correct from there.
-        mpcInput.CapacityActive = 0.7*mpcInput.CapacityActive + 0.3*midCap
-    }
+	mpcPrevPlan := s.LastPlan
+	if midCap := next.Engine.memory.GetMidRangeCap(); midCap > 0 {
+		// Blend current capacity toward mid-range; MPC will correct from there.
+		mpcInput.CapacityActive = 0.7*mpcInput.CapacityActive + 0.3*midCap
+	}
 
-    seq, mpcConf :=
-        r.MPC.Optimise(
-            mpcInput,
-            mpcPrevPlan,
-        )
-
+	seq, mpcConf :=
+		r.MPC.Optimise(
+			mpcInput,
+			mpcPrevPlan,
+		)
 
 	// ALWAYS use latest MPC decision, NO fallback
 	control := seq[0]
@@ -358,12 +357,12 @@ func (r *RuntimeOrchestrator) Tick(
 		)
 
 	overrideFlag := 0.0
-    if override {
-        overrideFlag = 1.0
-        // Preserve fallback capacity separately — NOT mixed into rate signal
-        next.LastFallbackCap = severity
-    }
-    next.OverrideHistory = append(next.OverrideHistory, overrideFlag)
+	if override {
+		overrideFlag = 1.0
+		// Preserve fallback capacity separately — NOT mixed into rate signal
+		next.LastFallbackCap = severity
+	}
+	next.OverrideHistory = append(next.OverrideHistory, overrideFlag)
 
 	if len(next.OverrideHistory) >
 		r.OverrideWindow {
@@ -401,22 +400,21 @@ func (r *RuntimeOrchestrator) Tick(
 
 	// ---------- rollout ----------
 	effectiveControl := control
-    if override && next.LastFallbackCap > effectiveControl.CapacityTarget {
-        effectiveControl.CapacityTarget = next.LastFallbackCap
-    }
+	if override && next.LastFallbackCap > effectiveControl.CapacityTarget {
+		effectiveControl.CapacityTarget = next.LastFallbackCap
+	}
 
-    newRollout :=
-        r.Rollout.StepAdaptive(
-            s.Rollout,
-            effectiveControl,
-            s.ID.ModelConfidence,
-            override,
-            s.Plant.Backlog,
-            s.ID.StabilityPressure,
-            infraLoad,
-            s.Time,
-        )
-
+	newRollout :=
+		r.Rollout.StepAdaptive(
+			s.Rollout,
+			effectiveControl,
+			s.ID.ModelConfidence,
+			override,
+			s.Plant.Backlog,
+			s.ID.StabilityPressure,
+			infraLoad,
+			s.Time,
+		)
 
 	// ---------- multidimensional failure ----------
 	// if randUnit() < r.FailureScaleProb {
@@ -516,9 +514,9 @@ func (r *RuntimeOrchestrator) Tick(
 
 	tel := RuntimeTelemetry{
 		PhysicalBacklog: newPhysicalBacklog,
-		Backlog:  newPlant.Backlog,
-		Latency:  newPlant.Latency,
-		Capacity: newRollout.CapacityActive,
+		Backlog:         newPlant.Backlog,
+		Latency:         newPlant.Latency,
+		Capacity:        newRollout.CapacityActive,
 
 		Confidence:    idState.ModelConfidence,
 		MPCConfidence: mpcConf,

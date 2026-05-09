@@ -206,7 +206,7 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 		state,
 		GeneratorConfig{
 			BaseRadius: radius,
-			Seed:       seedFor(in.ServiceID, in.Tick, 0x41),
+			Seed:       seedFor(in.ServiceID, in.Tick/4, 0x41),
 		},
 		a.Memory,
 	)
@@ -258,9 +258,17 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 		a.LastScaleTick = in.Tick
 	}
 
+	// Prevent scale-down while backlog pressure still rising
+	if rawScale < a.LastDirective.ScaleFactor &&
+		float64(state.QueueDepth) > a.EWMABacklog {
+		rawScale = a.LastDirective.ScaleFactor
+	}
+
 	// Asymmetric max delta: fast up (2.0x), slow down (0.15x)
 	maxDelta := 0.15
-	if rawScale > 1.0 {
+
+	// Compare against previous directive, not baseline 1.0
+	if rawScale >= a.LastDirective.ScaleFactor {
 		maxDelta = 2.0
 	}
 	scale := a.enforceScaleRate(rawScale, maxDelta)
@@ -484,7 +492,7 @@ func defaultCostParams(targetUtil, risk float64, adv AdvisoryBundle) CostParams 
 		BacklogWeight:   5.0 + backlogFactor*2, // INCREASED: Was 1.5 + backlog/1000
 		UtilTarget:      clamp(targetUtil-utilPenalty, 0.45, 0.85),
 		UtilBand:        0.15,
-		SmoothReplica:   0.05, // LOWERED: Allow faster response
+		SmoothReplica:   0.12, // LOWERED: Allow faster response
 		SmoothRetry:     0.20,
 		SmoothQueue:     0.20,
 		SmoothCache:     0.20,

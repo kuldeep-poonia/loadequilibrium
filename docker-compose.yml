@@ -92,31 +92,7 @@ services:
     networks:
       - internal
 
-  #  Dashboard (temporarily disabled) ─
-  #
-  # dashboard:
-  #   build:
-  #     context: ./dashboard
-  #     dockerfile: Dockerfile
-  #     args:
-  #       NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
-  #   ports:
-  #     - "3001:3000"
-  #   environment:
-  #     NODE_ENV: production
-  #     NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
-  #   depends_on:
-  #     loadequilibrium:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 30s
-  #   restart: unless-stopped
-  #   networks:
-  #     - internal
+  
 
   #  Prometheus ─
   prometheus:

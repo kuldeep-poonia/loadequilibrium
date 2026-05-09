@@ -15,7 +15,7 @@ env:
 
 jobs:
 
-  # ── 1. Lint ────────────────────────────────────────────────────────────────
+  # ── 1. Lint 
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -42,7 +42,7 @@ jobs:
             exit 1
           fi
 
-  # ── 2. Unit & integration tests ───────────────────────────────────────────
+  # ── 2. Unit & integration tests 
   unit-test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
           path: coverage.out
           retention-days: 7
 
-  # ── 3. System tests ───────────────────────────────────────────────────────
+  # ── 3. System tests 
   system-test:
     name: System Tests (Autopilot)
     runs-on: ubuntu-latest
@@ -131,7 +131,7 @@ jobs:
           path: system_test_report.json
           retention-days: 30
 
-  # ── 4. Docker build check ─────────────────────────────────────────────────
+  # ── 4. Docker build check 
   # Builds both images to prove they compile correctly.
   # Does NOT push anywhere — no registry, no secrets needed.
   docker-build:
@@ -150,11 +150,4 @@ jobs:
           push: false
           tags: loadequilibrium:ci
 
-      - name: Build dashboard image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./dashboard
-          push: false
-          tags: loadequilibrium-dashboard:ci
-          build-args: |
-            NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
+      

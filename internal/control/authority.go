@@ -245,7 +245,11 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	// Previously: < 1 which is always false (Tick increments by ≥1), so cooldown never fired.
 	// Fix: < 3 so rapid direction reversal within 3 ticks is suppressed. This prevents
 	// the authority from oscillating between scale_up and scale_down within a burst transition.
-	if currentDir != "hold" && currentDir != a.LastScaleDir && (in.Tick-a.LastScaleTick) < 3 {
+	//
+	// Guard: LastScaleDir=="hold" means no real movement direction has been established yet.
+	// Without this guard, tick=2 - LastScaleTick=0 = 2 < 3 fires the cooldown on the very
+	// first scale-up attempt (hold→up is NOT a reversal and must not be suppressed).
+	if currentDir != "hold" && a.LastScaleDir != "hold" && currentDir != a.LastScaleDir && (in.Tick-a.LastScaleTick) < 3 {
 		// Cooldown active — suppress direction change, hold current trajectory
 		rawScale = 1.0
 		currentDir = "hold"

@@ -39,13 +39,16 @@ import (
 // L4-REP-003 — ComputeTopologySensitivity is stable across 100 identical calls
 //
 // AIM:   Call ComputeTopologySensitivity 100 times on the same GraphSnapshot.
-//        Every call must return identical SystemFragility and per-service
-//        PerturbationScore. This is a stronger check than L4-REP-001 because
-//        it exercises a single function in complete isolation.
+//
+//	Every call must return identical SystemFragility and per-service
+//	PerturbationScore. This is a stronger check than L4-REP-001 because
+//	it exercises a single function in complete isolation.
 //
 // THRESHOLD: zero deviations across 100 calls (max delta == 0)
 // ON EXCEED: The function is not a pure function — it has hidden mutable state
-//            (package-level variable, random number, time.Now() dependency).
+//
+//	(package-level variable, random number, time.Now() dependency).
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_003_SensitivityComputationStable100Calls(t *testing.T) {
 	start := time.Now()
@@ -202,16 +205,19 @@ func TestL4_REP_003_SensitivityComputationStable100Calls(t *testing.T) {
 // L4-REP-003b — InjectTopologySnapshot capture fidelity
 //
 // AIM:   After InjectTopologySnapshot(snap, durationMs), the returned
-//        ReplayCapture.FinalFragility must equal the value returned by
-//        ComputeTopologySensitivity(snap).SystemFragility.
-//        The ReplayCapture.PressureHeatmap must contain every service ID
-//        present in snap.Nodes with a valid float64 value in [0, ∞).
-//        The ReplayCapture.EdgeWeightChanges must contain one entry per edge.
+//
+//	ReplayCapture.FinalFragility must equal the value returned by
+//	ComputeTopologySensitivity(snap).SystemFragility.
+//	The ReplayCapture.PressureHeatmap must contain every service ID
+//	present in snap.Nodes with a valid float64 value in [0, ∞).
+//	The ReplayCapture.EdgeWeightChanges must contain one entry per edge.
 //
 // THRESHOLD: fragility_delta == 0, missing_services == 0, missing_edges == 0
 // ON EXCEED: InjectTopologySnapshot returns a capture that does not faithfully
-//            reflect the injected topology — replay tests would compare against
-//            wrong reference values.
+//
+//	reflect the injected topology — replay tests would compare against
+//	wrong reference values.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_003b_InjectTopologySnapshotCaptureFidelity(t *testing.T) {
 	start := time.Now()

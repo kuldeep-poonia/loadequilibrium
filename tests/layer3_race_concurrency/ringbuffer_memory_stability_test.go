@@ -24,13 +24,16 @@ import (
 // L3-TEL-002 — RingBuffer memory stability under 10 million Push calls
 //
 // AIM:   A RingBuffer with capacity=1000 must not grow heap beyond 2× its
-//        initial allocation when 10,000,000 entries are pushed.  The buffer is
-//        fixed-size by design — old entries must be overwritten, never retained.
+//
+//	initial allocation when 10,000,000 entries are pushed.  The buffer is
+//	fixed-size by design — old entries must be overwritten, never retained.
 //
 // THRESHOLD: heap_growth_factor <= 2.0
 // ON EXCEED: Buffer retains all pushed entries → heap grows O(N) with pushes →
-//            OOM kill in Kubernetes after sustained telemetry ingestion →
-//            CrashLoopBackOff on the loadequilibrium pod.
+//
+//	OOM kill in Kubernetes after sustained telemetry ingestion →
+//	CrashLoopBackOff on the loadequilibrium pod.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_TEL_002_RingBufferMemoryStability(t *testing.T) {
 	if testing.Short() {

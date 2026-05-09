@@ -11,7 +11,7 @@ type InstabilityInput struct {
 	Utilization float64
 }
 
-//   Replaced with boundedAgg which returns 0 when all inputs are 0.
+// Replaced with boundedAgg which returns 0 when all inputs are 0.
 func ComputeInstability(in InstabilityInput) (float64, string) {
 
 	// ---------- normalization (scale-robust, resolution-preserving) ----------

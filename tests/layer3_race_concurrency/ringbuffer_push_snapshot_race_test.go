@@ -30,14 +30,17 @@ import (
 // L3-TEL-001 — Concurrent Push + Snapshot + Last + Size + SummaryStats
 //
 // AIM:   10 writers + 10 readers operating concurrently on one RingBuffer for
-//        30 seconds must produce zero data races, zero torn reads, zero panics.
-//        A "torn read" is a Snapshot entry whose Timestamp is zero or whose
-//        RequestRate is negative — both are physically impossible after Push.
+//
+//	30 seconds must produce zero data races, zero torn reads, zero panics.
+//	A "torn read" is a Snapshot entry whose Timestamp is zero or whose
+//	RequestRate is negative — both are physically impossible after Push.
 //
 // THRESHOLD: torn_reads == 0, panics == 0
 // ON EXCEED: Telemetry ring buffer delivers garbled MetricPoints to the queue
-//            physics engine → MPC optimises against nonsense sensor data →
-//            actuator receives an unbounded control command.
+//
+//	physics engine → MPC optimises against nonsense sensor data →
+//	actuator receives an unbounded control command.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 	start := time.Now()

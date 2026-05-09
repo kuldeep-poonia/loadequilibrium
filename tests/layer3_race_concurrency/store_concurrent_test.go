@@ -29,12 +29,15 @@ import (
 // L3-TEL-003 — Store: concurrent Ingest + Prune + AllWindows + ServiceIDs
 //
 // AIM:   20 ingester goroutines, 5 pruner goroutines, 5 reader goroutines
-//        operating concurrently on one Store for 30 seconds must produce zero
-//        data races, zero panics, and zero nil-pointer dereferences.
+//
+//	operating concurrently on one Store for 30 seconds must produce zero
+//	data races, zero panics, and zero nil-pointer dereferences.
 //
 // THRESHOLD: panics == 0, nil_window_deref == 0
 // ON EXCEED: Race on Store.buffers map → concurrent map read/write panic →
-//            entire orchestrator tick goroutine crashes → control loop halts.
+//
+//	entire orchestrator tick goroutine crashes → control loop halts.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_TEL_003_StoreConcurrentIngestPruneAllWindows(t *testing.T) {
 	start := time.Now()
@@ -289,12 +292,15 @@ func TestL3_TEL_003_StoreConcurrentIngestPruneAllWindows(t *testing.T) {
 // L3-TEL-004 — Store cardinality cap enforced under concurrent ingestion
 //
 // AIM:   When maxServices=10 and 50 goroutines try to register new services
-//        simultaneously, Store.Ingest must never hold more than 10 services.
-//        The cap must be enforced without data races.
+//
+//	simultaneously, Store.Ingest must never hold more than 10 services.
+//	The cap must be enforced without data races.
 //
 // THRESHOLD: max_services_at_any_point <= maxSvcCap
 // ON EXCEED: Unbounded cardinality → unbounded heap growth →
-//            OOM kill in high-cardinality production environments.
+//
+//	OOM kill in high-cardinality production environments.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_TEL_004_StoreCardinalityCapConcurrent(t *testing.T) {
 	start := time.Now()

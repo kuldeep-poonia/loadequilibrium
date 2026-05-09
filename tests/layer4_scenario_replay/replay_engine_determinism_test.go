@@ -36,13 +36,16 @@ import (
 // L4-REP-001 — ExecuteAllScenarios is deterministic across 20 runs
 //
 // AIM:   Run ExecuteAllScenarios() 20 times. Each run must produce the same
-//        FinalFragility per scenario as run 0. Any deviation > 1e-9 means
-//        the sensitivity computation is non-deterministic.
+//
+//	FinalFragility per scenario as run 0. Any deviation > 1e-9 means
+//	the sensitivity computation is non-deterministic.
 //
 // THRESHOLD: max fragility deviation across all runs == 0 (within 1e-9)
 // ON EXCEED: Replay-based regression tests are unreliable because the same
-//            code produces different outputs on different runs — golden files
-//            become meaningless and CI can produce false failures/passes.
+//
+//	code produces different outputs on different runs — golden files
+//	become meaningless and CI can produce false failures/passes.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_001_ExecuteAllScenariosDeterminism(t *testing.T) {
 	start := time.Now()

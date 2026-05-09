@@ -455,13 +455,14 @@ func TestL6_PER_001_WriterNilSafeWhenDBUnavailable(t *testing.T) {
 // L6-PER-002 — persistence.Writer.Enqueue is non-blocking under full queue
 //
 // AIM:   NewWriter with a real in-memory queue (bufSize=5).
-//        We can't connect to a real DB in CI so we verify the non-blocking
-//        contract by testing the nil-path performance: 10,000 Enqueue calls
-//        on nil Writer must all complete in < 1ms total (no blocking).
 //
-//        This validates the "select { case w.queue <- s: default: }" path
-//        from writer.go — the drop-on-full behaviour that ensures the
-//        orchestrator tick loop is never blocked by persistence.
+//	We can't connect to a real DB in CI so we verify the non-blocking
+//	contract by testing the nil-path performance: 10,000 Enqueue calls
+//	on nil Writer must all complete in < 1ms total (no blocking).
+//
+//	This validates the "select { case w.queue <- s: default: }" path
+//	from writer.go — the drop-on-full behaviour that ensures the
+//	orchestrator tick loop is never blocked by persistence.
 //
 // THRESHOLD: total_enqueue_ms < 10 (10,000 calls under 10ms total)
 // ON EXCEED: Writer.Enqueue blocks when queue is full → tick loop delays.

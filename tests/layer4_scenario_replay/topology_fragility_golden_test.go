@@ -38,14 +38,17 @@ import (
 // L4-REP-002 — Topology sensitivity golden file: all 6 scenarios
 //
 // AIM:   For each of the 6 topology scenarios, run ComputeTopologySensitivity
-//        and compare output against a stored golden file.
-//        First run: writes the golden. Subsequent runs: verify within 0.001%.
-//        Validates that no code change silently altered topology sensitivity.
+//
+//	and compare output against a stored golden file.
+//	First run: writes the golden. Subsequent runs: verify within 0.001%.
+//	Validates that no code change silently altered topology sensitivity.
 //
 // THRESHOLD: max relative delta per field <= 0.001%
 // ON EXCEED: A code change to topology_sensitivity.go silently altered the
-//            fragility or perturbation scores that the dashboard displays —
-//            operators see wrong risk numbers without being notified.
+//
+//	fragility or perturbation scores that the dashboard displays —
+//	operators see wrong risk numbers without being notified.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_002_TopologyFragilityGolden(t *testing.T) {
 	start := time.Now()
@@ -281,12 +284,15 @@ func TestL4_REP_002_TopologyFragilityGolden(t *testing.T) {
 // L4-REP-002b — Expected fragility values match builders' own declarations
 //
 // AIM:   Each builder function declares ExpectedFragility. The actual computed
-//        value from ComputeTopologySensitivity must be within 5% of that declared
-//        expectation. This tests that the builders are internally consistent.
+//
+//	value from ComputeTopologySensitivity must be within 5% of that declared
+//	expectation. This tests that the builders are internally consistent.
 //
 // THRESHOLD: |actual - expected| / expected <= 5%
 // ON EXCEED: The scenario builder declares wrong expected values — test setup
-//            is misleading and the L4-REP-002 golden baseline is questionable.
+//
+//	is misleading and the L4-REP-002 golden baseline is questionable.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_002b_ExpectedFragilityMatchesBuilders(t *testing.T) {
 	start := time.Now()

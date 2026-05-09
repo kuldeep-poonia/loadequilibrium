@@ -39,13 +39,16 @@ import (
 // L3-ORC-001 — Orchestrator.Run goroutine leak after context cancellation
 //
 // AIM:   After Run(ctx) returns (ctx cancelled), the goroutine count must
-//        return to within 3 of the pre-Run baseline within 5 seconds.
-//        "Within 3" allows for the Go test runner and any GC goroutines.
+//
+//	return to within 3 of the pre-Run baseline within 5 seconds.
+//	"Within 3" allows for the Go test runner and any GC goroutines.
 //
 // THRESHOLD: leaked_goroutines <= 3
 // ON EXCEED: Each Kubernetes pod restart leaks goroutines from the previous
-//            Orchestrator instance → heap pressure grows → eventual OOM kill →
-//            CrashLoopBackOff on the loadequilibrium deployment.
+//
+//	Orchestrator instance → heap pressure grows → eventual OOM kill →
+//	CrashLoopBackOff on the loadequilibrium deployment.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 	start := time.Now()

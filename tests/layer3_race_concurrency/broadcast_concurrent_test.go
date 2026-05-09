@@ -40,12 +40,15 @@ import (
 // L3-HUB-001 — Hub.Broadcast concurrent safety
 //
 // AIM:   50 goroutines calling Broadcast simultaneously for 20 seconds must
-//        produce zero data races, zero panics, and the sequence numbers in
-//        GetLastPayload must strictly increase (seqNo.Add is atomic).
+//
+//	produce zero data races, zero panics, and the sequence numbers in
+//	GetLastPayload must strictly increase (seqNo.Add is atomic).
 //
 // THRESHOLD: panics == 0, seq_no_regressions == 0
 // ON EXCEED: Race on h.mu or h.lastPayload → corrupt tick payload sent to
-//            dashboard → operators see wrong topology or incorrect risk scores.
+//
+//	dashboard → operators see wrong topology or incorrect risk scores.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_HUB_001_BroadcastConcurrentRace(t *testing.T) {
 	start := time.Now()
@@ -237,19 +240,23 @@ func TestL3_HUB_001_BroadcastConcurrentRace(t *testing.T) {
 // L3-HUB-002 — Slow client backpressure: dropped without blocking fast clients
 //
 // AIM:   Connect one "slow" WebSocket client (never reads from socket) and one
-//        "fast" client (drains messages immediately).  After sendBufferSize+1
-//        broadcasts, the slow client must be dropped (ClientCount drops by 1)
-//        and the fast client must have received all broadcasts without delay.
+//
+//	"fast" client (drains messages immediately).  After sendBufferSize+1
+//	broadcasts, the slow client must be dropped (ClientCount drops by 1)
+//	and the fast client must have received all broadcasts without delay.
 //
 // sendBufferSize = 16  (defined as const in hub.go)
 //
 // THRESHOLD:
-//   slow_client_dropped == true  (ClientCount drops from 2 to 1)
-//   fast_client_msgs >= broadcasts_sent  (no messages lost for fast client)
-//   no_broadcast_blocked == true  (all Broadcast calls return within 10ms)
+//
+//	slow_client_dropped == true  (ClientCount drops from 2 to 1)
+//	fast_client_msgs >= broadcasts_sent  (no messages lost for fast client)
+//	no_broadcast_blocked == true  (all Broadcast calls return within 10ms)
 //
 // ON EXCEED: Slow client blocks Broadcast via head-of-line → all clients
-//            starve → dashboard freezes for every connected operator.
+//
+//	starve → dashboard freezes for every connected operator.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL3_HUB_002_SlowClientDroppedFastClientUnaffected(t *testing.T) {
 	start := time.Now()

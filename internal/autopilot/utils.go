@@ -37,9 +37,10 @@ func pos(x float64) float64 {
 // boundedAgg computes a zero-preserving soft-maximum over a set of values in [0, 1].
 //
 // WHY THIS EXISTS (replaces softAgg / softBlend everywhere):
-//   log-sum-exp returns ln(N) ≥ ln(4) ≈ 1.386 when all inputs are 0.
-//   This caused phantom Cascade classification at idle (anomaly_classifier)
-//   and a permanent "warning" instability score at zero load (instability_engine).
+//
+//	log-sum-exp returns ln(N) ≥ ln(4) ≈ 1.386 when all inputs are 0.
+//	This caused phantom Cascade classification at idle (anomaly_classifier)
+//	and a permanent "warning" instability score at zero load (instability_engine).
 //
 // CONTRACT:
 //   - All inputs are expected in [0, 1].

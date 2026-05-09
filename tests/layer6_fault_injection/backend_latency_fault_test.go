@@ -75,9 +75,10 @@ func collectFeedback(ch <-chan actuator.ActuationResult, n int, timeout time.Dur
 // L6-NET-001 — +500ms backend latency: Dispatch non-blocking, coalescing works
 //
 // AIM:
-//   Phase 1: 20 Dispatch() calls while backend takes 500ms → each Dispatch < 5ms.
-//   Phase 2: Fewer than 20 HTTP requests made (coalescing_ratio >= 2.0).
-//   Phase 3: After latency removed, recovery request completes < 100ms.
+//
+//	Phase 1: 20 Dispatch() calls while backend takes 500ms → each Dispatch < 5ms.
+//	Phase 2: Fewer than 20 HTTP requests made (coalescing_ratio >= 2.0).
+//	Phase 3: After latency removed, recovery request completes < 100ms.
 //
 // THRESHOLD: max_dispatch_ms < 5, coalescing >= 2.0, recovery_ms < 100
 // ON EXCEED: Control loop blocks on actuator → tick overruns cascade.
@@ -214,8 +215,9 @@ loop_done:
 // L6-NET-002 — Backend disconnection: graceful failure, no panic
 //
 // AIM:   Close server before any request → all connections refused.
-//        Panics==0, every dispatch delivers ActuationResult{Success:false},
-//        goroutine_leak<=3.
+//
+//	Panics==0, every dispatch delivers ActuationResult{Success:false},
+//	goroutine_leak<=3.
 //
 // THRESHOLD: panics==0, failed==serviceCount
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +313,8 @@ func TestL6_NET_002_BackendDisconnectionGraceful(t *testing.T) {
 // L6-NET-003 — RouterBackend partial failure isolation
 //
 // AIM:   svc-a → 5xx backend; svc-b → 200 backend.
-//        svc-b success rate == 1.0; svc-a fail rate == 1.0.
+//
+//	svc-b success rate == 1.0; svc-a fail rate == 1.0.
 //
 // THRESHOLD: svc_b_success_rate == 1.0
 // ─────────────────────────────────────────────────────────────────────────────

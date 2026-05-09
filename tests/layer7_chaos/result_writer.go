@@ -173,7 +173,8 @@ func newTestSystem(tickMs int) *testSystem {
 }
 
 // Shutdown mirrors main.go shutdown sequence:
-//   httpServer.Shutdown(shutCtx) → act.Close(shutCtx) → pw.Close() [nil, skipped]
+//
+//	httpServer.Shutdown(shutCtx) → act.Close(shutCtx) → pw.Close() [nil, skipped]
 func (ts *testSystem) Shutdown() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

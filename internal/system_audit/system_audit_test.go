@@ -240,7 +240,9 @@ func TestQ2_FinalDecisionMaker_ScaleRateLimitedByAuthority(t *testing.T) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST 1-C  Decision modes: Orchestrator mode escalation
-//   ModeSafetyOnly → ModeSupervised → ModeAdvisory → ModeAutonomous
+//
+//	ModeSafetyOnly → ModeSupervised → ModeAdvisory → ModeAutonomous
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestQ2_DecisionMaker_OrchestratorModeEscalation(t *testing.T) {
 	// From autonomy_orchestrator.go updateMode()

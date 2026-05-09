@@ -11,9 +11,9 @@ import (
 // that will prove or falsify tick loop reentrancy with 100% certainty.
 //
 // This test intentionally creates the worst case conditions for reentrancy by:
-//   1. Setting tick period = 50ms
-//   2. Forcing tick processing time = 120ms (greater than tick period)
-//   3. Running continuously for 10 seconds
+//  1. Setting tick period = 50ms
+//  2. Forcing tick processing time = 120ms (greater than tick period)
+//  3. Running continuously for 10 seconds
 //
 // If any reentrant ticks occur, the atomic counter will detect them with absolute certainty.
 func TestL7_CHAOS_013_TickReentrancyVerification(t *testing.T) {

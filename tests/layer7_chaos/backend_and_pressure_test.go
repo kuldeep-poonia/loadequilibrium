@@ -23,13 +23,13 @@ import (
 // L7-CHAOS-003 — Actuator backend killed mid-tick: orchestrator continues
 //
 // AIM:
-//   1. Start system with HTTPBackend route for svc-chaos.
-//   2. Allow 5 ticks with successful actuator dispatch.
-//   3. Close the backend HTTP server (backend disappears mid-operation).
-//   4. Verify: orchestrator continues ticking (seq increases), feedback channel
-//              delivers ActuationResult{Success:false} for failed dispatches,
-//              NO panic in orchestrator goroutine.
-//   5. Start a replacement backend server, add new route, verify recovery.
+//  1. Start system with HTTPBackend route for svc-chaos.
+//  2. Allow 5 ticks with successful actuator dispatch.
+//  3. Close the backend HTTP server (backend disappears mid-operation).
+//  4. Verify: orchestrator continues ticking (seq increases), feedback channel
+//     delivers ActuationResult{Success:false} for failed dispatches,
+//     NO panic in orchestrator goroutine.
+//  5. Start a replacement backend server, add new route, verify recovery.
 //
 // THRESHOLD: panics==0, ticks_after_kill>=3, recovery_dispatch_succeeded==true
 // ON EXCEED: Orchestrator goroutine panics on actuator error → control loop halts.
@@ -183,10 +183,11 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 // L7-CHAOS-004 — Concurrent context cancellation race: zero panics
 //
 // AIM:
-//   Start 10 goroutines each doing different operations (Broadcast, Ingest,
-//   Prune, AllWindows, Dispatch, GetLastPayload, Health check) while the
-//   context is cancelled after a random delay between 100-500ms.
-//   ALL 10 goroutines must exit without panic.
+//
+//	Start 10 goroutines each doing different operations (Broadcast, Ingest,
+//	Prune, AllWindows, Dispatch, GetLastPayload, Health check) while the
+//	context is cancelled after a random delay between 100-500ms.
+//	ALL 10 goroutines must exit without panic.
 //
 // THRESHOLD: panics == 0
 // ON EXCEED: Race condition causes panic during concurrent cancel+operation.
@@ -329,11 +330,12 @@ func TestL7_CHAOS_004_ConcurrentCancelRace(t *testing.T) {
 // L7-CHAOS-005 — Memory pressure: 60s soak at maximum ingestion rate
 //
 // AIM:
-//   With full system running (Orchestrator ticking at 200ms):
-//   Inject 5,000 events/s for 60 seconds across 10 services.
-//   Heap growth factor must stay <= 2.0× baseline.
-//   Orchestrator must continue ticking (seq increases throughout).
-//   Zero panics.
+//
+//	With full system running (Orchestrator ticking at 200ms):
+//	Inject 5,000 events/s for 60 seconds across 10 services.
+//	Heap growth factor must stay <= 2.0× baseline.
+//	Orchestrator must continue ticking (seq increases throughout).
+//	Zero panics.
 //
 // THRESHOLD: heap_growth_factor <= 2.0, orch_ticks_in_60s >= 200
 // ON EXCEED: Memory leak in hot path → OOM kill → Kubernetes restart loop.
@@ -536,24 +538,24 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 	t.Logf("L7-CHAOS-005 PASS | heap_growth=%.4fx ticks=%d panics=0", heapGrowth, orchTicks)
 }
 
-//
 // L7-CHAOS-006 — Clock skew in telemetry timestamps: staleness detection works
 //
 // AIM:
-//   Inject MetricPoints with:
-//     A. Far-future timestamps (system clock + 1 hour)
-//     B. Far-past timestamps (system clock - 10 minutes, beyond staleAge)
-//     C. Normal timestamps
-//   Verify:
-//     1. Store.Window with freshnessCutoff rejects stale entries (past).
-//     2. Future-timestamped entries do not crash Store.Ingest (nil-safe path).
-//     3. Normal entries are accessible via AllWindows.
-//     4. Zero panics across all operations.
+//
+//	Inject MetricPoints with:
+//	  A. Far-future timestamps (system clock + 1 hour)
+//	  B. Far-past timestamps (system clock - 10 minutes, beyond staleAge)
+//	  C. Normal timestamps
+//	Verify:
+//	  1. Store.Window with freshnessCutoff rejects stale entries (past).
+//	  2. Future-timestamped entries do not crash Store.Ingest (nil-safe path).
+//	  3. Normal entries are accessible via AllWindows.
+//	  4. Zero panics across all operations.
 //
 // THRESHOLD: panics==0, stale_windows_rejected>=1, normal_windows_accessible>=1
 // ON EXCEED: Clock skew causes panics or crashes — distributed system clock drift
-//            corrupts telemetry pipeline.
 //
+//	corrupts telemetry pipeline.
 func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 	start := time.Now()
 

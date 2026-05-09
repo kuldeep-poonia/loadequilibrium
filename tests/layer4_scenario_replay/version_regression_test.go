@@ -31,15 +31,18 @@ import (
 // L4-REP-004 — Version regression: all scenarios within 0.01% of golden
 //
 // AIM:   Every commit must produce fragility values within 0.01% of the stored
-//        golden for all 6 scenarios. This is the primary regression guard:
-//        any unintentional algorithm change in topology_sensitivity.go will
-//        fail this test before it reaches production.
+//
+//	golden for all 6 scenarios. This is the primary regression guard:
+//	any unintentional algorithm change in topology_sensitivity.go will
+//	fail this test before it reaches production.
 //
 // Prerequisite: L4-REP-002 must have run first to write the golden files.
 //
 // THRESHOLD: max field delta <= 0.01% per scenario
 // ON EXCEED: Topology sensitivity algorithm changed in a way that alters the
-//            risk scores shown on the dashboard — must be reviewed explicitly.
+//
+//	risk scores shown on the dashboard — must be reviewed explicitly.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_004_VersionRegression(t *testing.T) {
 	start := time.Now()
@@ -223,14 +226,17 @@ func TestL4_REP_004_VersionRegression(t *testing.T) {
 // L4-REP-004b — Recovery convergence: step 3 fragility within 1% of baseline
 //
 // AIM:   After 3 recovery steps, the triangle scenario must converge to within
-//        1% of the healthy baseline fragility.  This tests that the recovery
-//        curve defined in BuildTriangleRecoveryScenario is physically plausible
-//        and that the sensitivity algorithm correctly reflects recovery.
+//
+//	1% of the healthy baseline fragility.  This tests that the recovery
+//	curve defined in BuildTriangleRecoveryScenario is physically plausible
+//	and that the sensitivity algorithm correctly reflects recovery.
 //
 // THRESHOLD: |step3_fragility - baseline_fragility| / baseline_fragility <= 1%
 // ON EXCEED: Recovery scenario does not converge — either the topology edges
-//            in step 3 are not close enough to healthy, or the sensitivity
-//            computation is overweighting a degraded metric.
+//
+//	in step 3 are not close enough to healthy, or the sensitivity
+//	computation is overweighting a degraded metric.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_004b_RecoveryConvergence(t *testing.T) {
 	start := time.Now()
@@ -365,14 +371,17 @@ func TestL4_REP_004b_RecoveryConvergence(t *testing.T) {
 // L4-REP-004c — ExecuteAllScenarios replay vs golden: end-to-end regression
 //
 // AIM:   Run ExecuteAllScenarios() exactly once and compare every
-//        ReplayCapture.FinalFragility against the golden written by L4-REP-001.
-//        This is the end-to-end regression guard that combines the full
-//        replay pipeline (not just direct ComputeTopologySensitivity calls).
+//
+//	ReplayCapture.FinalFragility against the golden written by L4-REP-001.
+//	This is the end-to-end regression guard that combines the full
+//	replay pipeline (not just direct ComputeTopologySensitivity calls).
 //
 // THRESHOLD: max fragility delta vs golden <= 0.01%
 // ON EXCEED: The full replay pipeline (ReplayEngine → InjectTopologySnapshot →
-//            ComputeTopologySensitivity) produces different results than the
-//            isolated path — something in the pipeline wraps/modifies outputs.
+//
+//	ComputeTopologySensitivity) produces different results than the
+//	isolated path — something in the pipeline wraps/modifies outputs.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 func TestL4_REP_004c_ExecuteAllScenariosRegression(t *testing.T) {
 	start := time.Now()

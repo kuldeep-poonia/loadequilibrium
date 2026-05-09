@@ -1,4 +1,3 @@
-
 package persistence
 
 import (
@@ -245,8 +244,10 @@ func (c *pgConn) startup(cfg map[string]string) error {
 	copy(body[4:], params)
 	length := uint32(len(body) + 4)
 	msg := make([]byte, 4+len(body))
-	msg[0] = byte(length >> 24); msg[1] = byte(length >> 16)
-	msg[2] = byte(length >> 8);  msg[3] = byte(length)
+	msg[0] = byte(length >> 24)
+	msg[1] = byte(length >> 16)
+	msg[2] = byte(length >> 8)
+	msg[3] = byte(length)
 	copy(msg[4:], body)
 	if _, err := c.nc.Write(msg); err != nil {
 		return err
@@ -274,8 +275,10 @@ func (c *pgConn) readUntilReady(password string) error {
 				m := make([]byte, 1+4+len(pw))
 				m[0] = 'p'
 				l := 4 + len(pw)
-				m[1] = byte(l >> 24); m[2] = byte(l >> 16)
-				m[3] = byte(l >> 8);  m[4] = byte(l)
+				m[1] = byte(l >> 24)
+				m[2] = byte(l >> 16)
+				m[3] = byte(l >> 8)
+				m[4] = byte(l)
 				copy(m[5:], pw)
 				if _, err := c.nc.Write(m); err != nil {
 					return err
@@ -298,8 +301,10 @@ func (c *pgConn) simpleQuery(sql string) error {
 	l := 4 + len(q)
 	msg := make([]byte, 1+4+len(q))
 	msg[0] = 'Q'
-	msg[1] = byte(l >> 24); msg[2] = byte(l >> 16)
-	msg[3] = byte(l >> 8);  msg[4] = byte(l)
+	msg[1] = byte(l >> 24)
+	msg[2] = byte(l >> 16)
+	msg[3] = byte(l >> 8)
+	msg[4] = byte(l)
 	copy(msg[5:], q)
 	if _, err := c.nc.Write(msg); err != nil {
 		return err
@@ -341,9 +346,12 @@ func (c *pgConn) readMsg() (byte, []byte, error) {
 
 func pgErrMsg(data []byte) string {
 	for i := 0; i < len(data)-1; {
-		field := data[i]; i++
+		field := data[i]
+		i++
 		end := i
-		for end < len(data) && data[end] != 0 { end++ }
+		for end < len(data) && data[end] != 0 {
+			end++
+		}
 		if field == 'M' {
 			return string(data[i:end])
 		}
@@ -386,7 +394,11 @@ func substituteArgs(query string, args []driver.Value) string {
 		case float64:
 			lit = strconv.FormatFloat(v, 'f', -1, 64)
 		case bool:
-			if v { lit = "TRUE" } else { lit = "FALSE" }
+			if v {
+				lit = "TRUE"
+			} else {
+				lit = "FALSE"
+			}
 		case []byte:
 			lit = pgLiteral(string(v))
 		case string:

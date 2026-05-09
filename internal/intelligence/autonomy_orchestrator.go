@@ -4,8 +4,6 @@ import (
 	"time"
 )
 
-
-
 type AutonomyMode int
 
 const (
@@ -66,11 +64,11 @@ func NewAutonomyOrchestrator(
 	}
 
 	return &AutonomyOrchestrator{
-		rt:   rt,
-		telm: telm,
+		rt:    rt,
+		telm:  telm,
 		safeP: safeP,
-		roll: roll,
-		haz:  haz,
+		roll:  roll,
+		haz:   haz,
 		// P9: Start in ModeSupervised so the RL policy warms up before driving
 		// autonomous decisions. The orchestrator self-promotes to ModeAutonomous
 		// once anomalyScore < 0.45 and health/confidence thresholds are met.
@@ -149,7 +147,7 @@ func (o *AutonomyOrchestrator) updateMode(
 
 	recWin :=
 		time.Duration(
-			(o.recoveryBase+
+			(o.recoveryBase +
 				4*o.modeEW[reg]) *
 				float64(time.Second),
 		)

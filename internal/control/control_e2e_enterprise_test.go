@@ -2,13 +2,13 @@ package control_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"testing"
-	"fmt"
 
-	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
 	auto "github.com/loadequilibrium/loadequilibrium/internal/autopilot"
+	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
 )
 
 type StepLog struct {
@@ -26,20 +26,19 @@ type StepLog struct {
 	Risk float64 `json:"risk"`
 	Cost float64 `json:"cost"`
 
-	MPC_Target        float64
-	MPC_Confidence    float64
-	Decision_Action   string
-	Decision_Delta    float64
-	Rollout_Capacity  float64
-	Override_Rate     float64
-	Mode              int
-	Confidence        float64
+	MPC_Target       float64
+	MPC_Confidence   float64
+	Decision_Action  string
+	Decision_Delta   float64
+	Rollout_Capacity float64
+	Override_Rate    float64
+	Mode             int
+	Confidence       float64
 
 	AutopilotCap    float64 `json:"autopilot_cap"`
-ControlSelected int     `json:"control_selected"`
-ActuatorActual  float64 `json:"actuator_actual"`
-Override        bool    `json:"override"`
-
+	ControlSelected int     `json:"control_selected"`
+	ActuatorActual  float64 `json:"actuator_actual"`
+	Override        bool    `json:"override"`
 }
 
 type RunLog struct {
@@ -102,103 +101,103 @@ func Test_Control_Enterprise_E2E(t *testing.T) {
 
 func runScenario(name string) RunLog {
 
-sys := ctrl.SystemState{
-    Replicas:         3,
-    QueueLimit:       50,
-    RetryLimit:       3,
-    CacheAggression:  0.2,
-    QueueDepth:       200,
-    PredictedArrival: 120,
-    ArrivalRate:      120,
-    ServiceRate:      10,
-    Latency:          100,
-    SLATarget:        120,
-    MinReplicas:      1,
-    MaxReplicas:      50,
-    MinRetry:         1,
-    MaxRetry:         10,
-}
+	sys := ctrl.SystemState{
+		Replicas:         3,
+		QueueLimit:       50,
+		RetryLimit:       3,
+		CacheAggression:  0.2,
+		QueueDepth:       200,
+		PredictedArrival: 120,
+		ArrivalRate:      120,
+		ServiceRate:      10,
+		Latency:          100,
+		SLATarget:        120,
+		MinReplicas:      1,
+		MaxReplicas:      50,
+		MinRetry:         1,
+		MaxRetry:         10,
+	}
 	controller := ctrl.Controller{
-    OptimizerCfg: ctrl.OptimizerConfig{
-        ScenarioCount:   6,
-        BaseTemperature: 1.0,
-        MaxEvaluate:     30,
-        MinEvaluate:     5,
-    },
-    SimCfg: ctrl.SimConfig{
-        HorizonSteps:      25,
-        Dt:                1,
-        BaseLatency:       100,
-        DisturbanceStd:    0.3,
-        DisturbanceFreq:   0.2,
-        RetryFeedbackGain: 0.4,
-        EfficiencyDecay:   0.15,
-        MaxQueueDelay:     200,
-        HazardUtilGain:    0.5,
-        HazardBacklogGain: 0.4,
-        HazardRetryGain:   0.3,
-    },
-    CostCfg: ctrl.CostParams{
-        InfraUnitCost:   1,
-        SLAWeight:       2,
-        RiskWeight:      3,
-        BacklogWeight:   2,
-        UtilTarget:      0.7,
-        UtilBand:        0.2,
-        SmoothReplica:   0.3,
-        SmoothRetry:     0.2,
-        SmoothQueue:     0.2,
-        SmoothCache:     0.2,
-        CacheCostWeight: 0.5,
-    },
+		OptimizerCfg: ctrl.OptimizerConfig{
+			ScenarioCount:   6,
+			BaseTemperature: 1.0,
+			MaxEvaluate:     30,
+			MinEvaluate:     5,
+		},
+		SimCfg: ctrl.SimConfig{
+			HorizonSteps:      25,
+			Dt:                1,
+			BaseLatency:       100,
+			DisturbanceStd:    0.3,
+			DisturbanceFreq:   0.2,
+			RetryFeedbackGain: 0.4,
+			EfficiencyDecay:   0.15,
+			MaxQueueDelay:     200,
+			HazardUtilGain:    0.5,
+			HazardBacklogGain: 0.4,
+			HazardRetryGain:   0.3,
+		},
+		CostCfg: ctrl.CostParams{
+			InfraUnitCost:   1,
+			SLAWeight:       2,
+			RiskWeight:      3,
+			BacklogWeight:   2,
+			UtilTarget:      0.7,
+			UtilBand:        0.2,
+			SmoothReplica:   0.3,
+			SmoothRetry:     0.2,
+			SmoothQueue:     0.2,
+			SmoothCache:     0.2,
+			CacheCostWeight: 0.5,
+		},
 
-    // 🔥 MOST IMPORTANT FIX
-    ActuatorCfg: ctrl.ActuatorConfig{
-        MinReplicas: 1,
-        MaxReplicas: 50,
-        MaxScaleRate: 10,
-        ScaleCooldownSec: 2,
-        WarmupRate: 0.5,
+		// 🔥 MOST IMPORTANT FIX
+		ActuatorCfg: ctrl.ActuatorConfig{
+			MinReplicas:      1,
+			MaxReplicas:      50,
+			MaxScaleRate:     10,
+			ScaleCooldownSec: 2,
+			WarmupRate:       0.5,
 
-        MinQueue: 10,
-        MaxQueue: 200,
-        MaxQueueRate: 20,
-        QueueLagTau: 2,
-        QueueCooldownSec: 2,
+			MinQueue:         10,
+			MaxQueue:         200,
+			MaxQueueRate:     20,
+			QueueLagTau:      2,
+			QueueCooldownSec: 2,
 
-        RetryRate: 0.5,
-        RetryDisturbanceGain: 0.2,
-        MinRetry: 1,
-        MaxRetry: 10,
+			RetryRate:            0.5,
+			RetryDisturbanceGain: 0.2,
+			MinRetry:             1,
+			MaxRetry:             10,
 
-        CacheRate: 0.3,
-        CacheMemPressureGain: 0.5,
-    },
-}
+			CacheRate:            0.3,
+			CacheMemPressureGain: 0.5,
+		},
+	}
 	runtime := auto.RuntimeOrchestrator{
 		Dt: 1,
 
 		Predictor: &auto.Predictor{Dt: 1, MaxQueue: 10000},
 		MPC: &auto.MPCOptimiser{
-			Horizon: 10,
-			Dt:      1,
+			Horizon:       10,
+			Dt:            1,
 			ScenarioCount: 4,
-			MaxCapacity: 50,
-			MinCapacity: 1,
+			MaxCapacity:   50,
+			MinCapacity:   1,
 		},
 		Safety: &auto.SafetyEngine{
 			BaseMaxBacklog: 5000,
 			BaseMaxLatency: 1000,
 		},
 		Rollout: &auto.RolloutController{
-			Dt: 1,
+			Dt:       1,
 			QueueMax: 20,
 		},
 		ID: &auto.IdentificationEngine{
 			Dt: 1,
 		},
 
-		SLA_Backlog: 1000,
+		SLA_Backlog:    1000,
 		OverrideWindow: 20,
 	}
 
@@ -209,9 +208,9 @@ sys := ctrl.SystemState{
 
 	rtState := auto.RuntimeState{
 		Plant: auto.CongestionState{
-			Backlog: sys.QueueDepth,
-			ArrivalMean: sys.PredictedArrival,
-			ServiceRate: sys.ServiceRate,
+			Backlog:        sys.QueueDepth,
+			ArrivalMean:    sys.PredictedArrival,
+			ServiceRate:    sys.ServiceRate,
 			CapacityActive: float64(sys.Replicas),
 		},
 		Rollout: auto.RolloutState{
@@ -276,7 +275,7 @@ sys := ctrl.SystemState{
 		newCap := rtState.Rollout.CapacityActive
 		autopilotCap := newCap
 		fmt.Println("STEP:", step)
-        fmt.Println("AUTOPILOT CAP:", newCap)
+		fmt.Println("AUTOPILOT CAP:", newCap)
 
 		sys.Replicas = int(math.Max(1, newCap))
 		fmt.Println("SYS BEFORE CTRL:", sys.Replicas)
@@ -292,11 +291,11 @@ sys := ctrl.SystemState{
 		)
 
 		controlSelected := controller.LastDecision.Replicas
-actActual := controller.ActState.ReplicaActual
-overrideFlag := int(autopilotCap) != sys.Replicas
+		actActual := controller.ActState.ReplicaActual
+		overrideFlag := int(autopilotCap) != sys.Replicas
 
 		fmt.Println("SYS AFTER CTRL:", sys.Replicas)
-fmt.Println("------")
+		fmt.Println("------")
 
 		cost := util*2 + backlog*0.1
 
@@ -320,9 +319,9 @@ fmt.Println("------")
 			Cache:    sys.CacheAggression,
 
 			AutopilotCap:    autopilotCap,
-ControlSelected: controlSelected,
-ActuatorActual:  actActual,
-Override:        overrideFlag,
+			ControlSelected: controlSelected,
+			ActuatorActual:  actActual,
+			Override:        overrideFlag,
 
 			// Autopilot signals
 			MPC_Target:       mpcTarget,
@@ -396,12 +395,12 @@ Override:        overrideFlag,
 	}
 
 	// 🔥 DEBUG JSON (STEP-BY-STEP)
-file2, _ := os.Create("control_debug.json")
-defer file2.Close()
+	file2, _ := os.Create("control_debug.json")
+	defer file2.Close()
 
-enc2 := json.NewEncoder(file2)
-enc2.SetIndent("", "  ")
-enc2.Encode(logs)
+	enc2 := json.NewEncoder(file2)
+	enc2.SetIndent("", "  ")
+	enc2.Encode(logs)
 
 	return RunLog{
 		Scenario: name,

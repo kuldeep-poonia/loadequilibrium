@@ -114,10 +114,6 @@ func NewAuthority() *Authority {
 
 func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 
-	
-
-
-	
 	if a.Memory == nil {
 		a.Memory = NewRegimeMemory()
 	}
@@ -140,7 +136,6 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	if tickSeconds <= 0 {
 		tickSeconds = 1
 	}
-	
 
 	quality := DecisionQuality{
 		UsedSignals: []string{
@@ -159,7 +154,6 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	}
 
 	bounds := a.deriveBounds(state, in.Advisory, &quality)
-
 
 	risk := aggregateAdvisoryRisk(state, in.Advisory)
 	// Guard: InstabilityRisk is computed as (VarianceScale - 1.0) which can be
@@ -223,7 +217,6 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	quality.CandidateCount = len(candidates)
 
 	// Use EWMA backlog for cost calculations so it doesn't overreact to single-tick spikes
-	
 
 	best := SelectBestBundle(
 		state,
@@ -247,7 +240,7 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	} else if rawScale < 0.95 {
 		currentDir = "down"
 	}
-	
+
 	// Enforce 3-tick cooldown when changing direction (up→down or down→up).
 	// Previously: < 1 which is always false (Tick increments by ≥1), so cooldown never fired.
 	// Fix: < 3 so rapid direction reversal within 3 ticks is suppressed. This prevents
@@ -279,7 +272,7 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 		Active:                    true,
 		StabilityMargin:           1 - risk,
 		HysteresisState:           "control-authority",
-		ActuationBound: 1.0,
+		ActuationBound:            1.0,
 		PredictiveTarget:          clamp(state.Utilisation+state.Risk, 0, 1.5),
 		MPCPredictedRho:           best.HeuristicScore,
 		MPCOvershootRisk:          rawScale > scale,
@@ -296,7 +289,6 @@ func (a *Authority) Decide(in AuthorityInput) AuthorityDecision {
 	a.LastBundle = best
 	a.LastDirective = directive
 	a.Memory.RecordAction(best)
-
 
 	return AuthorityDecision{
 		Directive: directive,
@@ -469,28 +461,28 @@ func defaultSimConfig(dt float64, seed int64) SimConfig {
 }
 
 func defaultCostParams(targetUtil, risk float64, adv AdvisoryBundle) CostParams {
-    // FIX: Make backlog cost non-linear so it eventually forces a scale-up
-    // A backlog of 300 now produces a weight of ~16.0 instead of 1.8
-    backlogFactor := math.Pow(math.Max(0, adv.Autopilot.PredictedBacklog)/40.0, 2.5)
+	// FIX: Make backlog cost non-linear so it eventually forces a scale-up
+	// A backlog of 300 now produces a weight of ~16.0 instead of 1.8
+	backlogFactor := math.Pow(math.Max(0, adv.Autopilot.PredictedBacklog)/40.0, 2.5)
 
 	utilPenalty := 0.0
 	if adv.Autopilot.PredictedBacklog > 0 {
 		utilPenalty = 0.05 * risk
 	}
 
-    return CostParams{
-        InfraUnitCost:   1,
-        SLAWeight:       1.5 + risk + math.Max(0, adv.Sandbox.Urgency),
-        RiskWeight:      1.5 + 1.0*risk,        // REDUCED: Was 2.0 + 2.5*risk
-        BacklogWeight:   5.0 + backlogFactor*2,  // INCREASED: Was 1.5 + backlog/1000
-        UtilTarget:      clamp(targetUtil-utilPenalty, 0.45, 0.85),
-        UtilBand:        0.15,
-        SmoothReplica:   0.05, // LOWERED: Allow faster response
-        SmoothRetry:     0.20,
-        SmoothQueue:     0.20,
-        SmoothCache:     0.20,
-        CacheCostWeight: 0.50,
-    }
+	return CostParams{
+		InfraUnitCost:   1,
+		SLAWeight:       1.5 + risk + math.Max(0, adv.Sandbox.Urgency),
+		RiskWeight:      1.5 + 1.0*risk,        // REDUCED: Was 2.0 + 2.5*risk
+		BacklogWeight:   5.0 + backlogFactor*2, // INCREASED: Was 1.5 + backlog/1000
+		UtilTarget:      clamp(targetUtil-utilPenalty, 0.45, 0.85),
+		UtilBand:        0.15,
+		SmoothReplica:   0.05, // LOWERED: Allow faster response
+		SmoothRetry:     0.20,
+		SmoothQueue:     0.20,
+		SmoothCache:     0.20,
+		CacheCostWeight: 0.50,
+	}
 }
 func enforceBundleBounds(b Bundle, bounds ActionBounds) Bundle {
 	b.Replicas = clampInt(b.Replicas, bounds.MinReplicas, bounds.MaxReplicas)

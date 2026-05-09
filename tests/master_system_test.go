@@ -1,4 +1,3 @@
-
 package tests
 
 import (
@@ -24,9 +23,9 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
-// 
+//
 // MASTER TEST CONFIGURATION
-// 
+//
 
 func masterCfg() *config.Config {
 	return &config.Config{
@@ -133,10 +132,10 @@ func (a *captureActuator) AllDispatches() []capturedDispatch {
 	return out
 }
 
-// 
+//
 // MASTER TEST 1: FULL SYSTEM LIFECYCLE
 // Validates: ingest → tick pipeline → actuation → streaming → all 9 stages
-// 
+//
 
 func TestMaster_FullSystemLifecycle(t *testing.T) {
 	cfg := masterCfg()
@@ -209,12 +208,12 @@ func TestMaster_FullSystemLifecycle(t *testing.T) {
 	}
 	t.Logf("Orchestrator completed %d ticks", tickCount)
 
-	cancel() // stop orchestrator
+	cancel()                           // stop orchestrator
 	time.Sleep(200 * time.Millisecond) // allow drain
 
 	// ── Phase 4: Validate streaming payloads ──────────────────────────────
 	var receivedPayloads []*streaming.TickPayload
-	drainPayloads:
+drainPayloads:
 	for {
 		select {
 		case p := <-payloads:
@@ -304,9 +303,9 @@ func TestMaster_FullSystemLifecycle(t *testing.T) {
 	t.Logf("Reentrant ticks: %d, Total overruns: %d", orch.ReentrantTickCount(), rm.TotalOverruns)
 }
 
-// 
+//
 // MASTER TEST 2: COLLAPSE SCENARIO — high load triggers events + scale-up
-// 
+//
 
 func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 	cfg := masterCfg()
@@ -322,15 +321,15 @@ func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 
 	// Inject critically high load — arrival ≈ service rate → ρ ≈ 0.95+
 	for i := 0; i < 80; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-critical",
-		RequestRate: 950,
-		ErrorRate:   0.08,
-		Latency: telemetry.LatencyStats{
-			Mean: 10, P50: 8, P95: 20, P99: 30,
-		},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-critical",
+			RequestRate: 950,
+			ErrorRate:   0.08,
+			Latency: telemetry.LatencyStats{
+				Mean: 10, P50: 8, P95: 20, P99: 30,
+			},
+			Timestamp: time.Now(),
+		})
 	}
 
 	// Subscribe to capture all events
@@ -367,8 +366,6 @@ func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 		t.Error("Zero directives produced under critical load — control authority not connected to streaming")
 	}
 
-	
-
 	mu.Lock()
 	for _, d := range allDirectives {
 		if math.IsNaN(d.ScaleFactor) || math.IsInf(d.ScaleFactor, 0) {
@@ -398,9 +395,9 @@ func TestMaster_CollapseScenarioDetectedAndActuated(t *testing.T) {
 	}
 }
 
-// 
+//
 // MASTER TEST 3: RECOVERY SCENARIO — load drops after overload
-// 
+//
 
 func TestMaster_RecoveryAfterOverload(t *testing.T) {
 	cfg := masterCfg()
@@ -415,12 +412,12 @@ func TestMaster_RecoveryAfterOverload(t *testing.T) {
 
 	// Phase A: high load
 	for i := 0; i < 60; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-recover",
-		RequestRate: 850, ErrorRate: 0.05,
-		Latency: telemetry.LatencyStats{Mean: 10, P99: 25},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-recover",
+			RequestRate: 850, ErrorRate: 0.05,
+			Latency:   telemetry.LatencyStats{Mean: 10, P99: 25},
+			Timestamp: time.Now(),
+		})
 	}
 
 	type scaleSnapshot struct {
@@ -447,12 +444,12 @@ func TestMaster_RecoveryAfterOverload(t *testing.T) {
 
 	// Phase B: load drops
 	for i := 0; i < 60; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-recover",
-		RequestRate: 50, ErrorRate: 0.001,
-		Latency: telemetry.LatencyStats{Mean: 5, P99: 10},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-recover",
+			RequestRate: 50, ErrorRate: 0.001,
+			Latency:   telemetry.LatencyStats{Mean: 5, P99: 10},
+			Timestamp: time.Now(),
+		})
 	}
 	time.Sleep(1200 * time.Millisecond)
 	cancel()
@@ -493,10 +490,10 @@ func TestMaster_RecoveryAfterOverload(t *testing.T) {
 	}
 }
 
-// 
+//
 // MASTER TEST 4: MULTI-SERVICE TOPOLOGY PROPAGATION
 // Validates topology coupling and cascade risk flows across services
-// 
+//
 
 func TestMaster_MultiServiceTopologyCascade(t *testing.T) {
 	cfg := masterCfg()
@@ -606,9 +603,9 @@ func TestMaster_MultiServiceTopologyCascade(t *testing.T) {
 	}
 }
 
-// 
+//
 // MASTER TEST 5: SINGLE-START GUARD — orchestrator cannot run twice concurrently
-// 
+//
 
 func TestMaster_OrchestratorSingleStartGuard(t *testing.T) {
 	cfg := masterCfg()
@@ -644,10 +641,10 @@ func TestMaster_OrchestratorSingleStartGuard(t *testing.T) {
 	t.Logf("Started %d Run() goroutines, reentrant ticks=%d", startCount, reentrant)
 }
 
-// 
+//
 // MASTER TEST 6: ACTUATION FEEDBACK LOOP
 // Validates actuator feedback is drained each tick without blocking
-// 
+//
 
 func TestMaster_ActuatorFeedbackDrained(t *testing.T) {
 	cfg := masterCfg()
@@ -665,12 +662,12 @@ func TestMaster_ActuatorFeedbackDrained(t *testing.T) {
 	orch := runtime.New(cfg, store, hub, nil, act, scen)
 
 	for i := 0; i < 40; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-fb",
-		RequestRate: 100, ErrorRate: 0.01,
-		Latency: telemetry.LatencyStats{Mean: 50, P99: 100},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-fb",
+			RequestRate: 100, ErrorRate: 0.01,
+			Latency:   telemetry.LatencyStats{Mean: 50, P99: 100},
+			Timestamp: time.Now(),
+		})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
@@ -693,10 +690,10 @@ func TestMaster_ActuatorFeedbackDrained(t *testing.T) {
 	t.Logf("Ran %d ticks, reentrant=%d", ticks, orch.ReentrantTickCount())
 }
 
-// 
+//
 // MASTER TEST 7: ZERO-LATENCY RESTART
 // Validates bundles are broadcast on tick 1 when windows exist at startup
-// 
+//
 
 func TestMaster_ZeroLatencyRestartWithExistingWindows(t *testing.T) {
 	cfg := masterCfg()
@@ -704,12 +701,12 @@ func TestMaster_ZeroLatencyRestartWithExistingWindows(t *testing.T) {
 
 	// Pre-populate store before constructing orchestrator (simulating restart)
 	for i := 0; i < 60; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-preload",
-		RequestRate: 100, ErrorRate: 0.01,
-		Latency: telemetry.LatencyStats{Mean: 50, P99: 100},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-preload",
+			RequestRate: 100, ErrorRate: 0.01,
+			Latency:   telemetry.LatencyStats{Mean: 50, P99: 100},
+			Timestamp: time.Now(),
+		})
 	}
 
 	hub := streaming.NewHub()
@@ -744,9 +741,9 @@ func TestMaster_ZeroLatencyRestartWithExistingWindows(t *testing.T) {
 	}
 }
 
-// 
+//
 // MASTER TEST 8: PERSISTENCE WRITER (nil-safe path)
-// 
+//
 
 func TestMaster_PersistenceWriterNilSafe(t *testing.T) {
 	// pw=nil (no DATABASE_URL configured) — must not panic
@@ -762,9 +759,9 @@ func TestMaster_PersistenceWriterNilSafe(t *testing.T) {
 	pw.Enqueue(persistence.Snapshot{TickAt: time.Now()})
 }
 
-// 
+//
 // MASTER TEST 9: SIMULATION RUNNER MULTI-SCENARIO
-// 
+//
 
 func TestMaster_SimulationMultiScenarioComparison(t *testing.T) {
 	runner := simulation.NewRunner(300.0, 1.5, 4)
@@ -798,9 +795,9 @@ func TestMaster_SimulationMultiScenarioComparison(t *testing.T) {
 	}
 }
 
-// 
+//
 // MASTER TEST 10: STABILITY ENVELOPE VALIDATION
-// 
+//
 
 func TestMaster_StabilityEnvelopeInPayload(t *testing.T) {
 	cfg := masterCfg()
@@ -811,12 +808,12 @@ func TestMaster_StabilityEnvelopeInPayload(t *testing.T) {
 
 	// Ingest moderate load
 	for i := 0; i < 60; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-env",
-		RequestRate: 120, ErrorRate: 0.01,
-		Latency: telemetry.LatencyStats{Mean: 30, P99: 60},
-		Timestamp: time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-env",
+			RequestRate: 120, ErrorRate: 0.01,
+			Latency:   telemetry.LatencyStats{Mean: 30, P99: 60},
+			Timestamp: time.Now(),
+		})
 	}
 
 	var mu sync.Mutex
@@ -856,9 +853,9 @@ func TestMaster_StabilityEnvelopeInPayload(t *testing.T) {
 		env.SafeSystemRhoMax, env.CurrentSystemRhoMean, env.EnvelopeHeadroom, env.MostVulnerableService)
 }
 
-// 
+//
 // MASTER TEST 11: ADAPTIVE TICK INTERVAL STRETCHES ON OVERRUN
-// 
+//
 
 func TestMaster_AdaptiveTickIntervalUnderLoad(t *testing.T) {
 	cfg := masterCfg()
@@ -915,11 +912,11 @@ func TestMaster_AdaptiveTickIntervalUnderLoad(t *testing.T) {
 	// Test passes as long as system didn't panic or deadlock
 }
 
-// 
+//
 // MASTER TEST 12: STOCHASTIC BYPASS UNDER STALE DATA
 // Validates that stochastic model is bypassed when systemStaleness > 0.5
 // but queue modelling and optimisation still run
-// 
+//
 
 func TestMaster_StaleDataBypassesStochasticKeepsQueueModel(t *testing.T) {
 	cfg := masterCfg()
@@ -932,12 +929,12 @@ func TestMaster_StaleDataBypassesStochasticKeepsQueueModel(t *testing.T) {
 
 	// Inject old data (will be stale by the time orchestrator runs)
 	for i := 0; i < 30; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-stale",
-		RequestRate: 100, ErrorRate: 0.01,
-		Latency: telemetry.LatencyStats{Mean: 50, P99: 100},
-		Timestamp: time.Now().Add(-10 * time.Second), // aged data
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-stale",
+			RequestRate: 100, ErrorRate: 0.01,
+			Latency:   telemetry.LatencyStats{Mean: 50, P99: 100},
+			Timestamp: time.Now().Add(-10 * time.Second), // aged data
+		})
 	}
 
 	var mu sync.Mutex
@@ -975,9 +972,9 @@ func TestMaster_StaleDataBypassesStochasticKeepsQueueModel(t *testing.T) {
 	t.Log("Stale data bypass test passed — no panic with aged telemetry")
 }
 
-// 
+//
 // MASTER TEST 13: END-TO-END NUMERIC SUMMARY
-// 
+//
 
 func TestMaster_E2ENumericSummary(t *testing.T) {
 	cfg := masterCfg()
@@ -990,23 +987,23 @@ func TestMaster_E2ENumericSummary(t *testing.T) {
 
 	// Realistic load profile
 	for i := 0; i < 80; i++ {
-	store.Ingest(&telemetry.MetricPoint{
-		ServiceID:   "svc-summary",
-		RequestRate: 200 + float64(i%40),
-		ErrorRate:   0.008,
-		Latency:     telemetry.LatencyStats{Mean: 40, P50: 35, P95: 80, P99: 120},
-		Timestamp:   time.Now(),
-	})
+		store.Ingest(&telemetry.MetricPoint{
+			ServiceID:   "svc-summary",
+			RequestRate: 200 + float64(i%40),
+			ErrorRate:   0.008,
+			Latency:     telemetry.LatencyStats{Mean: 40, P50: 35, P95: 80, P99: 120},
+			Timestamp:   time.Now(),
+		})
 	}
 
 	var mu sync.Mutex
 	type metricSample struct {
-		tick              uint64
-		utilisation       float64
-		collapseRisk      float64
-		scaleFactor       float64
-		compositeScore    float64
-		tickHealthMs      float64
+		tick               uint64
+		utilisation        float64
+		collapseRisk       float64
+		scaleFactor        float64
+		compositeScore     float64
+		tickHealthMs       float64
 		cascadeFailureProb float64
 	}
 	var samples []metricSample
@@ -1089,16 +1086,16 @@ func TestMaster_E2ENumericSummary(t *testing.T) {
 	n := float64(len(samplesCopy))
 
 	summary := map[string]float64{
-		"ticks_completed":       float64(ticks),
-		"samples_captured":      n,
-		"avg_utilisation":       sumUtil / n,
-		"avg_collapse_risk":     sumRisk / n,
-		"avg_scale_factor":      sumScale / n,
-		"min_scale_factor":      minScale,
-		"max_scale_factor":      maxScale,
-		"avg_composite_score":   sumComposite / n,
-		"avg_tick_health_ms":    sumTickMs / n,
-		"reentrant_ticks":       float64(orch.ReentrantTickCount()),
+		"ticks_completed":     float64(ticks),
+		"samples_captured":    n,
+		"avg_utilisation":     sumUtil / n,
+		"avg_collapse_risk":   sumRisk / n,
+		"avg_scale_factor":    sumScale / n,
+		"min_scale_factor":    minScale,
+		"max_scale_factor":    maxScale,
+		"avg_composite_score": sumComposite / n,
+		"avg_tick_health_ms":  sumTickMs / n,
+		"reentrant_ticks":     float64(orch.ReentrantTickCount()),
 	}
 
 	t.Logf("\n=== E2E NUMERIC SUMMARY ===")

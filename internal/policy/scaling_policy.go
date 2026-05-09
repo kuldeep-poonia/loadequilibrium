@@ -3,10 +3,10 @@ package policy
 import "math"
 
 type ScalingSignal struct {
-	PredictedLoad     float64
-	CurrentReplicas   int
-	TargetLatency     float64
-	ObservedLatency   float64
+	PredictedLoad   float64
+	CurrentReplicas int
+	TargetLatency   float64
+	ObservedLatency float64
 
 	MinReplicas int
 	MaxReplicas int

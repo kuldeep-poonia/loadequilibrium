@@ -1,4 +1,3 @@
-
 package ws
 
 import (
@@ -31,15 +30,15 @@ const (
 
 // Conn is a WebSocket connection.
 type Conn struct {
-	conn   net.Conn
-	rw     *bufio.ReadWriter
+	conn     net.Conn
+	rw       *bufio.ReadWriter
 	isServer bool
 }
 
 // Upgrader upgrades HTTP connections to WebSocket.
 type Upgrader struct {
 	ReadBufferSize, WriteBufferSize int
-	CheckOrigin func(*http.Request) bool
+	CheckOrigin                     func(*http.Request) bool
 }
 
 var ErrHandshakeFailed = errors.New("ws: handshake failed")

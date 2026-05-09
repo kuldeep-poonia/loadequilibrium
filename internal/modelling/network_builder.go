@@ -22,8 +22,8 @@ func PopulateNetworkField(nf *NetworkField, topo topology.GraphSnapshot) {
 		}
 
 		e := &EdgeField{
-			Cells: make([]Cell, 30),
-			Dx:    1.0 / 30.0,
+			Cells:       make([]Cell, 30),
+			Dx:          1.0 / 30.0,
 			ServiceRate: 0.15,
 			NoiseAmp:    0.01,
 			SourceGain:  0.4,
@@ -48,4 +48,3 @@ func PopulateNetworkField(nf *NetworkField, topo topology.GraphSnapshot) {
 		nf.Junctions = append(nf.Junctions, j)
 	}
 }
-

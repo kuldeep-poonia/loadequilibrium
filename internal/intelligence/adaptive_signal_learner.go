@@ -7,7 +7,7 @@ import (
 )
 
 type SignalVector struct {
-	Timestamp time.Time
+	Timestamp          time.Time
 	BacklogError       float64
 	LatencyError       float64
 	ErrorRateError     float64
@@ -17,45 +17,45 @@ type SignalVector struct {
 }
 
 type LearnedInstability struct {
-	Score        float64
-	Confidence   float64
-	RegimeID     int
-	RegimeProb   []float64
-	HorizonRisk  float64
-	OscModes     []float64
+	Score         float64
+	Confidence    float64
+	RegimeID      int
+	RegimeProb    []float64
+	HorizonRisk   float64
+	OscModes      []float64
 	Observability float64
 }
 
 type AdaptiveSignalLearner struct {
-	mu sync.Mutex
+	mu  sync.Mutex
 	dim int
 
-	A [][]float64
-	P [][]float64
+	A   [][]float64
+	P   [][]float64
 	lam float64
 
-	mean []float64
-	cov [][]float64
+	mean   []float64
+	cov    [][]float64
 	covInv [][]float64
 	covLam float64
-	reg float64
+	reg    float64
 
-	K int
+	K       int
 	regMean [][]float64
-	regCov [][][]float64
+	regCov  [][][]float64
 	regProb []float64
-	trans [][]float64
+	trans   [][]float64
 
-	specBuf [][]float64
-	specIdx int
-	specWin int
+	specBuf  [][]float64
+	specIdx  int
+	specWin  int
 	freqGrid []float64
 
 	ctrlDelay int
 	ctrlBound float64
 
 	obsGram [][]float64
-	obsEW float64
+	obsEW   float64
 }
 
 func NewAdaptiveSignalLearner(dim int) *AdaptiveSignalLearner {
@@ -64,24 +64,24 @@ func NewAdaptiveSignalLearner(dim int) *AdaptiveSignalLearner {
 
 	return &AdaptiveSignalLearner{
 		dim: dim,
-		A: identityMatrix(dim, 0.4),
-		P: identityMatrix(dim, 40),
+		A:   identityMatrix(dim, 0.4),
+		P:   identityMatrix(dim, 40),
 		lam: 0.996,
 
-		mean: make([]float64, dim),
-		cov: identityMatrix(dim, 1),
+		mean:   make([]float64, dim),
+		cov:    identityMatrix(dim, 1),
 		covInv: identityMatrix(dim, 1),
 		covLam: 0.996,
-		reg: 1e-4,
+		reg:    1e-4,
 
-		K: K,
+		K:       K,
 		regMean: makeCentroids(K, dim),
-		regCov: makeFullCovSet(K, dim),
+		regCov:  makeFullCovSet(K, dim),
 		regProb: uniform(K),
-		trans: makeTrans(K),
+		trans:   makeTrans(K),
 
-		specBuf: makeBuf(128, dim),
-		specWin: 128,
+		specBuf:  makeBuf(128, dim),
+		specWin:  128,
 		freqGrid: []float64{0.05, 0.12, 0.21},
 
 		ctrlDelay: 3,
@@ -116,12 +116,12 @@ func (l *AdaptiveSignalLearner) Update(v SignalVector) LearnedInstability {
 	conf := l.conf(score, obs)
 
 	return LearnedInstability{
-		Score: score,
-		Confidence: conf,
-		RegimeID: reg,
-		RegimeProb: regProb,
-		HorizonRisk: risk,
-		OscModes: modes,
+		Score:         score,
+		Confidence:    conf,
+		RegimeID:      reg,
+		RegimeProb:    regProb,
+		HorizonRisk:   risk,
+		OscModes:      modes,
 		Observability: obs,
 	}
 }
@@ -159,7 +159,7 @@ func (l *AdaptiveSignalLearner) rls(phi []float64, x []float64) {
 		den := l.lam + dot(phi[:l.dim], g)
 
 		for j := 0; j < l.dim; j++ {
-			l.A[i][j] += (g[j]/den)*err
+			l.A[i][j] += (g[j] / den) * err
 		}
 
 		l.P = joseph(l.P, phi[:l.dim], l.lam)
@@ -174,7 +174,7 @@ func (l *AdaptiveSignalLearner) updateCov(x []float64) {
 
 	for i := 0; i < l.dim; i++ {
 		d := x[i] - l.mean[i]
-		l.mean[i] += (1-l.covLam)*d
+		l.mean[i] += (1 - l.covLam) * d
 	}
 
 	for i := 0; i < l.dim; i++ {

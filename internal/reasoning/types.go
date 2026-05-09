@@ -6,7 +6,7 @@ import "time"
 type Severity int
 
 const (
-	SeverityInfo     Severity = iota
+	SeverityInfo Severity = iota
 	SeverityWarning
 	SeverityCritical
 )
@@ -26,18 +26,18 @@ func (s Severity) String() string {
 
 // Event is a single structured reasoning output with cause→model→prediction→action chain.
 type Event struct {
-	ID                 string    `json:"id"`
-	Timestamp          time.Time `json:"timestamp"`
-	ServiceID          string    `json:"service_id,omitempty"`
-	Severity           Severity  `json:"severity"`
-	Category           string    `json:"category"`
-	Description        string    `json:"description"`
-	Recommendation     string    `json:"recommendation,omitempty"`
-	Evidence           Evidence  `json:"evidence"`
+	ID             string    `json:"id"`
+	Timestamp      time.Time `json:"timestamp"`
+	ServiceID      string    `json:"service_id,omitempty"`
+	Severity       Severity  `json:"severity"`
+	Category       string    `json:"category"`
+	Description    string    `json:"description"`
+	Recommendation string    `json:"recommendation,omitempty"`
+	Evidence       Evidence  `json:"evidence"`
 	// Intelligence fields
-	UncertaintyScore   float64   `json:"uncertainty_score"`   // 0=certain, 1=highly uncertain
-	OperationalPriority int      `json:"operational_priority"` // 0..9
-	ModelChain         string    `json:"model_chain,omitempty"` // cause→model→prediction→action
+	UncertaintyScore    float64 `json:"uncertainty_score"`     // 0=certain, 1=highly uncertain
+	OperationalPriority int     `json:"operational_priority"`  // 0..9
+	ModelChain          string  `json:"model_chain,omitempty"` // cause→model→prediction→action
 }
 
 // Evidence is the quantified supporting data for an event.

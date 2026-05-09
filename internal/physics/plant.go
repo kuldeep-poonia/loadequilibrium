@@ -9,7 +9,7 @@ import (
 type PlantParams struct {
 
 	// phase switching
-	Lambda float64
+	Lambda               float64
 	HighPhasePersistence float64
 
 	// inflow relaxation
@@ -19,10 +19,10 @@ type PlantParams struct {
 	InflowMeanHigh  float64
 
 	// service physics (advanced dissipative)
-	BaseService   float64
-	ServiceAlpha  float64
-	ServiceBeta   float64
-	RecoveryGain  float64
+	BaseService  float64
+	ServiceAlpha float64
+	ServiceBeta  float64
+	RecoveryGain float64
 
 	// global stochastic stability gain
 	StabilityGain float64
@@ -45,7 +45,6 @@ type PlantParams struct {
 }
 
 type FluidPlant struct {
-
 	Q float64
 	A float64
 	S float64
@@ -66,7 +65,7 @@ func NewFluidPlant(seed int64) *FluidPlant {
 
 	params := PlantParams{
 
-		Lambda: 0.25,
+		Lambda:               0.25,
 		HighPhasePersistence: 4.5,
 
 		InflowRelaxLow:  0.5,
@@ -133,9 +132,9 @@ func (p *FluidPlant) updateInflow(dt float64) {
 	}
 
 	if p.Phase == 0 {
-		p.A += -p.P.InflowRelaxLow*(p.A-p.P.InflowMeanLow)*dt
+		p.A += -p.P.InflowRelaxLow * (p.A - p.P.InflowMeanLow) * dt
 	} else {
-		p.A += -p.P.InflowRelaxHigh*(p.A-p.P.InflowMeanHigh)*dt
+		p.A += -p.P.InflowRelaxHigh * (p.A - p.P.InflowMeanHigh) * dt
 	}
 }
 

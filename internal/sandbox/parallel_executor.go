@@ -1,7 +1,5 @@
 package sandbox
 
-
-
 import (
 	"context"
 	"fmt"
@@ -65,7 +63,6 @@ type SimulationResult struct {
 type ResultSink func(res SimulationResult)
 
 type ExecutorConfig struct {
-
 	InitWorkers int
 	MaxWorkers  int
 
@@ -363,8 +360,7 @@ func runSafe(job SimulationJob) (res SimulationResult) {
 	return
 }
 
-var ErrSimulationPanic =
-	&SimulationError{"simulation panic"}
+var ErrSimulationPanic = &SimulationError{"simulation panic"}
 
 type SimulationError struct {
 	msg string

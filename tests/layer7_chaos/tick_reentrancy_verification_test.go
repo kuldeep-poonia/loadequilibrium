@@ -51,7 +51,7 @@ func TestL7_CHAOS_013_TickReentrancyVerification(t *testing.T) {
 	t.Logf("  goroutines_before = %d", beforeGoroutines)
 	t.Logf("  goroutines_after  = %d", afterGoroutines)
 	t.Logf("  max_in_flight     = %d", inFlight)
-	t.Logf("  goroutine_leak    = %d", afterGoroutines - beforeGoroutines)
+	t.Logf("  goroutine_leak    = %d", afterGoroutines-beforeGoroutines)
 
 	// Irrefutable proof of reentrancy
 	if reentrantCount > 0 {

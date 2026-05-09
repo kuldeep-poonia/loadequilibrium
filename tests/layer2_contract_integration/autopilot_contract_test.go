@@ -13,7 +13,9 @@ import (
 // ---------------------------------------------------------------
 // L2-AUTO-001 — SafetyEngine EmergencyOverride fires on unsafe trajectory
 // AIM: When backlog exceeds BaseMaxBacklog in every trajectory step,
-//      EmergencyOverride MUST trigger (return override=true).
+//
+//	EmergencyOverride MUST trigger (return override=true).
+//
 // THRESHOLD: 0 missed overrides for genuinely unsafe trajectories
 // ON EXCEED: CRITICAL — unsafe trajectory passes without intervention
 // ---------------------------------------------------------------
@@ -22,23 +24,23 @@ func TestL2_AUTO_001_SafetyOverrideFires(t *testing.T) {
 	const N = 1000
 
 	se := &autopilot.SafetyEngine{
-		BaseMaxBacklog:    100,
-		BaseMaxLatency:    50,
-		Alpha:             0.5,
-		Beta:              0.3,
-		ArrivalGain:       0.1,
-		DisturbanceGain:   0.2,
-		TopologyGain:      0.1,
-		RetryGain:         0.05,
-		TailRiskBase:      0.2,
-		AccelBaseWindow:   5,
-		AccelThreshold:    0.5,
-		MaxCapacityRamp:   2.0,
-		CapacityEffectTau: 0.5,
-		TopologyDelayTau:  0.5,
+		BaseMaxBacklog:     100,
+		BaseMaxLatency:     50,
+		Alpha:              0.5,
+		Beta:               0.3,
+		ArrivalGain:        0.1,
+		DisturbanceGain:    0.2,
+		TopologyGain:       0.1,
+		RetryGain:          0.05,
+		TailRiskBase:       0.2,
+		AccelBaseWindow:    5,
+		AccelThreshold:     0.5,
+		MaxCapacityRamp:    2.0,
+		CapacityEffectTau:  0.5,
+		TopologyDelayTau:   0.5,
 		TerminalEnergyBase: 500,
-		ContractionSlack:  0.3,
-		HysteresisBand:    0.1,
+		ContractionSlack:   0.3,
+		HysteresisBand:     0.1,
 	}
 
 	var missedOverrides int
@@ -108,7 +110,9 @@ func TestL2_AUTO_001_SafetyOverrideFires(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-AUTO-002 — PredictiveSafe always passes for benign trajectories
 // AIM: Trajectory where backlog << BaseMaxBacklog and latency << BaseMaxLatency
-//      must always return PredictiveSafe=true (no false alarms).
+//
+//	must always return PredictiveSafe=true (no false alarms).
+//
 // THRESHOLD: 0 false alarms
 // ON EXCEED: Safe trajectories trigger override → system halts unnecessarily
 // ---------------------------------------------------------------
@@ -117,23 +121,23 @@ func TestL2_AUTO_002_PredictiveSafeNoFalseAlarm(t *testing.T) {
 	const N = 1000
 
 	se := &autopilot.SafetyEngine{
-		BaseMaxBacklog:    100,
-		BaseMaxLatency:    50,
-		Alpha:             0.5,
-		Beta:              0.3,
-		ArrivalGain:       0.1,
-		DisturbanceGain:   0.2,
-		TopologyGain:      0.1,
-		RetryGain:         0.05,
-		TailRiskBase:      0.2,
-		AccelBaseWindow:   5,
-		AccelThreshold:    0.5,
-		MaxCapacityRamp:   2.0,
-		CapacityEffectTau: 0.5,
-		TopologyDelayTau:  0.5,
+		BaseMaxBacklog:     100,
+		BaseMaxLatency:     50,
+		Alpha:              0.5,
+		Beta:               0.3,
+		ArrivalGain:        0.1,
+		DisturbanceGain:    0.2,
+		TopologyGain:       0.1,
+		RetryGain:          0.05,
+		TailRiskBase:       0.2,
+		AccelBaseWindow:    5,
+		AccelThreshold:     0.5,
+		MaxCapacityRamp:    2.0,
+		CapacityEffectTau:  0.5,
+		TopologyDelayTau:   0.5,
 		TerminalEnergyBase: 500,
-		ContractionSlack:  0.5,
-		HysteresisBand:    0.1,
+		ContractionSlack:   0.5,
+		HysteresisBand:     0.1,
 	}
 
 	var falseAlarms int
@@ -200,7 +204,9 @@ func TestL2_AUTO_002_PredictiveSafeNoFalseAlarm(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-AUTO-003 — RolloutController capacity ramp bounded
 // AIM: Each Step must change CapacityActive by at most
-//      max(CapRampUpNormal, CapRampUpEmergency) * Dt per step.
+//
+//	max(CapRampUpNormal, CapRampUpEmergency) * Dt per step.
+//
 // THRESHOLD: 0 ramp violations
 // ON EXCEED: Capacity jumps unbounded → infrastructure shock
 // ---------------------------------------------------------------
@@ -307,7 +313,9 @@ func TestL2_AUTO_003_RolloutCapacityRampBounded(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-AUTO-004 — RolloutController mode transitions correct
 // AIM: GovernanceMode must be Emergency when backlog > EmergencyBacklog,
-//      Degraded when backlog > DegradedBacklog, Normal otherwise.
+//
+//	Degraded when backlog > DegradedBacklog, Normal otherwise.
+//
 // THRESHOLD: 0 mode misclassifications
 // ON EXCEED: Wrong governance mode → wrong ramp rate → capacity timing wrong
 // ---------------------------------------------------------------
@@ -315,18 +323,18 @@ func TestL2_AUTO_004_GovernanceModeTransitions(t *testing.T) {
 	start := time.Now()
 
 	rc := &autopilot.RolloutController{
-		Dt:               0.1,
-		CapRampUpNormal:  2.0,
+		Dt:                 0.1,
+		CapRampUpNormal:    2.0,
 		CapRampUpEmergency: 5.0,
-		CapRampDown:      3.0,
-		QueueMax:         20,
-		EmergencyBacklog: 100,
-		DegradedBacklog:  50,
-		RolloutTimeout:   10,
-		MaxRetries:       3,
-		SuccessProbBase:  0.95,
-		ConfigLagTau:     1.0,
-		WarmupTau:        1.0,
+		CapRampDown:        3.0,
+		QueueMax:           20,
+		EmergencyBacklog:   100,
+		DegradedBacklog:    50,
+		RolloutTimeout:     10,
+		MaxRetries:         3,
+		SuccessProbBase:    0.95,
+		ConfigLagTau:       1.0,
+		WarmupTau:          1.0,
 	}
 
 	type testCase struct {
@@ -393,7 +401,9 @@ func TestL2_AUTO_004_GovernanceModeTransitions(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-AUTO-005 — Supervisor.ShouldRecompute determinism
 // AIM: Same PlantState input must produce same ShouldRecompute output
-//      across 100 repeated calls (no hidden state mutation).
+//
+//	across 100 repeated calls (no hidden state mutation).
+//
 // THRESHOLD: 0 non-deterministic flips
 // ON EXCEED: Supervisor decision depends on hidden mutable state
 // ---------------------------------------------------------------
@@ -402,8 +412,8 @@ func TestL2_AUTO_005_SupervisorDeterminism(t *testing.T) {
 	const N = 100
 
 	type testCase struct {
-		state    autopilot.PlantState
-		label    string
+		state autopilot.PlantState
+		label string
 	}
 
 	cases := []testCase{
@@ -480,7 +490,9 @@ func TestL2_AUTO_005_SupervisorDeterminism(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-AUTO-006 — RuntimeOrchestrator tick latency SLA
 // AIM: Single RuntimeOrchestrator.Tick() must complete within SLA:
-//      p50<2ms p95<5ms p99<10ms
+//
+//	p50<2ms p95<5ms p99<10ms
+//
 // THRESHOLD: p99 < 10ms
 // ON EXCEED: Autopilot tick too slow → control frequency drops
 // ---------------------------------------------------------------
@@ -520,7 +532,7 @@ func TestL2_AUTO_006_RuntimeTickLatencySLA(t *testing.T) {
 			Status: l2Pass(passed), ActualValue: p99,
 			ActualUnit: "ms", SampleCount: N,
 			Percentiles: &L2PercentileResult{P50Ms: p50, P95Ms: p95, P99Ms: p99, P100Ms: p100},
-			DurationMs: durationMs,
+			DurationMs:  durationMs,
 		},
 		OnExceed: "Tick exceeds budget → autopilot frequency drops → control latency increases → system drift",
 		Questions: L2Questions{
@@ -604,14 +616,14 @@ func buildDefaultOrchestrator() *autopilot.RuntimeOrchestrator {
 func buildDefaultRuntimeState() autopilot.RuntimeState {
 	return autopilot.RuntimeState{
 		Plant: autopilot.CongestionState{
-			Backlog:      5,
-			ArrivalMean:  5,
-			ServiceRate:  2,
-			CapacityActive: 3,
-			CapacityTarget: 3,
-			CapacityTauUp:  1,
-			CapacityTauDown: 1,
-			ConcurrencyLimit: 100,
+			Backlog:           5,
+			ArrivalMean:       5,
+			ServiceRate:       2,
+			CapacityActive:    3,
+			CapacityTarget:    3,
+			CapacityTauUp:     1,
+			CapacityTauDown:   1,
+			ConcurrencyLimit:  100,
 			ServiceEfficiency: 0.9,
 		},
 		Rollout: autopilot.RolloutState{

@@ -48,12 +48,11 @@ const (
 )
 
 type Shock struct {
-	Time     time.Duration
+	Time      time.Duration
 	Magnitude float64
 }
 
 type LoadProfileConfig struct {
-
 	Kind LoadProfileKind
 
 	Base float64
@@ -61,18 +60,18 @@ type LoadProfileConfig struct {
 
 	Period time.Duration
 
-	Harmonics []float64
+	Harmonics   []float64
 	Frequencies []float64
 
 	RandomPhase bool
 	Seed        int64
 
 	// stacked shocks
-	Shocks []Shock
-	RiseTau float64
+	Shocks   []Shock
+	RiseTau  float64
 	DecayTau float64
-	OscFreq float64
-	OscDamp float64
+	OscFreq  float64
+	OscDamp  float64
 
 	// asymmetric trend
 	TrendRate float64
@@ -143,7 +142,7 @@ func EvaluateProfile(
 		val =
 			cfg.Base +
 				(cfg.Peak-cfg.Base)*
-					(0.5 + 0.5*math.Sin(phase))
+					(0.5+0.5*math.Sin(phase))
 
 	case ProfileMultiSine:
 
@@ -184,7 +183,7 @@ func EvaluateProfile(
 		val =
 			cfg.Base +
 				(cfg.Peak-cfg.Base)*
-					(0.5 + 0.5*sum)
+					(0.5+0.5*sum)
 
 	case ProfileShockStack:
 

@@ -323,24 +323,24 @@ func ExtractMetrics(trace *PlantTrace) Metrics {
 	for _, p := range trace.Points {
 		// Count failures
 		if p.Collapsed && !inCollapse {
-    failureCount++
-    inCollapse = true
-    collapseStart = p.Time.Seconds()
-}
+			failureCount++
+			inCollapse = true
+			collapseStart = p.Time.Seconds()
+		}
 
-if !p.Collapsed && inCollapse {
-    recoveryTime += p.Time.Seconds() - collapseStart
-    inCollapse = false
-}
+		if !p.Collapsed && inCollapse {
+			recoveryTime += p.Time.Seconds() - collapseStart
+			inCollapse = false
+		}
 
 		totalThroughput += p.Throughput
 		totalLatency += p.Latency
 	}
 
 	var avgRecoveryTime float64
-if failureCount > 0 {
-    avgRecoveryTime = recoveryTime / float64(failureCount)
-}
+	if failureCount > 0 {
+		avgRecoveryTime = recoveryTime / float64(failureCount)
+	}
 
 	meanThroughput := totalThroughput / float64(n)
 	meanLatency := totalLatency / float64(n)
@@ -349,23 +349,23 @@ if failureCount > 0 {
 	totalCost := meanLatency + 0.5*float64(failureCount)
 
 	return Metrics{
-    Failures:     failureCount,
-    RecoveryTime: avgRecoveryTime,
-    Throughput:   meanThroughput,
-    TotalCost:    totalCost,
-}
+		Failures:     failureCount,
+		RecoveryTime: avgRecoveryTime,
+		Throughput:   meanThroughput,
+		TotalCost:    totalCost,
+	}
 }
 
 func ComparePhase1Metrics(baseline, engine Metrics) map[string]float64 {
 	improvement := make(map[string]float64)
 
 	// Failures reduction (lower is better)
-if baseline.Failures > 0 {
-    improvement["failures_reduction"] =
-        float64(baseline.Failures-engine.Failures) / float64(baseline.Failures)
-} else {
-    improvement["failures_reduction"] = 0
-}
+	if baseline.Failures > 0 {
+		improvement["failures_reduction"] =
+			float64(baseline.Failures-engine.Failures) / float64(baseline.Failures)
+	} else {
+		improvement["failures_reduction"] = 0
+	}
 	// Recovery speed (baseline_time / engine_time, > 1 means improvement)
 	if engine.RecoveryTime > 1e-6 {
 		improvement["recovery_speed"] =

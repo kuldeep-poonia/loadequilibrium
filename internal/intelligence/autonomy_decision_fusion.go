@@ -6,8 +6,6 @@ import (
 	"sync"
 )
 
-
-
 type FusionInput struct {
 	State      []float64
 	StateDeriv []float64

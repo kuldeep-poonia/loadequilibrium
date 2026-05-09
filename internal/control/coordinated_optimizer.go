@@ -90,12 +90,12 @@ func SelectBestBundle(
 			meanSoFar :=
 				totalCost / float64(len(costs))
 
-			// 🔥 disable aggressive early stop
-if evaluated >= cfg.MinEvaluate &&
-    meanSoFar >
-        bestScore*(1+cfg.EarlyStopMargin*2) {
-    break
-}
+				// 🔥 disable aggressive early stop
+			if evaluated >= cfg.MinEvaluate &&
+				meanSoFar >
+					bestScore*(1+cfg.EarlyStopMargin*2) {
+				break
+			}
 		}
 
 		if len(costs) == 0 {
@@ -116,13 +116,13 @@ if evaluated >= cfg.MinEvaluate &&
 		downside =
 			math.Sqrt(downside / float64(len(costs)))
 
-		// 🔥 CRITICAL BACKLOG PENALTY
-backlogPressure := initial.QueueDepth / float64(initial.QueueLimit)
+			// 🔥 CRITICAL BACKLOG PENALTY
+		backlogPressure := initial.QueueDepth / float64(initial.QueueLimit)
 
-score :=
-    meanCost +
-        0.3*downside +
-        2.0*backlogPressure
+		score :=
+			meanCost +
+				0.3*downside +
+				2.0*backlogPressure
 
 		// inertia
 		if mem != nil {

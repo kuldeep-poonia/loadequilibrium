@@ -12,9 +12,11 @@ import (
 // ---------------------------------------------------------------
 // L2-SAFETY-001 — SafetyConstraintProjector envelope bounds
 // AIM: For ANY input action (including extreme values), Project()
-//      must return actions within the integratedEnvelope bounds:
-//        upper = 3.2 + 0.5*tanh(load) - 1.1*risk
-//        lower = -2.6 - 0.6*tanh(load)
+//
+//	must return actions within the integratedEnvelope bounds:
+//	  upper = 3.2 + 0.5*tanh(load) - 1.1*risk
+//	  lower = -2.6 - 0.6*tanh(load)
+//
 // THRESHOLD: 0 out-of-bound outputs
 // ON EXCEED: CRITICAL — unsafe action reaches actuator
 // ---------------------------------------------------------------
@@ -30,9 +32,9 @@ func TestL2_SAFETY_001_ProjectorEnvelopeBounds(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		// Systematically vary risk, capacity pressure, and action magnitude.
-		risk := float64(i%10) * 0.1          // 0..0.9
-		capPress := float64(i%5) * 0.2       // 0..0.8
-		actionScale := 10.0 * float64(i%20)  // 0..190
+		risk := float64(i%10) * 0.1         // 0..0.9
+		capPress := float64(i%5) * 0.2      // 0..0.8
+		actionScale := 10.0 * float64(i%20) // 0..190
 
 		action := make([]float64, actDim)
 		prev := make([]float64, actDim)
@@ -119,8 +121,10 @@ func TestL2_SAFETY_001_ProjectorEnvelopeBounds(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-SAFETY-002 — Projector reduces violation for unsafe inputs
 // AIM: When an unsafe input is projected, the output ViolationNorm
-//      must be less than the input violation (the projector actually
-//      corrects the action, not ignores it).
+//
+//	must be less than the input violation (the projector actually
+//	corrects the action, not ignores it).
+//
 // THRESHOLD: correction_rate >= 99% (some may already be safe)
 // ON EXCEED: Projector returns input unchanged → no safety correction
 // ---------------------------------------------------------------
@@ -215,7 +219,9 @@ func TestL2_SAFETY_002_ProjectorReducesViolation(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-SAFETY-003 — Projector output finite (no NaN/Inf)
 // AIM: Project() must never return NaN/Inf in Action, ViolationNorm,
-//      or ConstraintCost, regardless of input.
+//
+//	or ConstraintCost, regardless of input.
+//
 // THRESHOLD: 0 NaN/Inf
 // ON EXCEED: CRITICAL — NaN action sent to actuator → undefined behavior
 // ---------------------------------------------------------------

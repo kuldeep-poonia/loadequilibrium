@@ -162,8 +162,8 @@ loop_done:
 
 	writeL6Result(L6Record{
 		TestID: "L6-NET-001", Layer: 6,
-		Name: fmt.Sprintf("Backend +%dms latency: non-blocking Dispatch + coalescing + recovery", backendLatencyMs),
-		Aim:  fmt.Sprintf("Dispatch<5ms; coalescing>=%.1f:1; recovery<100ms", minCoalesce),
+		Name:             fmt.Sprintf("Backend +%dms latency: non-blocking Dispatch + coalescing + recovery", backendLatencyMs),
+		Aim:              fmt.Sprintf("Dispatch<5ms; coalescing>=%.1f:1; recovery<100ms", minCoalesce),
 		PackagesInvolved: []string{"internal/actuator", "internal/actuator/backends"},
 		FunctionsTested:  []string{"CoalescingActuator.Dispatch", "CoalescingActuator.Feedback", "HTTPBackend.Execute"},
 		Threshold: L6Threshold{
@@ -174,7 +174,12 @@ loop_done:
 			Status: l6Status(passed), ActualValue: maxDispMs, ActualUnit: "max_dispatch_ms",
 			FaultInjected:   fmt.Sprintf("+%dms latency via httptest.Server sleep", backendLatencyMs),
 			TimeToRecoverMs: recMs, CommandsSent: int64(dispatches) + 1,
-			CommandsSucceeded: func() int64 { if recOK { return 1 }; return 0 }(),
+			CommandsSucceeded: func() int64 {
+				if recOK {
+					return 1
+				}
+				return 0
+			}(),
 			CommandsCoalesced: int64(dispatches) - httpReqs,
 			DurationMs:        time.Since(start).Milliseconds(),
 			ErrorMessages: []string{fmt.Sprintf(
@@ -264,8 +269,8 @@ func TestL6_NET_002_BackendDisconnectionGraceful(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-NET-002", Layer: 6,
-		Name: "Backend disconnection: graceful failure propagation",
-		Aim:  fmt.Sprintf("All %d services get ActuationResult{Success:false}, 0 panics, goroutine_leak<=3", svcCount),
+		Name:             "Backend disconnection: graceful failure propagation",
+		Aim:              fmt.Sprintf("All %d services get ActuationResult{Success:false}, 0 panics, goroutine_leak<=3", svcCount),
 		PackagesInvolved: []string{"internal/actuator", "internal/actuator/backends"},
 		FunctionsTested:  []string{"CoalescingActuator.Dispatch (closed server)", "CoalescingActuator.Feedback"},
 		Threshold: L6Threshold{
@@ -281,12 +286,12 @@ func TestL6_NET_002_BackendDisconnectionGraceful(t *testing.T) {
 		},
 		OnExceed: "Actuator goroutine panics on connection error → control loop goroutine crashes → open-loop",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "httptest.NewServer + server.Close() before any Dispatch",
-			WhyThisThreshold:      "Zero panics: network errors are expected in production",
-			WhatHappensIfFails:    "CoalescingActuator goroutine panics → feedback channel never drained → orchestrator blocked",
-			HowFaultWasInjected:   "server closed before HTTPBackend.Execute makes first TCP connection",
-			HowRecoveryVerified:   "Not tested here — see L6-NET-001 for recovery",
-			WhatDegradedMeans:     "All ActuationResult.Success=false with Error; orchestrator logs and continues",
+			WhatFaultWasInjected: "httptest.NewServer + server.Close() before any Dispatch",
+			WhyThisThreshold:     "Zero panics: network errors are expected in production",
+			WhatHappensIfFails:   "CoalescingActuator goroutine panics → feedback channel never drained → orchestrator blocked",
+			HowFaultWasInjected:  "server closed before HTTPBackend.Execute makes first TCP connection",
+			HowRecoveryVerified:  "Not tested here — see L6-NET-001 for recovery",
+			WhatDegradedMeans:    "All ActuationResult.Success=false with Error; orchestrator logs and continues",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -380,8 +385,8 @@ done3:
 
 	writeL6Result(L6Record{
 		TestID: "L6-NET-003", Layer: 6,
-		Name: "RouterBackend partial failure isolation",
-		Aim:  "svc-a (5xx) fails 100%; svc-b (200) succeeds 100%; zero cross-contamination",
+		Name:             "RouterBackend partial failure isolation",
+		Aim:              "svc-a (5xx) fails 100%; svc-b (200) succeeds 100%; zero cross-contamination",
 		PackagesInvolved: []string{"internal/actuator", "internal/actuator/backends"},
 		FunctionsTested:  []string{"actuator.NewRouterBackend", "(*RouterBackend).AddRoute", "(*RouterBackend).Execute"},
 		Threshold: L6Threshold{
@@ -391,8 +396,8 @@ done3:
 		Result: L6ResultData{
 			Status: l6Status(passed), ActualValue: bRate, ActualUnit: "svc_b_success_rate",
 			FaultInjected: "svc-a → HTTP 500; svc-b → HTTP 200",
-			CommandsSent: int64(rounds * 2), CommandsSucceeded: bOK, CommandsFailed: aFail,
-			DurationMs:   time.Since(start).Milliseconds(),
+			CommandsSent:  int64(rounds * 2), CommandsSucceeded: bOK, CommandsFailed: aFail,
+			DurationMs: time.Since(start).Milliseconds(),
 			ErrorMessages: []string{fmt.Sprintf(
 				"svc-a: ok=%d fail=%d | svc-b: ok=%d fail=%d | b_rate=%.3f a_fail=%.3f",
 				aOK, aFail, bOK, bFail, bRate, aFailRate,
@@ -400,12 +405,12 @@ done3:
 		},
 		OnExceed: "One broken route contaminates all routes — cascading failure instead of isolation",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "svc-a AddRoute'd to HTTP 500 server; svc-b AddRoute'd to HTTP 200 server",
-			WhyThisThreshold:      "svc-b must be 100% unaffected — route isolation is the contract of RouterBackend",
-			WhatHappensIfFails:    "A single degraded service's backend degrades control for ALL services",
-			HowFaultWasInjected:   "router.AddRoute with independent broken and working backends",
-			HowRecoveryVerified:   "N/A — steady-state isolation test",
-			WhatDegradedMeans:     "svc-a commands fail with error; svc-b commands succeed normally",
+			WhatFaultWasInjected: "svc-a AddRoute'd to HTTP 500 server; svc-b AddRoute'd to HTTP 200 server",
+			WhyThisThreshold:     "svc-b must be 100% unaffected — route isolation is the contract of RouterBackend",
+			WhatHappensIfFails:   "A single degraded service's backend degrades control for ALL services",
+			HowFaultWasInjected:  "router.AddRoute with independent broken and working backends",
+			HowRecoveryVerified:  "N/A — steady-state isolation test",
+			WhatDegradedMeans:    "svc-a commands fail with error; svc-b commands succeed normally",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -464,8 +469,8 @@ func TestL6_NET_004_Backend5xxErrorFeedback(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-NET-004", Layer: 6,
-		Name: "Backend HTTP 503: ActuationResult.Error contains status code",
-		Aim:  "HTTP 503 → ActuationResult{Success:false, Error contains '503'}; zero panics",
+		Name:             "Backend HTTP 503: ActuationResult.Error contains status code",
+		Aim:              "HTTP 503 → ActuationResult{Success:false, Error contains '503'}; zero panics",
 		PackagesInvolved: []string{"internal/actuator", "internal/actuator/backends"},
 		FunctionsTested:  []string{"backends.(*HTTPBackend).Execute (non-2xx path)"},
 		Threshold: L6Threshold{
@@ -474,21 +479,26 @@ func TestL6_NET_004_Backend5xxErrorFeedback(t *testing.T) {
 		},
 		Result: L6ResultData{
 			Status: l6Status(passed), ActualValue: float64(panics), ActualUnit: "panics",
-			FaultInjected:  "httptest.Server returns HTTP 503",
-			CommandsSent:   1,
-			CommandsFailed: func() int64 { if !res.Success { return 1 }; return 0 }(),
-			Panics:         panics,
-			DurationMs:     time.Since(start).Milliseconds(),
-			ErrorMessages:  []string{fmt.Sprintf("panics=%d success=%v err=%v has_503=%v", panics, res.Success, res.Error, has503)},
+			FaultInjected: "httptest.Server returns HTTP 503",
+			CommandsSent:  1,
+			CommandsFailed: func() int64 {
+				if !res.Success {
+					return 1
+				}
+				return 0
+			}(),
+			Panics:        panics,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ErrorMessages: []string{fmt.Sprintf("panics=%d success=%v err=%v has_503=%v", panics, res.Success, res.Error, has503)},
 		},
 		OnExceed: "HTTPBackend panics on non-2xx → actuator goroutine crashes → actuator stops",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "httptest.Server writes StatusServiceUnavailable",
-			WhyThisThreshold:      "503 is most common production backend error — must produce typed error",
-			WhatHappensIfFails:    "Backend 5xx causes panic → process crash → Kubernetes restart",
-			HowFaultWasInjected:   "handler: w.WriteHeader(http.StatusServiceUnavailable)",
-			HowRecoveryVerified:   "N/A — error propagation test",
-			WhatDegradedMeans:     "ActuationResult.Error = 'http backend: status=503'; orchestrator logs and continues",
+			WhatFaultWasInjected: "httptest.Server writes StatusServiceUnavailable",
+			WhyThisThreshold:     "503 is most common production backend error — must produce typed error",
+			WhatHappensIfFails:   "Backend 5xx causes panic → process crash → Kubernetes restart",
+			HowFaultWasInjected:  "handler: w.WriteHeader(http.StatusServiceUnavailable)",
+			HowRecoveryVerified:  "N/A — error propagation test",
+			WhatDegradedMeans:    "ActuationResult.Error = 'http backend: status=503'; orchestrator logs and continues",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})

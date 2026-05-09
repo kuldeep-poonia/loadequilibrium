@@ -1,7 +1,5 @@
 package layer7
 
-
-
 import (
 	"context"
 	"fmt"
@@ -15,7 +13,6 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
 	runtimepkg "github.com/loadequilibrium/loadequilibrium/internal/runtime"
 )
-
 
 // L7-CHAOS-001 — Full system graceful shutdown under active load
 //
@@ -34,9 +31,9 @@ func TestL7_CHAOS_001_GracefulShutdownUnderLoad(t *testing.T) {
 	start := time.Now()
 
 	const (
-		tickMs           = 200
-		warmupTicks      = 10
-		leakThreshold    = 5
+		tickMs            = 200
+		warmupTicks       = 10
+		leakThreshold     = 5
 		shutdownThreshold = 10_000
 	)
 
@@ -44,7 +41,7 @@ func TestL7_CHAOS_001_GracefulShutdownUnderLoad(t *testing.T) {
 
 	ts := newTestSystem(tickMs)
 
-	// ── Inject telemetry for 3 services 
+	// ── Inject telemetry for 3 services
 	for i := 0; i < 3; i++ {
 		svcID := fmt.Sprintf("chaos-svc-%02d", i)
 		for tick := 0; tick < 5; tick++ {
@@ -52,7 +49,7 @@ func TestL7_CHAOS_001_GracefulShutdownUnderLoad(t *testing.T) {
 		}
 	}
 
-	// ── Wait for warmup ticks 
+	// ── Wait for warmup ticks
 	if !ts.WaitForTicks(warmupTicks, 10*time.Second) {
 		t.Logf("L7-CHAOS-001: only reached %d ticks in 10s (expected %d) — continuing",
 			func() int {
@@ -68,17 +65,17 @@ func TestL7_CHAOS_001_GracefulShutdownUnderLoad(t *testing.T) {
 	t.Logf("L7-CHAOS-001 pre-shutdown: goroutines=%d seq=%d clients=%d",
 		goroAtPeak, seqBeforeShutdown, ts.Hub.ClientCount())
 
-	// ── CHAOS: Cancel context (SIGTERM equivalent) 
+	// ── CHAOS: Cancel context (SIGTERM equivalent)
 	shutdownStart := time.Now()
 	ts.Shutdown()
 	shutdownMs := time.Since(shutdownStart).Milliseconds()
 
-	// ── Verify HTTP server stopped 
+	// ── Verify HTTP server stopped
 	time.Sleep(100 * time.Millisecond)
 	_, httpErr := http.Get(ts.HTTPSrv.URL + "/health")
 	httpStopped := httpErr != nil // must get connection refused or similar error
 
-	// ── Goroutine leak check 
+	// ── Goroutine leak check
 	// Give goroutines up to 2s to exit after shutdown.
 	var goroAfter int
 	deadline := time.Now().Add(2 * time.Second)
@@ -174,7 +171,6 @@ func runtimepkg_stack(buf []byte) int {
 	return 0 // replaced in real compilation by runtime.Stack(buf, true)
 }
 
-
 // L7-CHAOS-002 — Orchestrator restart under live telemetry (in-memory Store survives)
 //
 // AIM:
@@ -201,7 +197,7 @@ func TestL7_CHAOS_002_OrchestratorRestartUnderLiveTelemetry(t *testing.T) {
 
 	ts := newTestSystem(tickMs)
 
-	// ── Phase 1: Build up telemetry state 
+	// ── Phase 1: Build up telemetry state
 	const svcCount = 3
 	for i := 0; i < svcCount; i++ {
 		svcID := fmt.Sprintf("restart-svc-%02d", i)
@@ -214,7 +210,9 @@ func TestL7_CHAOS_002_OrchestratorRestartUnderLiveTelemetry(t *testing.T) {
 	if !ts.WaitForTicks(warmupTicks, 15*time.Second) {
 		t.Logf("L7-CHAOS-002: warmup only reached %d ticks — proceeding", func() int {
 			p := ts.Hub.GetLastPayload()
-			if p != nil { return int(p.SequenceNo) }
+			if p != nil {
+				return int(p.SequenceNo)
+			}
 			return 0
 		}())
 	}
@@ -229,7 +227,7 @@ func TestL7_CHAOS_002_OrchestratorRestartUnderLiveTelemetry(t *testing.T) {
 
 	t.Logf("L7-CHAOS-002 pre-restart: windows=%d seq=%d", windowsBeforeRestart, seqBeforeRestart)
 
-	// ── Phase 2: Kill orchestrator, keep Store 
+	// ── Phase 2: Kill orchestrator, keep Store
 	// Cancel orch context — Stop ONLY orch.Run(). Keep store, hub, act alive.
 	ts.orchCancel()
 	select {
@@ -247,7 +245,7 @@ func TestL7_CHAOS_002_OrchestratorRestartUnderLiveTelemetry(t *testing.T) {
 
 	time.Sleep(time.Duration(restartWaitMs) * time.Millisecond)
 
-	// ── Phase 3: Start NEW orchestrator with SAME Store 
+	// ── Phase 3: Start NEW orchestrator with SAME Store
 	newOrch := runtimepkg.New(ts.Cfg, ts.Store, ts.Hub, nil, ts.Act, nil)
 
 	newCtx, newCancel := context.WithCancel(context.Background())
@@ -269,7 +267,7 @@ func TestL7_CHAOS_002_OrchestratorRestartUnderLiveTelemetry(t *testing.T) {
 		ts.HTTPSrv.Close()
 	}()
 
-	// ── Phase 4: Verify recovery 
+	// ── Phase 4: Verify recovery
 	// New orch must produce a TickPayload with non-zero Bundles within 5 ticks.
 	ticksAfterRestart := 0
 	bundlesFound := false
@@ -361,7 +359,7 @@ func httpGet(url string) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// ── Verify actuator feedback drains 
+// ── Verify actuator feedback drains
 
 func drainFeedback7(ch <-chan actuator.ActuationResult, timeout time.Duration) int64 {
 	var count int64
@@ -376,7 +374,7 @@ func drainFeedback7(ch <-chan actuator.ActuationResult, timeout time.Duration) i
 	}
 }
 
-// ── Import actuator for drainFeedback7 
+// ── Import actuator for drainFeedback7
 // (backends imported to satisfy compiler for queue backend usage in helpers)
 var _ = backends.NewQueueBackend
 var _ = runtimepkg.New

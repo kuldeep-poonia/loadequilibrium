@@ -11,7 +11,6 @@ const (
 )
 
 type RegimeMemory struct {
-
 	LastAction ActionBundle
 
 	UtilEWMA float64
@@ -25,8 +24,8 @@ type RegimeMemory struct {
 	Regime       ControlRegime
 	StabilityAge int
 
-	LastCost      float64
-	CostTrendEWMA float64
+	LastCost        float64
+	CostTrendEWMA   float64
 	OscillationEWMA float64
 }
 
@@ -239,9 +238,8 @@ func (r *RegimeMemory) ApplyDamping(
 			float64(current.RetryLimit) +
 				f*(float64(next.RetryLimit-current.RetryLimit)),
 		),
-		CacheAggression:
-			current.CacheAggression +
-				f*(next.CacheAggression-current.CacheAggression),
+		CacheAggression: current.CacheAggression +
+			f*(next.CacheAggression-current.CacheAggression),
 	}
 
 	// ⭐ hard clamp to actuator bounds

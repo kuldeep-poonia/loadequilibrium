@@ -167,7 +167,7 @@ func newOrchestrator(dt float64, maxCapacity float64) *ap.RuntimeOrchestrator {
 	}
 
 	rollout := &ap.RolloutController{
-		Dt:                    dt,
+		Dt: dt,
 		// RAMP RATES: CapRampUpNormal is the dominant control for emergency response speed.
 		// Root cause of queue_saturation breach: CapRampUpNormal=4 applied at tick=2
 		// (backlog=38.28 < DegradedBacklog=120 → mode=Normal). Only +8 replicas grew
@@ -201,12 +201,12 @@ func newOrchestrator(dt float64, maxCapacity float64) *ap.RuntimeOrchestrator {
 	}
 
 	id := &ap.IdentificationEngine{
-		Dt:                  dt,
-		FastGain:            0.30,
-		SlowGain:            0.05,
-		BlendGain:           0.10,
-		VarGain:             0.10,
-		BurstGain:           0.50,
+		Dt:        dt,
+		FastGain:  0.30,
+		SlowGain:  0.05,
+		BlendGain: 0.10,
+		VarGain:   0.10,
+		BurstGain: 0.50,
 		// FIX: Increase BurstDecay from 0.10 → 0.25.
 		// Old half-life ln(2)/0.10 ≈ 6.9 ticks: a 2-tick burst lingered for 30+ ticks,
 		// keeping VarianceScale elevated and firing instability_high at zero backlog.
@@ -306,7 +306,6 @@ func newInitialState(arrivalMean, capacity, serviceRate float64) ap.RuntimeState
 		MetaPersistence: 0.0,
 	}
 }
-
 
 func computeAdaptationScore(timeline []TickSnapshot) float64 {
 	if len(timeline) < 4 {
@@ -477,9 +476,6 @@ func runScenario(
 	for i := 0; i < 10; i++ {
 		warmupState, _ = orch.Tick(warmupState, initArrival, 0.1)
 
-		
-
-		
 	}
 	state = warmupState
 
@@ -490,7 +486,7 @@ func runScenario(
 	var timelineLastDecision string
 	prevReplicas := int(math.Round(math.Max(1, state.Rollout.CapacityActive))) // track for dir labeling
 
-	instabilityCount := 0 
+	instabilityCount := 0
 
 	for tick := 1; tick <= ticks; tick++ {
 		arrival := arrivalFn(tick)
@@ -498,12 +494,12 @@ func runScenario(
 		nextState, tel := orch.Tick(state, arrival, infraLoad)
 
 		fmt.Printf("[SIM] tick=%d backlog=%.2f latency=%.2f capacity=%.2f arrival=%.2f\n",
-	tick,
-	tel.PhysicalBacklog,
-	tel.Latency,
-	tel.Capacity,
-	arrival,
-)
+			tick,
+			tel.PhysicalBacklog,
+			tel.Latency,
+			tel.Capacity,
+			arrival,
+		)
 
 		latency := tel.Latency + (tel.PhysicalBacklog * 0.4)
 
@@ -511,10 +507,10 @@ func runScenario(
 		required := arrival / (serviceRate + 1e-6)
 
 		fmt.Printf("[CONTROL_INPUT] tick=%d requiredCap=%.2f currentCap=%.2f\n",
-	tick,
-	required,
-	tel.Capacity,
-)
+			tick,
+			required,
+			tel.Capacity,
+		)
 
 		// ----- MPC output interpretation -----
 
@@ -557,14 +553,14 @@ func runScenario(
 			ServiceID: "test-service",
 			Tick:      uint64(tick),
 			State: ctrl.SystemState{
-				QueueDepth:       tel.PhysicalBacklog,
-				QueueLimit:       int(slaBacklog),
+				QueueDepth: tel.PhysicalBacklog,
+				QueueLimit: int(slaBacklog),
 				// FIX: Round instead of truncate. int(10.96)=10 vs int(11.03)=11 causes
 				// the authority to see alternating replica counts as the rollout float
 				// bounces near integers, producing spurious scale_up→hold→scale_up.
 				Replicas:         int(math.Round(math.Max(1, tel.Capacity))),
 				ServiceRate:      serviceRate,
-				Latency: latency,
+				Latency:          latency,
 				PredictedArrival: arrival,
 				Utilisation:      requiredCap / math.Max(1.0, tel.Capacity),
 			},
@@ -578,12 +574,11 @@ func runScenario(
 
 		decision := authEngine.Decide(input)
 
-
 		fmt.Printf("[AUTH] tick=%d decision=%.2f replicas=%d\n",
-	tick,
-	decision.Directive.ScaleFactor,
-	decision.Bundle.Replicas,
-)
+			tick,
+			decision.Directive.ScaleFactor,
+			decision.Bundle.Replicas,
+		)
 
 		scale := decision.Directive.ScaleFactor
 		replicaDelta := float64(decision.Bundle.Replicas - prevReplicas)
@@ -603,10 +598,10 @@ func runScenario(
 		prevReplicas = decision.Bundle.Replicas
 
 		fmt.Printf("[DIR] tick=%d dir=%s scale=%.2f\n",
-	tick,
-	dir,
-	scale,
-)
+			tick,
+			dir,
+			scale,
+		)
 
 		// ----- oscillation score from memory (via stability field) -----
 		oscScore := tel.Damping - 1.0 // DampingFactor = 1 + pressure; pressure ≈ oscillation proxy
@@ -630,11 +625,11 @@ func runScenario(
 			instabilityCount++
 		}
 
-fmt.Printf("[INSTABILITY] tick=%d score=%.2f backlog=%.2f\n",
-	tick,
-	instScore,
-	tel.PhysicalBacklog,
-)
+		fmt.Printf("[INSTABILITY] tick=%d score=%.2f backlog=%.2f\n",
+			tick,
+			instScore,
+			tel.PhysicalBacklog,
+		)
 
 		// 🔥 EVENT DETECTION
 
@@ -712,55 +707,55 @@ fmt.Printf("[INSTABILITY] tick=%d score=%.2f backlog=%.2f\n",
 		// depth that existed BEFORE the authority's corrective action was applied.
 
 		fmt.Printf("[FINAL] tick=%d backlog=%.2f latency=%.2f decision=%s\n",
-    tick,
-    tel.PhysicalBacklog,
-    latency,
-    dir,
-)
+			tick,
+			tel.PhysicalBacklog,
+			latency,
+			dir,
+		)
 		timeline = append(timeline, TickSnapshot{
-			Tick:             tick,
-			Backlog:          tel.PhysicalBacklog,
-			LatencyMs: latency,
-			ArrivalRate:      arrival,
-			CapacityCurrent:  float64(decision.Bundle.Replicas),
-			ScaleDecision: dir,
+			Tick:            tick,
+			Backlog:         tel.PhysicalBacklog,
+			LatencyMs:       latency,
+			ArrivalRate:     arrival,
+			CapacityCurrent: float64(decision.Bundle.Replicas),
+			ScaleDecision:   dir,
 		})
-    // Anchor both Plant and Rollout CapacityActive to authority's deployed integer count.
-    // This keeps the rollout ramp base in sync with the authority's scaled integer:
-    // at each tick the authority computes a new replica count based on current utilization
-    // and the rollout picks up from there. This is FASTER than pure float ramp during
-    // the early emergency phase because authority's utilization-based jump (10→22→30→88)
-    // overtakes the Normal-mode ramp rate (10→18→26→34).
-    nextState.Plant.CapacityActive = float64(decision.Bundle.Replicas)
-    nextState.Rollout.CapacityActive = float64(decision.Bundle.Replicas)
+		// Anchor both Plant and Rollout CapacityActive to authority's deployed integer count.
+		// This keeps the rollout ramp base in sync with the authority's scaled integer:
+		// at each tick the authority computes a new replica count based on current utilization
+		// and the rollout picks up from there. This is FASTER than pure float ramp during
+		// the early emergency phase because authority's utilization-based jump (10→22→30→88)
+		// overtakes the Normal-mode ramp rate (10→18→26→34).
+		nextState.Plant.CapacityActive = float64(decision.Bundle.Replicas)
+		nextState.Rollout.CapacityActive = float64(decision.Bundle.Replicas)
 		state = nextState
 	}
 
 	// ─── Summary computation ───
 	maxBacklog := 0.0
-maxLatency := 0.0
-decisionConflicts := 0
-slaBreaches := 0
+	maxLatency := 0.0
+	decisionConflicts := 0
+	slaBreaches := 0
 
-// 1. timeline se metrics nikalo
-for _, t := range timeline {
-	if t.Backlog > maxBacklog {
-		maxBacklog = t.Backlog
+	// 1. timeline se metrics nikalo
+	for _, t := range timeline {
+		if t.Backlog > maxBacklog {
+			maxBacklog = t.Backlog
+		}
+		if t.LatencyMs > maxLatency {
+			maxLatency = t.LatencyMs
+		}
+		if t.LatencyMs > slaLatency || t.Backlog > slaBacklog {
+			slaBreaches++
+		}
 	}
-	if t.LatencyMs > maxLatency {
-		maxLatency = t.LatencyMs
-	}
-	if t.LatencyMs > slaLatency || t.Backlog > slaBacklog {
-		slaBreaches++
-	}
-}
 
-// 2. conflicts events se
-for _, e := range events {
-	if e.Type == "decision_conflict" {
-		decisionConflicts++
+	// 2. conflicts events se
+	for _, e := range events {
+		if e.Type == "decision_conflict" {
+			decisionConflicts++
+		}
 	}
-}
 
 	// adaptScore: real computation from physical backlog timeline.
 	// Measures what fraction of ticks the physical queue stayed under the
@@ -769,7 +764,7 @@ for _, e := range events {
 	// regardless of whether backlogs were exploding (e.g. real=1257, reported=1.0).
 	ticksUnderSLA := 0
 	for _, snap := range timeline {
-		if snap.Backlog < slaBacklog*0.7{
+		if snap.Backlog < slaBacklog*0.7 {
 			ticksUnderSLA++
 		}
 	}
@@ -805,60 +800,58 @@ for _, e := range events {
 	// scenario that correctly drained its backlog — 55% SLA compliance during
 	// a 10× arrival spike is good control, not a failure.
 
-
-	
-
-// ----- oscillation detect -----
-// Count only genuine up↔down reversals (where the system changes from scaling up
-// to scaling down or vice versa). hold↔scale transitions are NOT oscillations —
-// they happen naturally in any rising-load ramp (scale_up, brief hold, scale_up again).
-// The previous code counted every decision change, falsely triggering oscillation_detected
-// in rising_load (backlog=2) and mpc_autopilot_alignment (backlog=29) scenarios.
-flipCount := 0
-lastSignificantDir := ""
-for i := 0; i < len(timeline); i++ {
-	d := timeline[i].ScaleDecision
-	if d == "hold" {
-		continue // holds don't contribute to oscillation
+	// ----- oscillation detect -----
+	// Count only genuine up↔down reversals (where the system changes from scaling up
+	// to scaling down or vice versa). hold↔scale transitions are NOT oscillations —
+	// they happen naturally in any rising-load ramp (scale_up, brief hold, scale_up again).
+	// The previous code counted every decision change, falsely triggering oscillation_detected
+	// in rising_load (backlog=2) and mpc_autopilot_alignment (backlog=29) scenarios.
+	flipCount := 0
+	lastSignificantDir := ""
+	for i := 0; i < len(timeline); i++ {
+		d := timeline[i].ScaleDecision
+		if d == "hold" {
+			continue // holds don't contribute to oscillation
+		}
+		if lastSignificantDir != "" && d != lastSignificantDir {
+			flipCount++ // genuine direction reversal: up→down or down→up
+		}
+		lastSignificantDir = d
 	}
-	if lastSignificantDir != "" && d != lastSignificantDir {
-		flipCount++ // genuine direction reversal: up→down or down→up
+
+	oscillationDetected := flipCount > ticks/8
+
+	// ----- production ready -----
+	productionReady :=
+		slaBreaches < ticks/20 &&
+			prevMaxOscScore < 0.3 &&
+			decisionConflicts < ticks/20 &&
+			adaptScore >= 0.6 &&
+			instabilityCount < ticks/3
+
+	return ScenarioResult{
+		Scenario: name,
+		Params:   params,
+		Events:   events,
+		Summary: ScenarioSummary{
+			OscillationDetected:   oscillationDetected,
+			MaxBacklog:            math.Round(maxBacklog*100) / 100,
+			MaxLatency:            math.Round(maxLatency*100) / 100,
+			RecoveryTimeTicks:     recoveryTime,
+			DecisionConflicts:     decisionConflicts,
+			AdvisoryIgnored:       advisoryIgnored,
+			AdaptationScore:       math.Round(adaptScore*1000) / 1000,
+			StabilityScore:        math.Round(stabilityScore*1000) / 1000,
+			ProductionReady:       productionReady,
+			SLABreaches:           slaBreaches,
+			MaxOverrideRate:       math.Round(maxOverride*1000) / 1000,
+			ConvergenceTicks:      convergence,
+			RetryAmplification:    math.Round(retryAmp*1000) / 1000,
+			CapacityTrackingError: math.Round(trackErr*100) / 100,
+		},
 	}
-	lastSignificantDir = d
 }
 
-oscillationDetected := flipCount > ticks/8
-
-// ----- production ready -----
-productionReady :=
-	slaBreaches < ticks/20 &&
-	prevMaxOscScore < 0.3 &&
-	decisionConflicts < ticks/20 &&
-	adaptScore >= 0.6 &&
-	instabilityCount < ticks/3
-
-return ScenarioResult{
-	Scenario: name,
-	Params:   params,
-	Events:   events,
-	Summary: ScenarioSummary{
-		OscillationDetected:   oscillationDetected,
-		MaxBacklog:            math.Round(maxBacklog*100) / 100,
-		MaxLatency:            math.Round(maxLatency*100) / 100,
-		RecoveryTimeTicks:     recoveryTime,
-		DecisionConflicts:     decisionConflicts,
-		AdvisoryIgnored:       advisoryIgnored,
-		AdaptationScore:       math.Round(adaptScore*1000) / 1000,
-		StabilityScore:        math.Round(stabilityScore*1000) / 1000,
-		ProductionReady:       productionReady,
-		SLABreaches:           slaBreaches,
-		MaxOverrideRate:       math.Round(maxOverride*1000) / 1000,
-		ConvergenceTicks:      convergence,
-		RetryAmplification:    math.Round(retryAmp*1000) / 1000,
-		CapacityTrackingError: math.Round(trackErr*100) / 100,
-	},
-}
-}
 // ─────────────────────────────────────────────────────────
 //  Scenario Definitions
 // ─────────────────────────────────────────────────────────

@@ -189,12 +189,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityCritical, Category: "UTILISATION",
-				Description:     fmt.Sprintf("%s at %.1f%% utilisation — saturation imminent", id, rho*100),
-				Recommendation:  "Scale out immediately; activate circuit breaker",
-				Evidence:        Evidence{Utilisation: rho, StabilityMargin: b.Stability.StabilityMargin},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s at %.1f%% utilisation — saturation imminent", id, rho*100),
+				Recommendation:      "Scale out immediately; activate circuit breaker",
+				Evidence:            Evidence{Utilisation: rho, StabilityMargin: b.Stability.StabilityMargin},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityCritical, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=high_arrival→model=M/M/c(ρ=%.2f)→prediction=queue_diverge→action=scale_out", rho),
+				ModelChain:          fmt.Sprintf("cause=high_arrival→model=M/M/c(ρ=%.2f)→prediction=queue_diverge→action=scale_out", rho),
 			})
 		}
 	} else if rho >= 0.80 {
@@ -202,12 +202,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "UTILISATION",
-				Description:     fmt.Sprintf("%s at %.1f%% — approaching saturation", id, rho*100),
-				Recommendation:  "Prepare scaling; review upstream rate limits",
-				Evidence:        Evidence{Utilisation: rho},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s at %.1f%% — approaching saturation", id, rho*100),
+				Recommendation:      "Prepare scaling; review upstream rate limits",
+				Evidence:            Evidence{Utilisation: rho},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=rising_load→model=M/M/c(ρ=%.2f)→prediction=saturation_risk→action=plan_scale", rho),
+				ModelChain:          fmt.Sprintf("cause=rising_load→model=M/M/c(ρ=%.2f)→prediction=saturation_risk→action=plan_scale", rho),
 			})
 		}
 	}
@@ -223,12 +223,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: sev, Category: "SATURATION",
-				Description:     fmt.Sprintf("%s saturates in %.0fs at current trend (uncertainty=%.0f%%)", id, secs, uncertainty*100),
-				Recommendation:  "Intervene before queue becomes unbounded",
-				Evidence:        Evidence{Utilisation: rho, SaturationSec: secs},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s saturates in %.0fs at current trend (uncertainty=%.0f%%)", id, secs, uncertainty*100),
+				Recommendation:      "Intervene before queue becomes unbounded",
+				Evidence:            Evidence{Utilisation: rho, SaturationSec: secs},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(sev, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=load_trend→model=linear_extrapolation→prediction=saturation_in_%.0fs→action=preempt", secs),
+				ModelChain:          fmt.Sprintf("cause=load_trend→model=linear_extrapolation→prediction=saturation_in_%.0fs→action=preempt", secs),
 			})
 		}
 	}
@@ -241,12 +241,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityCritical, Category: "SATURATION",
-				Description:     fmt.Sprintf("%s projected ρ=%.2f within 20s (trend-adjusted margin=%.3f)", id, projectedRho, b.Stability.TrendAdjustedMargin),
-				Recommendation:  "Immediate capacity intervention required — trend extrapolation crosses ρ=1",
-				Evidence:        Evidence{Utilisation: rho, SaturationSec: 20},
-				UncertaintyScore: uncertainty * 0.8, // trend-adjusted is more certain
+				Description:         fmt.Sprintf("%s projected ρ=%.2f within 20s (trend-adjusted margin=%.3f)", id, projectedRho, b.Stability.TrendAdjustedMargin),
+				Recommendation:      "Immediate capacity intervention required — trend extrapolation crosses ρ=1",
+				Evidence:            Evidence{Utilisation: rho, SaturationSec: 20},
+				UncertaintyScore:    uncertainty * 0.8, // trend-adjusted is more certain
 				OperationalPriority: 9,
-				ModelChain: fmt.Sprintf("cause=trend_projection→model=linear_forward_20s→prediction=rho=%.2f→action=immediate_scale", projectedRho),
+				ModelChain:          fmt.Sprintf("cause=trend_projection→model=linear_forward_20s→prediction=rho=%.2f→action=immediate_scale", projectedRho),
 			})
 		}
 	}
@@ -257,12 +257,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "STABILITY",
-				Description:     fmt.Sprintf("%s collapse risk accelerating at %.3f/s — load trend amplifying instability", id, b.Stability.StabilityDerivative),
-				Recommendation:  "Pre-emptive intervention while risk is still manageable; trend will compound",
-				Evidence:        Evidence{Utilisation: rho, CollapseRisk: b.Stability.CollapseRisk},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s collapse risk accelerating at %.3f/s — load trend amplifying instability", id, b.Stability.StabilityDerivative),
+				Recommendation:      "Pre-emptive intervention while risk is still manageable; trend will compound",
+				Evidence:            Evidence{Utilisation: rho, CollapseRisk: b.Stability.CollapseRisk},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=load_trend→model=d(sigmoid)/dt→prediction=risk_accel=%.3f/s→action=preempt", b.Stability.StabilityDerivative),
+				ModelChain:          fmt.Sprintf("cause=load_trend→model=d(sigmoid)/dt→prediction=risk_accel=%.3f/s→action=preempt", b.Stability.StabilityDerivative),
 			})
 		}
 	}
@@ -276,12 +276,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "SATURATION",
-				Description:    fmt.Sprintf("%s coupled saturation in %.0fs (upstream pressure=%.0f%%)", id, netSecs, b.Queue.UpstreamPressure*100),
-				Recommendation: "Inspect upstream call rates; apply backpressure at ingress",
-				Evidence:       Evidence{Utilisation: rho, SaturationSec: netSecs},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s coupled saturation in %.0fs (upstream pressure=%.0f%%)", id, netSecs, b.Queue.UpstreamPressure*100),
+				Recommendation:      "Inspect upstream call rates; apply backpressure at ingress",
+				Evidence:            Evidence{Utilisation: rho, SaturationSec: netSecs},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=upstream_pressure(%.0f%%)→model=coupled_queue→prediction=net_saturation_in_%.0fs→action=backpressure", b.Queue.UpstreamPressure*100, netSecs),
+				ModelChain:          fmt.Sprintf("cause=upstream_pressure(%.0f%%)→model=coupled_queue→prediction=net_saturation_in_%.0fs→action=backpressure", b.Queue.UpstreamPressure*100, netSecs),
 			})
 		}
 	}
@@ -297,12 +297,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: sev, Category: "LATENCY",
-				Description:     fmt.Sprintf("%s queue wait %.0fms (burst×%.2f)", id, adjWait, b.Queue.BurstFactor),
-				Recommendation:  "Apply token-bucket rate limiting upstream; reduce burst factor",
-				Evidence:        Evidence{QueueWaitMs: adjWait, BurstFactor: b.Queue.BurstFactor, Utilisation: rho},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s queue wait %.0fms (burst×%.2f)", id, adjWait, b.Queue.BurstFactor),
+				Recommendation:      "Apply token-bucket rate limiting upstream; reduce burst factor",
+				Evidence:            Evidence{QueueWaitMs: adjWait, BurstFactor: b.Queue.BurstFactor, Utilisation: rho},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(sev, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=burst_arrival→model=M/G/1_PKC(CoV²)→prediction=wait=%.0fms→action=rate_limit", adjWait),
+				ModelChain:          fmt.Sprintf("cause=burst_arrival→model=M/G/1_PKC(CoV²)→prediction=wait=%.0fms→action=rate_limit", adjWait),
 			})
 		}
 	}
@@ -313,12 +313,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityCritical, Category: "STABILITY",
-				Description:     fmt.Sprintf("%s collapse risk %.0f%% [zone=%s] — nonlinear saturation region", id, b.Stability.CollapseRisk*100, b.Stability.CollapseZone),
-				Recommendation:  "Enable circuit breaker; shed non-critical traffic; horizontal scale",
-				Evidence:        Evidence{CollapseRisk: b.Stability.CollapseRisk, Utilisation: rho, StabilityMargin: b.Stability.StabilityMargin},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s collapse risk %.0f%% [zone=%s] — nonlinear saturation region", id, b.Stability.CollapseRisk*100, b.Stability.CollapseZone),
+				Recommendation:      "Enable circuit breaker; shed non-critical traffic; horizontal scale",
+				Evidence:            Evidence{CollapseRisk: b.Stability.CollapseRisk, Utilisation: rho, StabilityMargin: b.Stability.StabilityMargin},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityCritical, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=high_rho→model=nonlinear_sigmoid→prediction=collapse_risk=%.0f%%→action=circuit_breaker", b.Stability.CollapseRisk*100),
+				ModelChain:          fmt.Sprintf("cause=high_rho→model=nonlinear_sigmoid→prediction=collapse_risk=%.0f%%→action=circuit_breaker", b.Stability.CollapseRisk*100),
 			})
 		}
 	}
@@ -329,12 +329,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "CASCADE",
-				Description:    fmt.Sprintf("%s cascade amplification %.2f — high downstream risk", id, b.Stability.CascadeAmplificationScore),
-				Recommendation: "Implement bulkheads on downstream services; add timeout policies",
-				Evidence:       Evidence{CascadeRisk: b.Stability.CascadeAmplificationScore, Utilisation: rho},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s cascade amplification %.2f — high downstream risk", id, b.Stability.CascadeAmplificationScore),
+				Recommendation:      "Implement bulkheads on downstream services; add timeout policies",
+				Evidence:            Evidence{CascadeRisk: b.Stability.CascadeAmplificationScore, Utilisation: rho},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, b.Queue.UtilisationTrend),
-				ModelChain: fmt.Sprintf("cause=feedback_gain→model=cascade_amplification→prediction=downstream_overload→action=bulkhead"),
+				ModelChain:          fmt.Sprintf("cause=feedback_gain→model=cascade_amplification→prediction=downstream_overload→action=bulkhead"),
 			})
 		}
 	}
@@ -345,12 +345,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "STABILITY",
-				Description:     fmt.Sprintf("%s oscillation risk %.0f%% — EWMA two-timescale divergence", id, b.Stability.OscillationRisk*100),
-				Recommendation:  "Check for feedback loops; review auto-scaling hysteresis",
-				Evidence:        Evidence{OscillationRisk: b.Stability.OscillationRisk, Utilisation: rho},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s oscillation risk %.0f%% — EWMA two-timescale divergence", id, b.Stability.OscillationRisk*100),
+				Recommendation:      "Check for feedback loops; review auto-scaling hysteresis",
+				Evidence:            Evidence{OscillationRisk: b.Stability.OscillationRisk, Utilisation: rho},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, 0),
-				ModelChain: "cause=ewma_divergence→model=two_timescale_rms→prediction=oscillation→action=hysteresis_review",
+				ModelChain:          "cause=ewma_divergence→model=two_timescale_rms→prediction=oscillation→action=hysteresis_review",
 			})
 		}
 	}
@@ -361,12 +361,12 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityWarning, Category: "ANOMALY",
-				Description:      fmt.Sprintf("%s arrival spike detected (>3σ from EWMA)", id),
-				Recommendation:   "Verify no retry storm; check upstream release or cron burst",
-				Evidence:         Evidence{Utilisation: rho},
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s arrival spike detected (>3σ from EWMA)", id),
+				Recommendation:      "Verify no retry storm; check upstream release or cron burst",
+				Evidence:            Evidence{Utilisation: rho},
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: computePriority(SeverityWarning, rho, b.Queue.UtilisationTrend),
-				ModelChain: "cause=sudden_arrival_jump→model=ewma_spike_z_score→prediction=transient_overload→action=investigate_source",
+				ModelChain:          "cause=sudden_arrival_jump→model=ewma_spike_z_score→prediction=transient_overload→action=investigate_source",
 			})
 		}
 	}
@@ -377,11 +377,11 @@ func (e *Engine) evalService(b *modelling.ServiceModelBundle, now time.Time) []E
 			events = append(events, Event{
 				ID: newID(), Timestamp: now, ServiceID: id,
 				Severity: SeverityInfo, Category: "ANOMALY",
-				Description:     fmt.Sprintf("%s CUSUM change-point: workload regime shift detected", id),
-				Recommendation:  "Verify deployment, feature flag, or traffic source change",
-				UncertaintyScore: uncertainty,
+				Description:         fmt.Sprintf("%s CUSUM change-point: workload regime shift detected", id),
+				Recommendation:      "Verify deployment, feature flag, or traffic source change",
+				UncertaintyScore:    uncertainty,
 				OperationalPriority: 2,
-				ModelChain: "cause=cusum_threshold_crossed→model=cusum_bilateral→prediction=regime_change→action=audit_traffic_source",
+				ModelChain:          "cause=cusum_threshold_crossed→model=cusum_bilateral→prediction=regime_change→action=audit_traffic_source",
 			})
 		}
 	}
@@ -404,12 +404,12 @@ func (e *Engine) evalTopology(topo topology.GraphSnapshot, now time.Time) []Even
 		events = append(events, Event{
 			ID: newID(), Timestamp: now,
 			Severity: sev, Category: "CASCADE",
-			Description:     fmt.Sprintf("Critical path cascade risk %.0f%% across %d services", cp.CascadeRisk*100, len(cp.Nodes)),
-			Recommendation:  "Isolate critical-path services; implement bulkheads and timeouts",
-			Evidence:        Evidence{CascadeRisk: cp.CascadeRisk},
-			UncertaintyScore: 0.2, // topology model is structural, lower uncertainty
+			Description:         fmt.Sprintf("Critical path cascade risk %.0f%% across %d services", cp.CascadeRisk*100, len(cp.Nodes)),
+			Recommendation:      "Isolate critical-path services; implement bulkheads and timeouts",
+			Evidence:            Evidence{CascadeRisk: cp.CascadeRisk},
+			UncertaintyScore:    0.2, // topology model is structural, lower uncertainty
 			OperationalPriority: computePriority(sev, cp.CascadeRisk, 0),
-			ModelChain: fmt.Sprintf("cause=critical_path_load→model=graph_cascade_sigmoid→prediction=cascade_risk=%.0f%%→action=bulkhead", cp.CascadeRisk*100),
+			ModelChain:          fmt.Sprintf("cause=critical_path_load→model=graph_cascade_sigmoid→prediction=cascade_risk=%.0f%%→action=bulkhead", cp.CascadeRisk*100),
 		})
 	}
 	return events
@@ -422,12 +422,12 @@ func (e *Engine) evalObjective(obj optimisation.ObjectiveScore, now time.Time) [
 			events = append(events, Event{
 				ID: newID(), Timestamp: now,
 				Severity: SeverityCritical, Category: "OBJECTIVE",
-				Description:     fmt.Sprintf("System composite risk %.0f%% — system-wide degradation (latency=40%% cascade=30%% instability=20%% osc=10%%)", obj.CompositeScore*100),
-				Recommendation:  "Activate incident response; shape traffic at ingress",
-				Evidence:        Evidence{CompositeScore: obj.CompositeScore, CascadeRisk: obj.CascadeFailureProbability, QueueWaitMs: obj.PredictedP99LatencyMs},
-				UncertaintyScore: 0.15,
+				Description:         fmt.Sprintf("System composite risk %.0f%% — system-wide degradation (latency=40%% cascade=30%% instability=20%% osc=10%%)", obj.CompositeScore*100),
+				Recommendation:      "Activate incident response; shape traffic at ingress",
+				Evidence:            Evidence{CompositeScore: obj.CompositeScore, CascadeRisk: obj.CascadeFailureProbability, QueueWaitMs: obj.PredictedP99LatencyMs},
+				UncertaintyScore:    0.15,
 				OperationalPriority: 9,
-				ModelChain: fmt.Sprintf("cause=multi_axis_degradation→model=composite_objective→prediction=system_impairment=%.0f%%→action=incident_response", obj.CompositeScore*100),
+				ModelChain:          fmt.Sprintf("cause=multi_axis_degradation→model=composite_objective→prediction=system_impairment=%.0f%%→action=incident_response", obj.CompositeScore*100),
 			})
 		}
 	}
@@ -452,7 +452,10 @@ func (e *Engine) evictOldest(n int) {
 	if len(e.cooldowns) == 0 {
 		return
 	}
-	type kv struct{ k string; t time.Time }
+	type kv struct {
+		k string
+		t time.Time
+	}
 	entries := make([]kv, 0, len(e.cooldowns))
 	for k, t := range e.cooldowns {
 		entries = append(entries, kv{k, t})

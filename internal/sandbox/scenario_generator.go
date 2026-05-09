@@ -36,7 +36,6 @@ const (
 )
 
 type ScenarioConfig struct {
-
 	BaseArrival float64
 	BaseService float64
 
@@ -97,7 +96,6 @@ type Scenario struct {
 }
 
 type genState struct {
-
 	rng *rand.Rand
 
 	prevNoise float64
@@ -251,7 +249,7 @@ func retryProcess(cfg ScenarioConfig, s *genState) float64 {
 	}
 
 	interval :=
-		math.Exp(-pressure*cfg.RetryDecay)
+		math.Exp(-pressure * cfg.RetryDecay)
 
 	jitter :=
 		1 + cfg.RetryJitter*s.rng.NormFloat64()

@@ -37,12 +37,12 @@ type L3ResultData struct {
 }
 
 type L3Questions struct {
-	WhatWasTested           string `json:"what_was_tested"`
-	WhyThisThreshold        string `json:"why_this_threshold"`
-	WhatHappensIfFails      string `json:"what_happens_if_it_fails"`
-	HowRacesWereDetected    string `json:"how_races_were_detected"`
-	HowLeaksWereDetected    string `json:"how_leaks_were_detected"`
-	WhatConcurrencyPattern  string `json:"concurrency_pattern_exercised"`
+	WhatWasTested          string `json:"what_was_tested"`
+	WhyThisThreshold       string `json:"why_this_threshold"`
+	WhatHappensIfFails     string `json:"what_happens_if_it_fails"`
+	HowRacesWereDetected   string `json:"how_races_were_detected"`
+	HowLeaksWereDetected   string `json:"how_leaks_were_detected"`
+	WhatConcurrencyPattern string `json:"concurrency_pattern_exercised"`
 }
 
 type L3Record struct {
@@ -66,6 +66,7 @@ var (
 	l3Mu      sync.Mutex
 	l3OutPath = "../results/layer3_results.json"
 )
+
 func writeL3Result(r L3Record) {
 	l3Mu.Lock()
 	defer l3Mu.Unlock()

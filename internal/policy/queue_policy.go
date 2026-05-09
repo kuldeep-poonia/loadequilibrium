@@ -21,7 +21,7 @@ type QueueSignal struct {
 }
 
 type QueueDecision struct {
-	QueueLimit float64
+	QueueLimit    float64
 	DrainPriority float64
 
 	Reason     string

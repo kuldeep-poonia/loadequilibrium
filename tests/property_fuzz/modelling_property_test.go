@@ -17,13 +17,17 @@ import (
 // ---------------------------------------------------------------
 // L1-MOD-001 — Stability assessment CollapseZone classification
 // AIM: RunStabilityAssessment must classify CollapseZone correctly:
-//      "safe" when effectiveRho < warningBoundary
-//      "warning" when warningBoundary <= effectiveRho < collapseThreshold
-//      "collapse" when effectiveRho >= collapseThreshold
+//
+//	"safe" when effectiveRho < warningBoundary
+//	"warning" when warningBoundary <= effectiveRho < collapseThreshold
+//	"collapse" when effectiveRho >= collapseThreshold
+//
 // THRESHOLD: 0 misclassifications
 // ON EXCEED: Wrong zone classification → controller applies wrong
-//            damping strategy → either under-damps (crash) or
-//            over-damps (wasted capacity)
+//
+//	damping strategy → either under-damps (crash) or
+//	over-damps (wasted capacity)
+//
 // ---------------------------------------------------------------
 func TestL1_MOD_001_StabilityZoneClassification(t *testing.T) {
 	const seed int64 = 31415
@@ -86,9 +90,9 @@ func TestL1_MOD_001_StabilityZoneClassification(t *testing.T) {
 			}
 			return true
 		},
-		gen.Float64Range(0.0, 1.5),   // rho
-		gen.Float64Range(0.0, 0.5),   // hazard
-		gen.Float64Range(0.0, 1.0),   // reservoir
+		gen.Float64Range(0.0, 1.5), // rho
+		gen.Float64Range(0.0, 0.5), // hazard
+		gen.Float64Range(0.0, 1.0), // reservoir
 	))
 
 	properties.TestingRun(t)
@@ -131,10 +135,14 @@ func TestL1_MOD_001_StabilityZoneClassification(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-MOD-002 — StabilityMargin is exactly 1 - effectiveRho
 // AIM: StabilityMargin must equal 1 - (rho + hazard*0.2 + reservoir*0.1)
-//      before upstream pressure adjustments
+//
+//	before upstream pressure adjustments
+//
 // THRESHOLD: |error| <= 1e-10 (float64 arithmetic tolerance)
 // ON EXCEED: Stability margin miscalculated → controller bases
-//            damping decisions on wrong distance-to-saturation
+//
+//	damping decisions on wrong distance-to-saturation
+//
 // ---------------------------------------------------------------
 func TestL1_MOD_002_StabilityMarginFormula(t *testing.T) {
 	const seed int64 = 54321
@@ -236,10 +244,14 @@ func TestL1_MOD_002_StabilityMarginFormula(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-MOD-003 — CollapseRisk monotonicity with ρ
 // AIM: Higher effective ρ must always produce higher CollapseRisk.
-//      The sigmoid function is monotonically increasing.
+//
+//	The sigmoid function is monotonically increasing.
+//
 // THRESHOLD: 0 monotonicity violations
 // ON EXCEED: Stability model claims higher load is safer → controller
-//            reduces capacity when it should increase it
+//
+//	reduces capacity when it should increase it
+//
 // ---------------------------------------------------------------
 func TestL1_MOD_003_CollapseRiskMonotonicity(t *testing.T) {
 	const seed int64 = 27182
@@ -249,8 +261,8 @@ func TestL1_MOD_003_CollapseRiskMonotonicity(t *testing.T) {
 	properties := gopter.NewProperties(params)
 
 	var (
-		worstReg  float64
-		worstCase interface{}
+		worstReg   float64
+		worstCase  interface{}
 		iterations int
 		violations int
 	)

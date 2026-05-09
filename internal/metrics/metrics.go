@@ -19,13 +19,13 @@ import (
 // Counters holds atomically-updated application event counters.
 // Wire these into the runtime/autopilot paths that emit decisions.
 type Counters struct {
-	TicksTotal      atomic.Int64
+	TicksTotal       atomic.Int64
 	SLABreachesTotal atomic.Int64
-	ScaleUpTotal    atomic.Int64
-	ScaleDownTotal  atomic.Int64
-	HoldTotal       atomic.Int64
-	IngestTotal     atomic.Int64
-	IngestErrors    atomic.Int64
+	ScaleUpTotal     atomic.Int64
+	ScaleDownTotal   atomic.Int64
+	HoldTotal        atomic.Int64
+	IngestTotal      atomic.Int64
+	IngestErrors     atomic.Int64
 }
 
 // Handler serves GET /metrics in Prometheus text exposition format (v0.0.4).

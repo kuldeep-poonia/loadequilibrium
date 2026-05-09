@@ -517,25 +517,25 @@ func (m *MPCOptimiser) Optimise(
 	// 2) OPTIMIZATION LOOP
 	// -------------------------------
 	if len(prevSeq) > 0 && initial.ArrivalMean > 1e-6 {
-        // Infer previous arrival from warm-started capacity target
-        prevImpliedArrival := prevSeq[0].CapacityTarget * initial.ServiceRate
-        if prevImpliedArrival > 1e-6 {
-            ratio := initial.ArrivalMean / prevImpliedArrival
-            if ratio > 1.30 || ratio < 0.70 {
-                // Regime shift detected (>30% arrival change): hard reset to required
-                for i := range seq {
-                    seq[i].CapacityTarget = warmRequired
-                    seq[i].RetryFactor = 0
-                    seq[i].CacheRelief = 0
-                }
-            }
-        }
-    }
+		// Infer previous arrival from warm-started capacity target
+		prevImpliedArrival := prevSeq[0].CapacityTarget * initial.ServiceRate
+		if prevImpliedArrival > 1e-6 {
+			ratio := initial.ArrivalMean / prevImpliedArrival
+			if ratio > 1.30 || ratio < 0.70 {
+				// Regime shift detected (>30% arrival change): hard reset to required
+				for i := range seq {
+					seq[i].CapacityTarget = warmRequired
+					seq[i].RetryFactor = 0
+					seq[i].CacheRelief = 0
+				}
+			}
+		}
+	}
 
-    // -------------------------------
-    // 2) OPTIMIZATION LOOP
-    // -------------------------------
-    best, tail := m.evaluate(initial, seq)
+	// -------------------------------
+	// 2) OPTIMIZATION LOOP
+	// -------------------------------
+	best, tail := m.evaluate(initial, seq)
 	temp := m.InitTemp
 
 	candidate := make([]MPCControl, m.Horizon)

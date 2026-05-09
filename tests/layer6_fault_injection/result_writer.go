@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// ─── Result schema 
+// ─── Result schema
 
 type L6Threshold struct {
 	Metric    string  `json:"metric"`
@@ -23,28 +23,28 @@ type L6Threshold struct {
 }
 
 type L6ResultData struct {
-	Status              string   `json:"status"`
-	ActualValue         float64  `json:"actual_value"`
-	ActualUnit          string   `json:"actual_unit"`
-	FaultInjected       string   `json:"fault_injected"`
-	TimeToDetectMs      int64    `json:"time_to_detect_fault_ms"`
-	TimeToRecoverMs     int64    `json:"time_to_recover_ms"`
-	CommandsSent        int64    `json:"commands_sent"`
-	CommandsSucceeded   int64    `json:"commands_succeeded"`
-	CommandsFailed      int64    `json:"commands_failed"`
-	CommandsCoalesced   int64    `json:"commands_coalesced_not_sent"`
-	Panics              int64    `json:"panics"`
-	DurationMs          int64    `json:"duration_ms"`
-	ErrorMessages       []string `json:"error_messages,omitempty"`
+	Status            string   `json:"status"`
+	ActualValue       float64  `json:"actual_value"`
+	ActualUnit        string   `json:"actual_unit"`
+	FaultInjected     string   `json:"fault_injected"`
+	TimeToDetectMs    int64    `json:"time_to_detect_fault_ms"`
+	TimeToRecoverMs   int64    `json:"time_to_recover_ms"`
+	CommandsSent      int64    `json:"commands_sent"`
+	CommandsSucceeded int64    `json:"commands_succeeded"`
+	CommandsFailed    int64    `json:"commands_failed"`
+	CommandsCoalesced int64    `json:"commands_coalesced_not_sent"`
+	Panics            int64    `json:"panics"`
+	DurationMs        int64    `json:"duration_ms"`
+	ErrorMessages     []string `json:"error_messages,omitempty"`
 }
 
 type L6Questions struct {
-	WhatFaultWasInjected  string `json:"what_fault_was_injected"`
-	WhyThisThreshold      string `json:"why_this_threshold"`
-	WhatHappensIfFails    string `json:"what_happens_if_it_fails"`
-	HowFaultWasInjected   string `json:"how_fault_was_injected"`
-	HowRecoveryVerified   string `json:"how_recovery_was_verified"`
-	WhatDegradedMeans     string `json:"what_degraded_mode_means"`
+	WhatFaultWasInjected string `json:"what_fault_was_injected"`
+	WhyThisThreshold     string `json:"why_this_threshold"`
+	WhatHappensIfFails   string `json:"what_happens_if_it_fails"`
+	HowFaultWasInjected  string `json:"how_fault_was_injected"`
+	HowRecoveryVerified  string `json:"how_recovery_was_verified"`
+	WhatDegradedMeans    string `json:"what_degraded_mode_means"`
 }
 
 type L6Record struct {
@@ -62,7 +62,7 @@ type L6Record struct {
 	GoVersion        string       `json:"go_version"`
 }
 
-// ─── Writer 
+// ─── Writer
 
 var (
 	l6Mu      sync.Mutex
@@ -84,7 +84,7 @@ func writeL6Result(r L6Record) {
 	}
 }
 
-// ─── Helpers 
+// ─── Helpers
 func l6Now() string   { return time.Now().UTC().Format(time.RFC3339) }
 func l6GoVer() string { return runtime.Version() }
 func l6Status(passed bool) string {

@@ -19,19 +19,19 @@ import (
 
 func makeBundle(id string, arrivalRate, serviceRate, utilisation, collapseRisk float64) *modelling.ServiceModelBundle {
 	q := modelling.QueueModel{
-		ServiceID:    id,
-		ArrivalRate:  arrivalRate,
-		ServiceRate:  serviceRate,
-		Utilisation:  utilisation,
-		MeanQueueLen: math.Max(0, utilisation/(1-math.Min(utilisation, 0.99))),
+		ServiceID:      id,
+		ArrivalRate:    arrivalRate,
+		ServiceRate:    serviceRate,
+		Utilisation:    utilisation,
+		MeanQueueLen:   math.Max(0, utilisation/(1-math.Min(utilisation, 0.99))),
 		AdjustedWaitMs: math.Max(1, 1000*utilisation/((1-math.Min(utilisation, 0.99))*serviceRate+1e-9)),
-		Confidence:   0.9,
+		Confidence:     0.9,
 	}
 	stab := modelling.StabilityAssessment{
 		ServiceID:       id,
 		CollapseRisk:    collapseRisk,
 		StabilityMargin: 1 - utilisation,
-		CollapseZone:    func() string {
+		CollapseZone: func() string {
 			if utilisation >= 0.90 {
 				return "collapse"
 			} else if utilisation >= 0.75 {
@@ -197,11 +197,11 @@ func TestControl_StabilityDerivativeDirection(t *testing.T) {
 
 	// Service with rising utilisation trend
 	qRising := modelling.QueueModel{
-		ServiceID:       "svc-rising",
-		Utilisation:     0.75,
+		ServiceID:        "svc-rising",
+		Utilisation:      0.75,
 		UtilisationTrend: 0.02, // rising
-		ArrivalRate:     100,
-		ServiceRate:     133,
+		ArrivalRate:      100,
+		ServiceRate:      133,
 	}
 	sigRising := modelling.SignalState{FastEWMA: 100, SlowEWMA: 95}
 	stabRising := modelling.RunStabilityAssessment(qRising, sigRising, snap, 0.90)
@@ -234,12 +234,12 @@ func TestControl_CollapseZoneClassificationAtBoundaries(t *testing.T) {
 	threshold := 0.90
 
 	cases := []struct {
-		rps      float64
-		lat      float64
+		rps        float64
+		lat        float64
 		expectZone string
 	}{
-		{10, 5, "safe"},    // very low load
-		{700, 10, "warning"}, // moderate load
+		{10, 5, "safe"},       // very low load
+		{700, 10, "warning"},  // moderate load
 		{990, 10, "collapse"}, // near saturation
 	}
 

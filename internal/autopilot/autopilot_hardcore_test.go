@@ -151,27 +151,24 @@ func runScenario(t *testing.T, seed int64, steps int, scenario string) (KPI, []m
 		prevCap                = state.CapacityActive
 		trace                  []map[string]float64
 		logs                   []StepLog
-	    
 	)
-    var prev []MPCControl
-
+	var prev []MPCControl
 
 	controller := &Controller{
-    Dt: 1,
+		Dt: 1,
 
-    Kb: 1.0,
-    Kp: 1.0,
-    Kg: 1.0,
+		Kb: 1.0,
+		Kp: 1.0,
+		Kg: 1.0,
 
-    MPCWeight: 0.5,
-    //SmoothTau: 5,
+		MPCWeight: 0.5,
+		//SmoothTau: 5,
 
-    //MinCapacity: 1,
-    MaxCapacity: 300,
-}
+		//MinCapacity: 1,
+		MaxCapacity: 300,
+	}
 
-
-	var prevPlant PlantState	
+	var prevPlant PlantState
 	memory := NewRegimeMemory(20)
 	var prevBacklog float64 = state.Backlog
 	prevConfState := ConfidenceState{PrevConfidence: 1.0}
@@ -289,7 +286,6 @@ func runScenario(t *testing.T, seed int64, steps int, scenario string) (KPI, []m
 		})
 
 		// 7. MPC optimisation (BASE plan only)
-		
 
 		// 8. Merge: MPC + Decision
 		var sign float64 = 0
@@ -298,15 +294,15 @@ func runScenario(t *testing.T, seed int64, steps int, scenario string) (KPI, []m
 		} else if decision.Action == "scale_down" {
 			sign = -1
 		}
-		
+
 		sup := &Supervisor{Dt: 1}
 		clampedDelta := sup.ClampDecision(decision.ScaleDelta, osc, conf)
-		
+
 		decisionCapacity := prevCapacityActive + sign*clampedDelta*prevCapacityActive
 		mpcCapacity := ctrl.CapacityTarget
-		
+
 		finalCapacity := conf*decisionCapacity + (1.0-conf)*mpcCapacity
-		
+
 		required := state.ArrivalMean / math.Max(state.ServiceRate, 1)
 		minCapacity := required * 1.4
 		if finalCapacity < minCapacity {
@@ -455,7 +451,7 @@ func runScenario(t *testing.T, seed int64, steps int, scenario string) (KPI, []m
 		MeanCapacity:   sumC / float64(steps),
 		OscillationCnt: oscCnt,
 	}, trace, logs
-	}
+}
 
 func Test_Autopilot_Stress(t *testing.T) {
 	scenarios := []string{"stable", "spike", "drop", "oscillating", "overload"}
@@ -474,7 +470,7 @@ func Test_Autopilot_Stress(t *testing.T) {
 
 func Test_Autopilot_Hardcore_Endurance(t *testing.T) {
 	kpi, _, logs := runScenario(t, 42, 100, "default")
-	
+
 	file, _ := os.Create("autopilot_final.json")
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")

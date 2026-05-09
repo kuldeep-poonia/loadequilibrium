@@ -3,13 +3,12 @@ package policy
 import "math"
 
 type EngineState struct {
-	LastGlobalRisk float64
-	LastReplicas   int
+	LastGlobalRisk   float64
+	LastReplicas     int
 	OscillationScore float64
 }
 
 type EngineInput struct {
-
 	Scaling ScalingSignal
 	Retry   RetrySignal
 	Queue   QueueSignal
@@ -38,9 +37,9 @@ func EvaluatePolicies(
 
 	// ---- evaluate individual policies
 	scaling := RecommendScaling(in.Scaling)
-	retry   := RecommendRetryPolicy(in.Retry)
-	queue   := RecommendQueuePolicy(in.Queue)
-	cache   := RecommendCachePolicy(in.Cache)
+	retry := RecommendRetryPolicy(in.Retry)
+	queue := RecommendQueuePolicy(in.Queue)
+	cache := RecommendCachePolicy(in.Cache)
 
 	// ---- light cross-policy coordination damping
 	// example: scaling up + queue tightening → conflict
@@ -63,11 +62,10 @@ func EvaluatePolicies(
 	cacheW := 1.0 - (scaleW + queueW + retryW)
 
 	globalRisk :=
-		1 - math.Exp(-(
-			scaleW*scaling.Risk +
-				queueW*queue.Risk +
-				retryW*retry.Risk +
-				cacheW*cache.Risk))
+		1 - math.Exp(-(scaleW*scaling.Risk +
+			queueW*queue.Risk +
+			retryW*retry.Risk +
+			cacheW*cache.Risk))
 
 	// ---- unified economic cost estimation (Phase-1 coarse)
 	latencyProxy :=
@@ -115,7 +113,7 @@ func EvaluatePolicies(
 		}
 
 		state.LastGlobalRisk = globalRisk
-		state.LastReplicas   = scaling.DesiredReplicas
+		state.LastReplicas = scaling.DesiredReplicas
 
 	} else {
 
@@ -129,13 +127,13 @@ func EvaluatePolicies(
 	}
 
 	return EngineDecision{
-		Scaling:     scaling,
-		Retry:       retry,
-		Queue:       queue,
-		Cache:       cache,
-		GlobalRisk:  globalRisk,
-		GlobalCost:  cost,
-		Confidence:  confidence,
+		Scaling:      scaling,
+		Retry:        retry,
+		Queue:        queue,
+		Cache:        cache,
+		GlobalRisk:   globalRisk,
+		GlobalCost:   cost,
+		Confidence:   confidence,
 		SystemReason: reason,
 	}
 }

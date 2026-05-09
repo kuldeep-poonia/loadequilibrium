@@ -14,12 +14,12 @@ import (
 //   - Hysteresis band: suppresses micro-corrections when output barely changes
 type PIDController struct {
 	Kp, Ki, Kd  float64
-	Setpoint     float64
-	Deadband     float64
-	OutputMin    float64
-	OutputMax    float64
-	IntegralMax  float64
-	DerivativeN  float64 // filter coefficient (5..20 typical)
+	Setpoint    float64
+	Deadband    float64
+	OutputMin   float64
+	OutputMax   float64
+	IntegralMax float64
+	DerivativeN float64 // filter coefficient (5..20 typical)
 
 	// Safe actuation: clamp per-tick delta to this value (0 = disabled)
 	MaxActuationStep float64
@@ -27,12 +27,12 @@ type PIDController struct {
 	// Hysteresis: suppress output update when |new - last| < HysteresisThreshold
 	HysteresisThreshold float64
 
-	integral      float64
-	prevError     float64
-	filteredDeriv float64
-	prevTime      time.Time
-	lastOutput    float64
-	Active        bool
+	integral        float64
+	prevError       float64
+	filteredDeriv   float64
+	prevTime        time.Time
+	lastOutput      float64
+	Active          bool
 	HysteresisState string // "active" | "suppressed" | "deadband"
 }
 

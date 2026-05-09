@@ -48,7 +48,7 @@ type ExperienceBuffer struct {
 	episodeSlots map[int]map[int]struct{}
 	regimeSlots  map[int][]int
 
-	driftEW []float64
+	driftEW    []float64
 	driftDecay float64
 
 	rng *rand.Rand
@@ -78,7 +78,7 @@ func NewExperienceBuffer(cap int, regimes int) *ExperienceBuffer {
 		episodeSlots: make(map[int]map[int]struct{}),
 		regimeSlots:  make(map[int][]int),
 
-		driftEW: make([]float64, regimes),
+		driftEW:    make([]float64, regimes),
 		driftDecay: 0.995,
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),

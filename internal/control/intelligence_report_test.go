@@ -9,17 +9,17 @@ import (
 )
 
 type IntelligenceReport struct {
-	ScaleLowLoad   float64 `json:"scale_low_load"`
-	ScaleHighLoad  float64 `json:"scale_high_load"`
-	ScaleChange    float64 `json:"scale_change"`
+	ScaleLowLoad  float64 `json:"scale_low_load"`
+	ScaleHighLoad float64 `json:"scale_high_load"`
+	ScaleChange   float64 `json:"scale_change"`
 
-	MaxReplicas    int     `json:"max_replicas"`
-	FinalBacklog   float64 `json:"final_backlog"`
-	PeakBacklog    float64 `json:"peak_backlog"`
+	MaxReplicas  int     `json:"max_replicas"`
+	FinalBacklog float64 `json:"final_backlog"`
+	PeakBacklog  float64 `json:"peak_backlog"`
 
-	Oscillation    float64 `json:"oscillation"`
+	Oscillation float64 `json:"oscillation"`
 
-	Health         string  `json:"health"`
+	Health string `json:"health"`
 }
 
 func Test_Generate_Intelligence_Report(t *testing.T) {

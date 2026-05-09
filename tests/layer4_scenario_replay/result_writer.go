@@ -26,28 +26,28 @@ type L4Threshold struct {
 }
 
 type L4FieldDiff struct {
-	FieldName      string  `json:"field"`
-	GoldenValue    float64 `json:"golden_value"`
-	ActualValue    float64 `json:"actual_value"`
-	AbsDelta       float64 `json:"abs_delta"`
-	RelDeltaPct    float64 `json:"rel_delta_pct"`
-	WithinTolerance bool   `json:"within_tolerance"`
+	FieldName       string  `json:"field"`
+	GoldenValue     float64 `json:"golden_value"`
+	ActualValue     float64 `json:"actual_value"`
+	AbsDelta        float64 `json:"abs_delta"`
+	RelDeltaPct     float64 `json:"rel_delta_pct"`
+	WithinTolerance bool    `json:"within_tolerance"`
 }
 
 type L4ResultData struct {
-	Status             string        `json:"status"`
-	ActualValue        float64       `json:"actual_value"`
-	ActualUnit         string        `json:"actual_unit"`
-	RunsAttempted      int           `json:"runs_attempted"`
-	RunsIdentical      int           `json:"runs_identical"`
-	FieldsChecked      int           `json:"fields_checked"`
-	FieldsInTolerance  int           `json:"fields_in_tolerance"`
-	FieldsOutside      int           `json:"fields_outside_tolerance"`
-	WorstDeltaPct      float64       `json:"worst_relative_delta_pct"`
-	OutputChecksum     string        `json:"output_sha256"`
-	Diffs              []L4FieldDiff `json:"field_diffs,omitempty"`
-	DurationMs         int64         `json:"duration_ms"`
-	ErrorMessages      []string      `json:"error_messages,omitempty"`
+	Status            string        `json:"status"`
+	ActualValue       float64       `json:"actual_value"`
+	ActualUnit        string        `json:"actual_unit"`
+	RunsAttempted     int           `json:"runs_attempted"`
+	RunsIdentical     int           `json:"runs_identical"`
+	FieldsChecked     int           `json:"fields_checked"`
+	FieldsInTolerance int           `json:"fields_in_tolerance"`
+	FieldsOutside     int           `json:"fields_outside_tolerance"`
+	WorstDeltaPct     float64       `json:"worst_relative_delta_pct"`
+	OutputChecksum    string        `json:"output_sha256"`
+	Diffs             []L4FieldDiff `json:"field_diffs,omitempty"`
+	DurationMs        int64         `json:"duration_ms"`
+	ErrorMessages     []string      `json:"error_messages,omitempty"`
 }
 
 type L4Questions struct {

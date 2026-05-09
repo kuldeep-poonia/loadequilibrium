@@ -27,9 +27,9 @@ func Classify(in AnomalyInput) AnomalyType {
 
 	// --- normalization ---
 	// FIX W3: normPos removed — norm() from utils.go is identical.
-	bg  := norm(in.BacklogGrowth)
-	lt  := norm(in.LatencyTrend)
-	rp  := norm(in.RetryPressure)
+	bg := norm(in.BacklogGrowth)
+	lt := norm(in.LatencyTrend)
+	rp := norm(in.RetryPressure)
 	osc := clamp01(in.Oscillation)
 
 	inst := clamp01(in.Instability)
@@ -44,10 +44,10 @@ func Classify(in AnomalyInput) AnomalyType {
 	activitySum := s1 + s2 + s3 + s4
 
 	// --- correlation structure ---
-	corrBL   := bg * lt
-	corrLR   := lt * rp
+	corrBL := bg * lt
+	corrLR := lt * rp
 	corrLoop := bg * lt * rp
-	corrOsc  := osc * (bg + lt + rp) / (1.0 + bg + lt + rp)
+	corrOsc := osc * (bg + lt + rp) / (1.0 + bg + lt + rp)
 
 	// FIX W1: was softAgg — log-sum-exp produced ln(4) ≈ 1.386 floor at zero load.
 	// boundedAgg returns 0 when all inputs are 0.
@@ -72,14 +72,14 @@ func Classify(in AnomalyInput) AnomalyType {
 			(0.2 * safetyBias * inst)
 
 	energyLocal :=
-		activitySum/(1.0+activitySum) *
+		activitySum / (1.0 + activitySum) *
 			(1.0 - correlation) *
 			(1.0 - propagation)
 
 	// --- smooth dominance selection (all outputs in [0,1)) ---
-	eCascade  := energyCascade / (1.0 + energyCascade)
+	eCascade := energyCascade / (1.0 + energyCascade)
 	eSystemic := energySystemic / (1.0 + energySystemic)
-	eLocal    := energyLocal / (1.0 + energyLocal)
+	eLocal := energyLocal / (1.0 + energyLocal)
 
 	eStable := 1.0 - (eLocal + eSystemic + eCascade)
 	if eStable < 0 {
@@ -88,7 +88,7 @@ func Classify(in AnomalyInput) AnomalyType {
 
 	// --- soft winner-take-all decision ---
 	maxVal := eStable
-	result  := Stable
+	result := Stable
 
 	if eLocal > maxVal {
 		maxVal = eLocal

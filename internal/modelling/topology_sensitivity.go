@@ -151,7 +151,10 @@ func findMaxAmplificationPath(snap topology.GraphSnapshot) (float64, []string) {
 	}
 
 	// Build log-weight adjacency.
-	type edge struct{ target string; logW float64 }
+	type edge struct {
+		target string
+		logW   float64
+	}
 	adj := make(map[string][]edge, len(snap.Nodes))
 	for _, e := range snap.Edges {
 		if e.Weight > 0 {

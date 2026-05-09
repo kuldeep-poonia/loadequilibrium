@@ -5,28 +5,26 @@ import (
 	"sync"
 )
 
-
-
 type MetaInput struct {
-	GlobalRisk float64
+	GlobalRisk   float64
 	RiskForecast []float64
 
-	HazardUnc float64
-	ModelUnc  float64
+	HazardUnc      float64
+	ModelUnc       float64
 	EpistemicTrend float64
 
 	PerfSignal float64
 	PerfTrend  float64
 
 	StabilityMargin float64
-	EntropyProxy float64
-	GradMagProxy float64
-	ReplayNovelty float64
+	EntropyProxy    float64
+	GradMagProxy    float64
+	ReplayNovelty   float64
 
 	CapacityPressure float64
 
 	SLASeverity float64
-	OscPenalty float64
+	OscPenalty  float64
 
 	Regime int
 }
@@ -57,9 +55,9 @@ type MetaAutonomyController struct {
 func NewMetaAutonomyController() *MetaAutonomyController {
 
 	return &MetaAutonomyController{
-		level: 0.5,
-		modeBelief: [3]float64{0.4, 0.4, 0.2},
-		weights: [6]float64{1.2, 1.1, 0.9, 0.8, 0.7, 0.6},
+		level:       0.5,
+		modeBelief:  [3]float64{0.4, 0.4, 0.2},
+		weights:     [6]float64{1.2, 1.1, 0.9, 0.8, 0.7, 0.6},
 		regimeScore: make(map[int]float64),
 	}
 }
@@ -90,10 +88,10 @@ func (m *MetaAutonomyController) Step(in MetaInput) MetaOutput {
 	m.learnRegime(in)
 
 	return MetaOutput{
-		AutonomyLevel: m.level,
-		SafetyGain: sGain,
+		AutonomyLevel:   m.level,
+		SafetyGain:      sGain,
 		ExplorationGate: explore,
-		GovernanceMode: argmax3(m.modeBelief),
+		GovernanceMode:  argmax3(m.modeBelief),
 	}
 }
 
@@ -161,7 +159,7 @@ func (m *MetaAutonomyController) intelligentExplore(
 	riskSupp :=
 		1 -
 			sigmoid(
-				in.GlobalRisk +
+				in.GlobalRisk+
 					in.EpistemicTrend,
 			)
 
@@ -229,7 +227,7 @@ func (m *MetaAutonomyController) learnWeights(
 ) {
 
 	grad :=
-		(in.PerfSignal-0.5) -
+		(in.PerfSignal - 0.5) -
 			rVec[0] -
 			in.SLASeverity
 
@@ -305,4 +303,3 @@ func argmax3(x [3]float64) int {
 	}
 	return 2
 }
-

@@ -1,7 +1,5 @@
 package layer7
 
-
-
 import (
 	"context"
 	"encoding/json"
@@ -33,28 +31,28 @@ type L7Threshold struct {
 }
 
 type L7ResultData struct {
-	Status             string   `json:"status"`
-	ActualValue        float64  `json:"actual_value"`
-	ActualUnit         string   `json:"actual_unit"`
-	ChaosInjected      string   `json:"chaos_injected"`
-	GoroutinesBefore   int      `json:"goroutines_before"`
-	GoroutinesPeak     int      `json:"goroutines_peak"`
-	GoroutinesAfter    int      `json:"goroutines_after"`
-	GoroutinesLeaked   int      `json:"goroutines_leaked"`
-	TicksCompleted     int      `json:"ticks_completed"`
-	PanicsDetected     int64    `json:"panics_detected"`
-	ShutdownMs         int64    `json:"shutdown_duration_ms"`
-	DurationMs         int64    `json:"duration_ms"`
-	ErrorMessages      []string `json:"error_messages,omitempty"`
+	Status           string   `json:"status"`
+	ActualValue      float64  `json:"actual_value"`
+	ActualUnit       string   `json:"actual_unit"`
+	ChaosInjected    string   `json:"chaos_injected"`
+	GoroutinesBefore int      `json:"goroutines_before"`
+	GoroutinesPeak   int      `json:"goroutines_peak"`
+	GoroutinesAfter  int      `json:"goroutines_after"`
+	GoroutinesLeaked int      `json:"goroutines_leaked"`
+	TicksCompleted   int      `json:"ticks_completed"`
+	PanicsDetected   int64    `json:"panics_detected"`
+	ShutdownMs       int64    `json:"shutdown_duration_ms"`
+	DurationMs       int64    `json:"duration_ms"`
+	ErrorMessages    []string `json:"error_messages,omitempty"`
 }
 
 type L7Questions struct {
-	WhatChaosWasInjected   string `json:"what_chaos_was_injected"`
-	WhyThisThreshold       string `json:"why_this_threshold"`
-	WhatHappensIfFails     string `json:"what_happens_if_it_fails"`
-	HowChaosWasInjected    string `json:"how_chaos_was_injected"`
-	HowRecoveryVerified    string `json:"how_recovery_was_verified"`
-	ProductionEquivalent   string `json:"production_equivalent"`
+	WhatChaosWasInjected string `json:"what_chaos_was_injected"`
+	WhyThisThreshold     string `json:"why_this_threshold"`
+	WhatHappensIfFails   string `json:"what_happens_if_it_fails"`
+	HowChaosWasInjected  string `json:"how_chaos_was_injected"`
+	HowRecoveryVerified  string `json:"how_recovery_was_verified"`
+	ProductionEquivalent string `json:"production_equivalent"`
 }
 
 type L7Record struct {
@@ -106,15 +104,15 @@ func l7Goroutines() int { return runtime.NumGoroutine() }
 // testSystem holds all components constructed in the same order as main.go.
 // Use newTestSystem() to construct; call Shutdown() to tear down.
 type testSystem struct {
-	Cfg      *config.Config
-	Store    *telemetry.Store
-	Hub      *streaming.Hub
-	Act      *actuator.CoalescingActuator
-	Queue    *backends.QueueBackend
-	Router   *actuator.RouterBackend
-	Orch     *runtimepkg.Orchestrator
-	Srv      *api.Server
-	HTTPSrv  *httptest.Server
+	Cfg     *config.Config
+	Store   *telemetry.Store
+	Hub     *streaming.Hub
+	Act     *actuator.CoalescingActuator
+	Queue   *backends.QueueBackend
+	Router  *actuator.RouterBackend
+	Orch    *runtimepkg.Orchestrator
+	Srv     *api.Server
+	HTTPSrv *httptest.Server
 
 	// orchCtx / orchCancel control orch.Run goroutine lifecycle.
 	orchCtx    context.Context

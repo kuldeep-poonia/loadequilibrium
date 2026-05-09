@@ -5,7 +5,6 @@ import (
 	"sync"
 )
 
-
 type TelemetryInput struct {
 	RiskForecast []float64
 
@@ -18,8 +17,8 @@ type TelemetryInput struct {
 
 	SpectralEnergy []float64
 
-	AdvSkew   float64
-	DistKL    float64
+	AdvSkew float64
+	DistKL  float64
 
 	TrackingErr  float64
 	SLASeverity  float64
@@ -28,15 +27,15 @@ type TelemetryInput struct {
 	FailureMode float64
 	Seasonality float64
 
-	Regime int
+	Regime   int
 	Fallback bool
 }
 
 type TelemetryOutput struct {
-	Confidence float64
-	Health     float64
+	Confidence  float64
+	Health      float64
 	Instability float64
-	Degraded   bool
+	Degraded    bool
 }
 
 type AutonomyTelemetryModel struct {
@@ -64,10 +63,10 @@ func NewAutonomyTelemetryModel() *AutonomyTelemetryModel {
 
 	return &AutonomyTelemetryModel{
 		specCenters: []float64{0.3, 0.8},
-		specEW: []float64{0, 0},
-		regimeVec: make(map[int][3]float64),
-		w: [5]float64{0.25, 0.2, 0.2, 0.2, 0.15},
-		conf: 0.6,
+		specEW:      []float64{0, 0},
+		regimeVec:   make(map[int][3]float64),
+		w:           [5]float64{0.25, 0.2, 0.2, 0.2, 0.15},
+		conf:        0.6,
 	}
 }
 
@@ -99,10 +98,10 @@ func (m *AutonomyTelemetryModel) Step(
 	m.normalizeWeights()
 
 	return TelemetryOutput{
-		Confidence: c,
-		Health: h,
+		Confidence:  c,
+		Health:      h,
 		Instability: inst,
-		Degraded: deg,
+		Degraded:    deg,
 	}
 }
 
@@ -235,7 +234,7 @@ func (m *AutonomyTelemetryModel) health(
 
 	perf :=
 		sigmoid(
-			in.TrackingErr+
+			in.TrackingErr +
 				in.SLASeverity,
 		)
 
@@ -295,4 +294,3 @@ func (m *AutonomyTelemetryModel) normalizeWeights() {
 }
 
 /* ===== utils ===== */
-

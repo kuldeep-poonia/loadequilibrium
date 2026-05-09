@@ -43,14 +43,14 @@ func SimulateBundle(
 
 		mult := 1 + disturb
 
-if mult < 0.2 {
-    mult = 0.2
-}
-if mult > 3 {
-    mult = 3
-}
+		if mult < 0.2 {
+			mult = 0.2
+		}
+		if mult > 3 {
+			mult = 3
+		}
 
-baseArrival := initial.PredictedArrival * mult
+		baseArrival := initial.PredictedArrival * mult
 
 		// ---------- retry storm feedback ----------
 		retrySat :=
@@ -182,7 +182,7 @@ baseArrival := initial.PredictedArrival * mult
 
 		retryHaz :=
 			cfg.HazardRetryGain *
-				math.Tanh(retryIntensity * 0.5)
+				math.Tanh(retryIntensity*0.5)
 
 		hazard :=
 			utilHaz + backlogHaz + retryHaz
@@ -193,7 +193,7 @@ baseArrival := initial.PredictedArrival * mult
 		// ---------- SLA integral ----------
 		if latency > initial.SLATarget {
 			slaArea +=
-				(latency-initial.SLATarget) *
+				(latency - initial.SLATarget) *
 					cfg.Dt
 		}
 	}

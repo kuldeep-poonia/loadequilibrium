@@ -47,14 +47,12 @@ type RealClock struct{}
 func (RealClock) Now() time.Time { return time.Now() }
 
 type ExperimentLineage struct {
-
 	ScenarioHash string
 	WorkloadHash string
 	PlantHash    string
 }
 
 type ExperimentRecord struct {
-
 	SchemaVersion string
 
 	Timestamp time.Time
@@ -68,14 +66,13 @@ type ExperimentRecord struct {
 }
 
 type LoggerConfig struct {
-
 	OutputPath string
 
 	Append bool
 
 	EnableGzip bool
 
-	MaxBytes int64      // rotate threshold
+	MaxBytes       int64 // rotate threshold
 	MaxRecordBytes int64 // single record guard
 
 	Clock ExperimentClock

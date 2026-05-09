@@ -58,8 +58,9 @@ func BuildPredictionTimeline(
 // prediction horizon, showing CollapseRisk evolution under current trends.
 //
 // At each tick k, we project:
-//   ρ(k) = ρ₀ + trend × k × tickSec
-//   CollapseRisk(k) = sigmoid((ρ(k) - threshold×0.95) / 0.04)
+//
+//	ρ(k) = ρ₀ + trend × k × tickSec
+//	CollapseRisk(k) = sigmoid((ρ(k) - threshold×0.95) / 0.04)
 //
 // This gives operators a "risk runway" — the number of ticks until each service
 // crosses 0.5 or 0.8 CollapseRisk, enabling proactive decisions rather than

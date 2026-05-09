@@ -458,7 +458,8 @@ func ComputeNetworkEquilibrium(
 // all services under mutual coupling using a fixed-point iteration scheme.
 //
 // Algorithm: Gauss-Seidel fixed-point iteration with SOR damping.
-//   ρ_i(k+1) = (1-ω)·ρ_i(k) + ω·[λ_i + Σ_j w_ij·ρ_j(k)] / μ_i
+//
+//	ρ_i(k+1) = (1-ω)·ρ_i(k) + ω·[λ_i + Σ_j w_ij·ρ_j(k)] / μ_i
 //
 // where the Σ_j term models upstream load injection proportional to edge weight.
 // The iteration converges when ||ρ(k+1) - ρ(k)||_∞ < ε.
@@ -475,9 +476,9 @@ func ComputeFixedPointEquilibrium(
 	}
 
 	const (
-		omega    = 0.55  // SOR damping: < 1 guarantees convergence for this problem class
-		epsilon  = 1e-6  // convergence criterion: max absolute ρ change
-		maxIter  = 50    // iteration cap — in practice converges in 5-15 steps
+		omega   = 0.55 // SOR damping: < 1 guarantees convergence for this problem class
+		epsilon = 1e-6 // convergence criterion: max absolute ρ change
+		maxIter = 50   // iteration cap — in practice converges in 5-15 steps
 	)
 
 	// Build outbound edge index: src → [(target, weight)].
@@ -490,7 +491,7 @@ func ComputeFixedPointEquilibrium(
 
 	// Initialise ρ from current window observations.
 	rho := make(map[string]float64, len(windows))
-	mu := make(map[string]float64, len(windows))  // service rate per node
+	mu := make(map[string]float64, len(windows)) // service rate per node
 	for id, w := range windows {
 		if w.MeanRequestRate > 0 && w.MeanLatencyMs > 0 && w.MeanActiveConns > 0 {
 			c := math.Max(math.Round(w.MeanActiveConns), 1)

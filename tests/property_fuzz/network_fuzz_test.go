@@ -16,11 +16,15 @@ import (
 // ---------------------------------------------------------------
 // L1-NET-001 — NetworkField finite-state invariant (no NaN/Inf)
 // AIM: After any number of steps with any valid edge configuration,
-//      all cell densities must remain finite (no NaN, no Inf).
-//      TotalMass and TotalVariation must also be finite.
+//
+//	all cell densities must remain finite (no NaN, no Inf).
+//	TotalMass and TotalVariation must also be finite.
+//
 // THRESHOLD: 0 NaN/Inf states across all iterations
 // ON EXCEED: PDE solver diverges → density field becomes NaN →
-//            all network-coupled routing produces garbage
+//
+//	all network-coupled routing produces garbage
+//
 // ---------------------------------------------------------------
 func TestL1_NET_001_NetworkFieldFiniteState(t *testing.T) {
 	const seed int64 = 99887
@@ -134,10 +138,14 @@ func TestL1_NET_001_NetworkFieldFiniteState(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-NET-002 — NetworkField density always in [0, 1]
 // AIM: Every cell's Rho must stay in [0, 1] after any number of steps.
-//      The solver enforces this via explicit clamping in fluxStep.
+//
+//	The solver enforces this via explicit clamping in fluxStep.
+//
 // THRESHOLD: 0 out-of-range cells
 // ON EXCEED: Density > 1 or < 0 is physically meaningless →
-//            Flux/Supply/Demand functions produce wrong values
+//
+//	Flux/Supply/Demand functions produce wrong values
+//
 // ---------------------------------------------------------------
 func TestL1_NET_002_NetworkFieldDensityBounds(t *testing.T) {
 	const seed int64 = 77777
@@ -147,7 +155,7 @@ func TestL1_NET_002_NetworkFieldDensityBounds(t *testing.T) {
 	properties := gopter.NewProperties(params)
 
 	var (
-		worstOOB  float64
+		worstOOB   float64
 		worstInput interface{}
 		iterations int
 		violations int

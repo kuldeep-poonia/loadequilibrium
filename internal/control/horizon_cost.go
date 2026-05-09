@@ -35,8 +35,8 @@ func EvaluateHorizonCost(
 	// INFRA COST (normalized, stable)
 	// =========================
 	infraCost :=
-    p.InfraUnitCost *
-    math.Sqrt(float64(b.Replicas))
+		p.InfraUnitCost *
+			math.Sqrt(float64(b.Replicas))
 
 	// =========================
 	// SLA COST

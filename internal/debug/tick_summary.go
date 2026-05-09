@@ -21,8 +21,8 @@ type TickSummary struct {
 	SafetyLevel int
 
 	// Window metrics
-	WindowsTotal int
-	WindowsStale int
+	WindowsTotal    int
+	WindowsStale    int
 	WindowsDegraded int
 
 	// Stage timings
@@ -37,23 +37,23 @@ type TickSummary struct {
 	BroadcastMs float64
 
 	// System state
-	SystemRhoMean      float64
-	SystemFragility    float64
-	CollapseRisk       float64
-	ActiveServices     int
-	KeystoneServices   int
-	HighRiskServices   int
+	SystemRhoMean    float64
+	SystemFragility  float64
+	CollapseRisk     float64
+	ActiveServices   int
+	KeystoneServices int
+	HighRiskServices int
 
 	// Control outputs
-	DirectivesTotal    int
-	DirectivesScaleUp  int
+	DirectivesTotal     int
+	DirectivesScaleUp   int
 	DirectivesScaleDown int
-	DirectivesActive   int
+	DirectivesActive    int
 
 	// Overrun status
-	Overran            bool
+	Overran             bool
 	ConsecutiveOverruns int
-	PredictedOverrun   bool
+	PredictedOverrun    bool
 }
 
 // Emit prints the single final summary line for this tick.

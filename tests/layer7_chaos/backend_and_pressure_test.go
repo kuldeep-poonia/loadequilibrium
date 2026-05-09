@@ -1,6 +1,5 @@
 package layer7
 
-
 import (
 	"context"
 	"fmt"
@@ -17,8 +16,8 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
 	"github.com/loadequilibrium/loadequilibrium/internal/debug"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
-	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
+	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 )
 
 // L7-CHAOS-003 — Actuator backend killed mid-tick: orchestrator continues
@@ -38,11 +37,11 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 	start := time.Now()
 
 	const (
-		tickMs     = 200
+		tickMs      = 200
 		warmupTicks = 5
 	)
 
-	// ── Build system with HTTP backend for one service 
+	// ── Build system with HTTP backend for one service
 	var backendHits int64
 	backendSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&backendHits, 1)
@@ -73,7 +72,7 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 	hitsBeforeKill := atomic.LoadInt64(&backendHits)
 	t.Logf("L7-CHAOS-003 pre-kill: seq=%d backend_hits=%d", seqBeforeKill, hitsBeforeKill)
 
-	// ── CHAOS: Kill backend server 
+	// ── CHAOS: Kill backend server
 	backendSrv.Close()
 
 	// Continue injecting telemetry — orchestrator must keep ticking.
@@ -82,7 +81,7 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 		ts.InjectTelemetry("svc-normal", 160.0, 42.0)
 	}
 
-	// ── Wait for 3+ ticks post-kill 
+	// ── Wait for 3+ ticks post-kill
 	var seqAfterKill int64
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -103,7 +102,7 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 	t.Logf("L7-CHAOS-003 post-kill: seq_before=%d seq_after=%d ticks_after=%d failed_feedback=%d",
 		seqBeforeKill, seqAfterKill, ticksAfterKill, failedResults)
 
-	// ── Recovery: Add new backend 
+	// ── Recovery: Add new backend
 	var recoveryHits int64
 	recoverySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&recoveryHits, 1)
@@ -146,12 +145,12 @@ func TestL7_CHAOS_003_BackendKilledMidTick(t *testing.T) {
 			Rationale: "Backend failure must not halt the control loop",
 		},
 		Result: L7ResultData{
-			Status:        l7Status(passed),
-			ActualValue:   float64(ticksAfterKill),
-			ActualUnit:    "ticks_after_kill",
-			ChaosInjected: "httptest.Server.Close() for actuator backend mid-operation",
+			Status:         l7Status(passed),
+			ActualValue:    float64(ticksAfterKill),
+			ActualUnit:     "ticks_after_kill",
+			ChaosInjected:  "httptest.Server.Close() for actuator backend mid-operation",
 			TicksCompleted: int(seqAfterKill),
-			DurationMs:    time.Since(start).Milliseconds(),
+			DurationMs:     time.Since(start).Milliseconds(),
 			ErrorMessages: []string{fmt.Sprintf(
 				"seq_before=%d seq_after=%d ticks_after=%d failed_fb=%d recovery_ok=%v",
 				seqBeforeKill, seqAfterKill, ticksAfterKill, failedResults, recoverySucceeded,
@@ -195,8 +194,8 @@ func TestL7_CHAOS_004_ConcurrentCancelRace(t *testing.T) {
 	start := time.Now()
 
 	const (
-		tickMs       = 100
-		goroutines   = 10
+		tickMs        = 100
+		goroutines    = 10
 		cancelAfterMs = 300
 	)
 
@@ -217,7 +216,7 @@ func TestL7_CHAOS_004_ConcurrentCancelRace(t *testing.T) {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 
-	// ── Launch concurrent operations 
+	// ── Launch concurrent operations
 	for g := 0; g < goroutines; g++ {
 		g := g
 		wg.Add(1)
@@ -264,10 +263,10 @@ func TestL7_CHAOS_004_ConcurrentCancelRace(t *testing.T) {
 		}()
 	}
 
-	// ── CHAOS: Cancel after 300ms 
+	// ── CHAOS: Cancel after 300ms
 	time.Sleep(time.Duration(cancelAfterMs) * time.Millisecond)
-	close(done)      // signal goroutines to stop
-	ts.Shutdown()    // cancel orchestrator + actuator
+	close(done)   // signal goroutines to stop
+	ts.Shutdown() // cancel orchestrator + actuator
 
 	// ✅ PROOF-BASED CLEANUP: WAIT FOR ALL 10 GOROUTINES TO FULLY EXIT
 	// No random sleeps, no guessing, no leftover goroutines.
@@ -375,7 +374,7 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 	runtime.GC()
 	runtime.GC()
 	time.Sleep(100 * time.Millisecond)
-	
+
 	var memBefore runtime.MemStats
 	runtime.ReadMemStats(&memBefore)
 	heapBaseline := memBefore.HeapAlloc
@@ -389,7 +388,7 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 	ingestsDone := int64(0)
 	var ingestWG sync.WaitGroup
 
-	// ── Ingest at 5,000 events/s 
+	// ── Ingest at 5,000 events/s
 	ctx, cancel := context.WithTimeout(context.Background(), soakDuration)
 	defer cancel()
 
@@ -487,7 +486,7 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 	t.Logf("L7-CHAOS-005 heap_baseline=%dKB heap_final=%dKB growth=%.4fx ticks=%d panics=%d",
 		heapBaseline/1024, heapFinal/1024, heapGrowth, orchTicks, panics)
 
-		passed := heapGrowth <= 4.0 && orchTicks >= expectedMinTicks && panics == 0
+	passed := heapGrowth <= 4.0 && orchTicks >= expectedMinTicks && panics == 0
 
 	writeL7Result(L7Record{
 		TestID: "L7-CHAOS-005", Layer: 7,
@@ -537,7 +536,7 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 	t.Logf("L7-CHAOS-005 PASS | heap_growth=%.4fx ticks=%d panics=0", heapGrowth, orchTicks)
 }
 
-// 
+//
 // L7-CHAOS-006 — Clock skew in telemetry timestamps: staleness detection works
 //
 // AIM:
@@ -554,7 +553,7 @@ func TestL7_CHAOS_005_MemoryPressureSoak(t *testing.T) {
 // THRESHOLD: panics==0, stale_windows_rejected>=1, normal_windows_accessible>=1
 // ON EXCEED: Clock skew causes panics or crashes — distributed system clock drift
 //            corrupts telemetry pipeline.
-// 
+//
 func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 	start := time.Now()
 
@@ -565,7 +564,7 @@ func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 
 	var panics int64
 
-	// ── Inject skewed timestamps 
+	// ── Inject skewed timestamps
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -621,7 +620,7 @@ func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 		}
 	}()
 
-	// ── Check freshness-gated window access 
+	// ── Check freshness-gated window access
 	const freshnessCutoff = 60 * time.Second // only entries within last 60s
 
 	// Past-skewed service: Window should return nil (entries older than cutoff).
@@ -633,7 +632,12 @@ func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 	normalWindow := ts.Store.Window("skew-normal", 32, freshnessCutoff)
 	normalAccessible := normalWindow != nil && normalWindow.SampleCount > 0
 	t.Logf("L7-CHAOS-006 skew-normal window accessible: %v samples=%d",
-		normalAccessible, func() int { if normalWindow != nil { return normalWindow.SampleCount }; return 0 }())
+		normalAccessible, func() int {
+			if normalWindow != nil {
+				return normalWindow.SampleCount
+			}
+			return 0
+		}())
 
 	// Future-skewed service: Window with freshness cutoff behaviour depends on
 	// implementation — future timestamps may or may not be rejected.
@@ -671,8 +675,8 @@ func TestL7_CHAOS_006_ClockSkewTelemetryHandling(t *testing.T) {
 
 	writeL7Result(L7Record{
 		TestID: "L7-CHAOS-006", Layer: 7,
-		Name: "Clock skew in telemetry timestamps: staleness detection and nil-safety",
-		Aim:  "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
+		Name:             "Clock skew in telemetry timestamps: staleness detection and nil-safety",
+		Aim:              "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
 		PackagesInvolved: []string{"internal/telemetry", "internal/runtime"},
 		Threshold: L7Threshold{
 			Metric: "panics", Operator: "==", Value: 0, Unit: "count",

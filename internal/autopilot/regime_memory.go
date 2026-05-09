@@ -1,7 +1,5 @@
 package autopilot
 
-
-
 type MemoryEntry struct {
 	Instability float64
 	Confidence  float64
@@ -15,14 +13,14 @@ type MemoryEntry struct {
 }
 
 type RegimeMemory struct {
-    buffer []MemoryEntry
-    size   int
-    index  int
-    count  int
+	buffer []MemoryEntry
+	size   int
+	index  int
+	count  int
 
-    // cycle detection
-    cycleScore    float64 // EWMA of action-flip frequency
-    midRangeCap   float64 // cached mid-range capacity for oscillating regimes
+	// cycle detection
+	cycleScore  float64 // EWMA of action-flip frequency
+	midRangeCap float64 // cached mid-range capacity for oscillating regimes
 }
 
 // -----------------------------
@@ -41,31 +39,31 @@ func NewRegimeMemory(size int) *RegimeMemory {
 // -----------------------------
 
 func (m *RegimeMemory) Add(e MemoryEntry) {
-    // update cycle score before overwriting slot
-    if m.count >= 2 {
-        prev := m.get(0) // most recent before this
-        flip := 0.0
-        if prev.Action != e.Action && e.Action != "hold" && prev.Action != "hold" {
-            flip = 1.0
-        }
-        m.cycleScore = 0.85*m.cycleScore + 0.15*flip
-    }
+	// update cycle score before overwriting slot
+	if m.count >= 2 {
+		prev := m.get(0) // most recent before this
+		flip := 0.0
+		if prev.Action != e.Action && e.Action != "hold" && prev.Action != "hold" {
+			flip = 1.0
+		}
+		m.cycleScore = 0.85*m.cycleScore + 0.15*flip
+	}
 
-    // maintain mid-range capacity hint when oscillating
-    if m.cycleScore > 0.45 && e.Workers > 0 {
-        if m.midRangeCap == 0 {
-            m.midRangeCap = e.Workers
-        } else {
-            m.midRangeCap = 0.90*m.midRangeCap + 0.10*e.Workers
-        }
-    }
+	// maintain mid-range capacity hint when oscillating
+	if m.cycleScore > 0.45 && e.Workers > 0 {
+		if m.midRangeCap == 0 {
+			m.midRangeCap = e.Workers
+		} else {
+			m.midRangeCap = 0.90*m.midRangeCap + 0.10*e.Workers
+		}
+	}
 
-    m.buffer[m.index] = e
-    m.index = (m.index + 1) % m.size
+	m.buffer[m.index] = e
+	m.index = (m.index + 1) % m.size
 
-    if m.count < m.size {
-        m.count++
-    }
+	if m.count < m.size {
+		m.count++
+	}
 }
 
 // -----------------------------
@@ -301,21 +299,20 @@ func (m *RegimeMemory) GetStabilityScore() float64 {
 	return clamp01(stability)
 }
 
-
 // ── Add exported accessors for the new fields ─────────────────────────────
 // ADD these two methods after the existing GetStabilityScore():
 
 // GetCycleScore returns the oscillation cycle frequency EWMA [0,1].
 // Values > 0.45 indicate a persistent alternating load pattern.
 func (m *RegimeMemory) GetCycleScore() float64 {
-    return m.cycleScore
+	return m.cycleScore
 }
 
 // GetMidRangeCap returns the capacity hint for oscillating regimes.
 // Returns 0 when no oscillation has been detected.
 func (m *RegimeMemory) GetMidRangeCap() float64 {
-    if m.cycleScore < 0.45 {
-        return 0
-    }
-    return m.midRangeCap
+	if m.cycleScore < 0.45 {
+		return 0
+	}
+	return m.midRangeCap
 }

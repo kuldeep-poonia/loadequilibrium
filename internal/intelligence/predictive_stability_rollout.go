@@ -5,25 +5,23 @@ import (
 	"math/rand"
 )
 
-
-
 type RolloutInput struct {
-	State []float64
+	State  []float64
 	Action []float64
 	Regime int
 
-	ModelUnc float64
+	ModelUnc  float64
 	HazardUnc float64
 
 	SLAWeight []float64
 
-	Policy func([]float64) []float64
+	Policy    func([]float64) []float64
 	PolicyUnc float64
 }
 
 type StabilityForecast struct {
 	RiskTrajectory []float64
-	ModeVector []float64
+	ModeVector     []float64
 	SpectralGrowth float64
 }
 
@@ -36,7 +34,7 @@ type PredictiveStabilityRollout struct {
 
 	P [][]float64
 
-	burstCov [][]float64
+	burstCov   [][]float64
 	burstState []float64
 
 	tipLevel float64
@@ -55,11 +53,11 @@ func NewPredictiveStabilityRollout(dim, act int) *PredictiveStabilityRollout {
 	return &PredictiveStabilityRollout{
 		dim: dim,
 		act: act,
-		A: normalizeSpectralRadius(randomMatrix(dim, dim, 1.0), 0.5),
-		B: randomMatrix(dim, act, 1.0),
-		P: identityMatrix(dim, 1),
+		A:   normalizeSpectralRadius(randomMatrix(dim, dim, 1.0), 0.5),
+		B:   randomMatrix(dim, act, 1.0),
+		P:   identityMatrix(dim, 1),
 
-		burstCov: randSPD(dim),
+		burstCov:   randSPD(dim),
 		burstState: make([]float64, dim),
 
 		tipLevel: 1.0,
@@ -127,7 +125,7 @@ func (r *PredictiveStabilityRollout) Forecast(in RolloutInput) StabilityForecast
 
 	return StabilityForecast{
 		RiskTrajectory: traj,
-		ModeVector: mode,
+		ModeVector:     mode,
 		SpectralGrowth: specAccum / float64(h),
 	}
 }

@@ -1,4 +1,3 @@
-
 package sandbox
 
 import (
@@ -27,7 +26,6 @@ Human infra style intentionally uneven.
 */
 
 type BaselineSnapshot struct {
-
 	MeanLatency float64
 	P95Latency  float64
 	P99Latency  float64
@@ -51,8 +49,8 @@ type BaselineSnapshot struct {
 
 	SpectralOscillation float64
 	SettlingTime        float64
-        OscillationIndex float64
-        SettlingIndex float64
+	OscillationIndex    float64
+	SettlingIndex       float64
 }
 
 func BuildBaselineSnapshot(

@@ -18,9 +18,7 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
 )
 
-// ─── helpers 
-
-
+// ─── helpers
 
 func makeWindow(serviceID string, arrivalRate, latencyMs float64, samples int) *telemetry.ServiceWindow {
 	return &telemetry.ServiceWindow{
@@ -29,20 +27,18 @@ func makeWindow(serviceID string, arrivalRate, latencyMs float64, samples int) *
 		MeanLatencyMs:   latencyMs,
 		SampleCount:     samples,
 		ConfidenceScore: 1.0,
-		ComputedAt:     time.Now(),
+		ComputedAt:      time.Now(),
 
 		UpstreamEdges: map[string]telemetry.EdgeWindow{
-	"svc-b": {
-		TargetServiceID: "svc-b",
-		MeanCallRate:    50,
-		MeanErrorRate:   0.01,
-		MeanLatencyMs:   20,
-	},
-},
+			"svc-b": {
+				TargetServiceID: "svc-b",
+				MeanCallRate:    50,
+				MeanErrorRate:   0.01,
+				MeanLatencyMs:   20,
+			},
+		},
 	}
 
-
-	
 }
 
 func makeStore() *telemetry.Store {
@@ -213,8 +209,8 @@ func TestIntegration_WindowsToNetworkCoupling(t *testing.T) {
 		"svc-b": makeWindow("svc-b", 80, 60, 30),
 	}
 	graph := topology.New()
-graph.Update(windows)
-snap := graph.Snapshot()
+	graph.Update(windows)
+	snap := graph.Snapshot()
 	coupling := modelling.ComputeNetworkCoupling(windows, snap)
 
 	// Must return a map (possibly empty if no topology edges)
@@ -333,21 +329,21 @@ func TestIntegration_BundlesToPolicy(t *testing.T) {
 	sig := sp.Update(w)
 	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
 	bundle := &modelling.ServiceModelBundle{
-		Queue:      q,
-		
+		Queue: q,
+
 		Stability:  stab,
 		Stochastic: modelling.StochasticModel{ServiceID: "svc-p", Confidence: 0.9},
 	}
 
 	input := policy.EngineInput{
 		Scaling: policy.ScalingSignal{
-			PredictedLoad:   bundle.Queue.ArrivalRate,
-			CurrentReplicas: 2,
-			TargetLatency:   500,
-			ObservedLatency: bundle.Queue.AdjustedWaitMs + 1,
-			MinReplicas:     1,
-			MaxReplicas:     10,
-			InstanceCost:    1.0,
+			PredictedLoad:    bundle.Queue.ArrivalRate,
+			CurrentReplicas:  2,
+			TargetLatency:    500,
+			ObservedLatency:  bundle.Queue.AdjustedWaitMs + 1,
+			MinReplicas:      1,
+			MaxReplicas:      10,
+			InstanceCost:     1.0,
 			SlaPenaltyWeight: 1.0,
 		},
 		Retry: policy.RetrySignal{

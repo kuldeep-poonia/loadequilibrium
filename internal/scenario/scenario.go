@@ -13,7 +13,7 @@ type Disturbance struct {
 	Metric              string // "RequestRate", "Latency"
 	Factor              float64
 	Active              bool
-	Phase               string // "ramp", "peak", "decay"
+	Phase               string  // "ramp", "peak", "decay"
 	PropagationDelayEst float64 // ms
 	PropagationDepth    int
 }
@@ -35,7 +35,7 @@ func (s *ResettableBurst) Evaluate(tick uint64, topo topology.GraphSnapshot, win
 	if tick < s.StartTick {
 		return nil
 	}
-	
+
 	cycleTick := tick - s.StartTick
 	if s.RepeatEvery > 0 {
 		cycleTick = cycleTick % s.RepeatEvery
@@ -46,7 +46,7 @@ func (s *ResettableBurst) Evaluate(tick uint64, topo topology.GraphSnapshot, win
 	}
 
 	relativeTick := float64(cycleTick)
-	
+
 	rampTicks := float64(s.DurationTicks) * 0.2
 	decayTicks := float64(s.DurationTicks) * 0.2
 	peakEnd := float64(s.DurationTicks) - decayTicks
@@ -55,11 +55,11 @@ func (s *ResettableBurst) Evaluate(tick uint64, topo topology.GraphSnapshot, win
 	phase := "peak"
 
 	if relativeTick < rampTicks {
-		factor = 1.0 + (s.MaxFactor-1.0)*math.Sin(math.Pi/2 * (relativeTick/rampTicks))
+		factor = 1.0 + (s.MaxFactor-1.0)*math.Sin(math.Pi/2*(relativeTick/rampTicks))
 		phase = "ramp"
 	} else if relativeTick > peakEnd {
 		rem := float64(s.DurationTicks) - relativeTick
-		factor = 1.0 + (s.MaxFactor-1.0)*math.Sin(math.Pi/2 * (rem/decayTicks))
+		factor = 1.0 + (s.MaxFactor-1.0)*math.Sin(math.Pi/2*(rem/decayTicks))
 		phase = "decay"
 	} else {
 		factor = s.MaxFactor

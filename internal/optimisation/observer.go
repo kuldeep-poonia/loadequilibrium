@@ -11,10 +11,10 @@ import (
 
 // ObserverSignal holds the evaluated dynamic variables for closed-loop control.
 type ObserverSignal struct {
-	QueueVelocity      float64
-	UtilisationGrad    float64
-	DisturbanceEnergy  float64
-	StabilityScore     float64
+	QueueVelocity     float64
+	UtilisationGrad   float64
+	DisturbanceEnergy float64
+	StabilityScore    float64
 
 	// Legacy fields mirrored for controller abstraction compatibility
 	StabilityEnvelope  float64

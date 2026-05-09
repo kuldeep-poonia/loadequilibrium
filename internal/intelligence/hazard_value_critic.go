@@ -6,8 +6,6 @@ import (
 	"sync"
 )
 
-
-
 type HazardSample struct {
 	Feature []float64
 
@@ -43,7 +41,7 @@ type HazardValueCritic struct {
 
 	temp float64
 
-	smooth float64
+	smooth  float64
 	lastHaz float64
 }
 

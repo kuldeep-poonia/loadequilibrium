@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-
-
 type RuntimeModules struct {
 	Meta    *MetaAutonomyController
 	Safety  *SafetyConstraintProjector

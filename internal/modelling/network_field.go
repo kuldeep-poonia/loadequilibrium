@@ -72,7 +72,7 @@ func NewNetworkField() *NetworkField {
 
 /******** PHYSICS ********/
 
-func Flux(r float64) float64 { return r * (1 - r) }
+func Flux(r float64) float64      { return r * (1 - r) }
 func FluxPrime(r float64) float64 { return 1 - 2*r }
 
 func Demand(r float64) float64 {

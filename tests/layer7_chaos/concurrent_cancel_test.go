@@ -1,10 +1,7 @@
 //go:build legacy
 // +build legacy
 
-
 package layer7
-
-
 
 import (
 	"fmt"
@@ -16,7 +13,7 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
 )
 
-// 
+//
 // L7-CHAOS-004 — Concurrent cancel race: zero panics across all operations
 //
 // AIM:
@@ -31,8 +28,7 @@ import (
 //
 // THRESHOLD: panics == 0
 // ON EXCEED: Race condition during concurrent cancel causes panic → crash.
-// 
-
+//
 
 func TestL7_CHAOS_004_ConcurrentCancelRace_ORIG(t *testing.T) {
 	start := time.Now()

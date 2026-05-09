@@ -6,7 +6,6 @@ import (
 	"time"
 
 	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
-	
 )
 
 func baseState() ctrl.SystemState {

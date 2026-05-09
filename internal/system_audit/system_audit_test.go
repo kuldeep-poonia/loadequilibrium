@@ -21,19 +21,32 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 func clamp01(x float64) float64 {
-	if x < 0 { return 0 }
-	if x > 1 { return 1 }
+	if x < 0 {
+		return 0
+	}
+	if x > 1 {
+		return 1
+	}
 	return x
 }
 func clampF(x, lo, hi float64) float64 {
-	if x < lo { return lo }
-	if x > hi { return hi }
+	if x < lo {
+		return lo
+	}
+	if x > hi {
+		return hi
+	}
 	return x
 }
 func sigmoid(x float64) float64 { return 1.0 / (1.0 + math.Exp(-x)) }
 func norm(x float64) float64    { return x / (1.0 + x) }
-func pos(x float64) float64     { if x < 0 { return 0 }; return x }
-func tanh(x float64) float64    { return math.Tanh(x) }
+func pos(x float64) float64 {
+	if x < 0 {
+		return 0
+	}
+	return x
+}
+func tanh(x float64) float64 { return math.Tanh(x) }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ███████████████████████████████████████████████████████████████████████████
@@ -46,14 +59,14 @@ func tanh(x float64) float64    { return math.Tanh(x) }
 // ─── Minimal stubs mirroring the real types ───────────────────────────────
 
 type ControlDirective struct {
-	ServiceID           string
-	ScaleFactor         float64
-	TargetUtilisation   float64
-	Active              bool
-	StabilityMargin     float64
-	MPCOvershootRisk    bool
+	ServiceID             string
+	ScaleFactor           float64
+	TargetUtilisation     float64
+	Active                bool
+	StabilityMargin       float64
+	MPCOvershootRisk      bool
 	MPCUnderactuationRisk bool
-	PlannerConvergent   bool
+	PlannerConvergent     bool
 }
 
 type AutopilotAdvice struct {
@@ -97,20 +110,20 @@ type AdvisoryBundle struct {
 	Sandbox      SandboxAdvice
 }
 type SystemState struct {
-	Replicas        int
-	Utilisation     float64
-	Risk            float64
-	Latency         float64
-	SLATarget       float64
-	ServiceRate     float64
-	QueueDepth      float64
+	Replicas         int
+	Utilisation      float64
+	Risk             float64
+	Latency          float64
+	SLATarget        float64
+	ServiceRate      float64
+	QueueDepth       float64
 	PredictedArrival float64
-	MinReplicas     int
-	MaxReplicas     int
-	RetryLimit      int
-	QueueLimit      float64
-	MinRetry        int
-	MaxRetry        int
+	MinReplicas      int
+	MaxReplicas      int
+	RetryLimit       int
+	QueueLimit       float64
+	MinRetry         int
+	MaxRetry         int
 }
 
 // aggregateAdvisoryRisk — mirrors authority.go exactly
@@ -201,10 +214,10 @@ func TestQ2_FinalDecisionMaker_ScaleRateLimitedByAuthority(t *testing.T) {
 		maxDelta  float64
 		wantClamp bool
 	}{
-		{"small delta — no clamp",  1.10, 1.00, 0.30, false},
-		{"large up — must clamp",   2.00, 1.00, 0.30, true},
+		{"small delta — no clamp", 1.10, 1.00, 0.30, false},
+		{"large up — must clamp", 2.00, 1.00, 0.30, true},
 		{"large down — must clamp", 0.40, 1.00, 0.30, true},
-		{"exact boundary",          1.30, 1.00, 0.30, false},
+		{"exact boundary", 1.30, 1.00, 0.30, false},
 		{"zero last — passthrough", 1.50, 0.00, 0.30, false},
 	}
 
@@ -245,12 +258,15 @@ func TestQ2_DecisionMaker_OrchestratorModeEscalation(t *testing.T) {
 		}
 	}
 
-	table := []struct{ score float64; want string }{
+	table := []struct {
+		score float64
+		want  string
+	}{
 		{0.90, "SafetyOnly"},
 		{0.70, "Supervised"},
 		{0.55, "Advisory"},
 		{0.20, "Autonomous"},
-		{0.46, "Advisory"},    // just above 0.45 → Advisory
+		{0.46, "Advisory"},   // just above 0.45 → Advisory
 		{0.81, "SafetyOnly"}, // just above 0.8
 	}
 
@@ -285,8 +301,8 @@ func TestQ2_Supervisor_TriggersRecomputeAtShortHorizon(t *testing.T) {
 		wantRecompute  bool
 		desc           string
 	}{
-		{1, true,  "energy unsafe at h=1 → immediate recompute"},
-		{2, true,  "energy unsafe at h=2 → still recompute"},
+		{1, true, "energy unsafe at h=1 → immediate recompute"},
+		{2, true, "energy unsafe at h=2 → still recompute"},
 		{3, false, "energy safe past h=2 → no recompute"},
 		{5, false, "stable system — recompute not needed"},
 	}
@@ -360,7 +376,9 @@ func TestQ3_SignalProcessor_SpikeRejection(t *testing.T) {
 		filtered := tc.raw
 		if gotSpike {
 			sign := 1.0
-			if tc.raw < fastEWMA { sign = -1.0 }
+			if tc.raw < fastEWMA {
+				sign = -1.0
+			}
 			filtered = fastEWMA + sign*spikeK*stdDev
 		}
 
@@ -385,7 +403,7 @@ func TestQ3_SignalProcessor_SpikeRejection(t *testing.T) {
 // TEST 2-C  CUSUM change-point detection
 func TestQ3_SignalProcessor_CUSUMChangePointDetection(t *testing.T) {
 	// From signal.go: CUSUM fires when cusumPos or cusumNeg > threshold=5.0
-	const slack     = 0.5
+	const slack = 0.5
 	const threshold = 5.0
 
 	cusumPos := 0.0
@@ -396,8 +414,8 @@ func TestQ3_SignalProcessor_CUSUMChangePointDetection(t *testing.T) {
 	// threshold=5.0, slack=0.5 → need normalizedDiff > 0.5 to accumulate
 	// At diff=1.5: each tick adds (1.5-0.5)=1.0 → fires after 5 shift ticks
 	normalizedDiffs := []float64{
-		0.1, 0.2, 0.1, 0.15,              // baseline (all < slack, cumsum stays 0)
-		1.5, 1.5, 1.5, 1.5, 1.5, 1.5,    // strong shift: adds 1.0/tick → crosses 5.0 at tick 4+5=9
+		0.1, 0.2, 0.1, 0.15, // baseline (all < slack, cumsum stays 0)
+		1.5, 1.5, 1.5, 1.5, 1.5, 1.5, // strong shift: adds 1.0/tick → crosses 5.0 at tick 4+5=9
 	}
 
 	for i, d := range normalizedDiffs {
@@ -424,7 +442,9 @@ func TestQ3_SignalProcessor_CUSUMChangePointDetection(t *testing.T) {
 // TEST 2-D  Hub sanitises NaN/Inf before broadcast
 func TestQ3_Hub_SanitisesNaNAndInf(t *testing.T) {
 	safeFloat := func(x float64) float64 {
-		if math.IsNaN(x) || math.IsInf(x, 0) { return 0 }
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0
+		}
 		return x
 	}
 
@@ -452,15 +472,15 @@ func TestQ3_Store_SignalConfidenceScoring(t *testing.T) {
 	freshnessConf := func(ageSec float64) float64 { return math.Exp(-ageSec / 6.0) }
 
 	tests := []struct {
-		samples    int
-		cov        float64
-		ageSec     float64
+		samples     int
+		cov         float64
+		ageSec      float64
 		wantQuality string
 	}{
 		{50, 0.1, 0.5, "good"},
-		{5,  0.1, 0.5, "sparse"},    // too few samples
-		{30, 2.0, 0.5, "sparse"},    // high CoV crushes conf below 0.3
-		{30, 0.1, 20.0, "sparse"},   // stale data
+		{5, 0.1, 0.5, "sparse"},   // too few samples
+		{30, 2.0, 0.5, "sparse"},  // high CoV crushes conf below 0.3
+		{30, 0.1, 20.0, "sparse"}, // stale data
 	}
 
 	for _, tc := range tests {
@@ -532,23 +552,34 @@ func TestQ4_DecisionPolicy_ScaleUpUnderBacklogAndGap(t *testing.T) {
 		absGap := math.Abs(gap)
 
 		rateMultiplier := 1.0
-		if backlogV > 0 { rateMultiplier = 1.5 }
+		if backlogV > 0 {
+			rateMultiplier = 1.5
+		}
 		baseDelta := (absGap / (absGap + 2.0)) * rateMultiplier
 
 		memFactor := (1.0 + 0.6*1.0) * (1.0 - oscillation) // effectiveness=1
 		speedFactor := 0.2 + 0.8*conf
 
 		delta := baseDelta * memFactor * speedFactor
-		if delta > 1.0 { delta = 1.0 }
+		if delta > 1.0 {
+			delta = 1.0
+		}
 
 		action := "hold"
-		if gap > 0.05 { action = "scale_up" }
-		if gap < -0.05 { action = "scale_down" }
+		if gap > 0.05 {
+			action = "scale_up"
+		}
+		if gap < -0.05 {
+			action = "scale_down"
+		}
 		if action == "hold" {
 			if backlogV > 0 || trend > 0.1 || inst > 0.5 {
-				action = "scale_up"; delta = 0.02
+				action = "scale_up"
+				delta = 0.02
 			}
-		} else if delta < 0.01 { delta = 0.01 }
+		} else if delta < 0.01 {
+			delta = 0.01
+		}
 
 		return action, clamp01(delta)
 	}
@@ -561,10 +592,10 @@ func TestQ4_DecisionPolicy_ScaleUpUnderBacklogAndGap(t *testing.T) {
 		wantAction string
 		wantDelta  float64 // minimum
 	}{
-		{"high backlog + capacity gap",  50.0, 5.0, 10.0, "scale_up",   0.01},
-		{"no backlog + capacity surplus", 0.0, 10.0,  5.0, "scale_down", 0.01},
-		{"equilibrium",                   0.0,  5.0,  5.0, "hold",       0.0},
-		{"backlog only — hold→scale_up",  20.0,  5.0,  5.05, "scale_up", 0.02},
+		{"high backlog + capacity gap", 50.0, 5.0, 10.0, "scale_up", 0.01},
+		{"no backlog + capacity surplus", 0.0, 10.0, 5.0, "scale_down", 0.01},
+		{"equilibrium", 0.0, 5.0, 5.0, "hold", 0.0},
+		{"backlog only — hold→scale_up", 20.0, 5.0, 5.05, "scale_up", 0.02},
 	}
 
 	for _, tc := range tests {
@@ -588,10 +619,10 @@ func TestQ4_DecisionPolicy_NoFreezeRule(t *testing.T) {
 		shouldEscalate       bool
 	}
 	cases := []noFreezeCase{
-		{50, 0.1, 0.0, true},  // backlog forces scale_up
-		{0,  0.6, 0.0, true},  // high instability
-		{0,  0.1, 0.2, true},  // trending up
-		{0,  0.1, 0.0, false}, // genuine hold
+		{50, 0.1, 0.0, true}, // backlog forces scale_up
+		{0, 0.6, 0.0, true},  // high instability
+		{0, 0.1, 0.2, true},  // trending up
+		{0, 0.1, 0.0, false}, // genuine hold
 	}
 	for _, c := range cases {
 		escalate := c.backlog > 0 || c.trend > 0.1 || c.inst > 0.5
@@ -627,23 +658,27 @@ func TestQ4_ConfidenceEngine_CoherenceAndStabilityFactor(t *testing.T) {
 		stabilityFactor := 1.0 / (1.0 + 3.0*shortTermRisk + 2.0*shortTermRisk*shortTermRisk)
 
 		raw := coherence * controlGain * stabilityFactor
-		if instability > 0.8 && (osc > 0.5 || e < 0.15) { raw *= 0.15 }
-		if osc > 0.8 { raw *= 0.3 }
+		if instability > 0.8 && (osc > 0.5 || e < 0.15) {
+			raw *= 0.15
+		}
+		if osc > 0.8 {
+			raw *= 0.3
+		}
 
 		conf := raw / (0.40 + 0.60*raw)
 		return clamp01(conf)
 	}
 
 	tests := []struct {
-		name             string
+		name                 string
 		trend, sig, eff, osc float64
-		wantHigh         bool // true = expect conf > 0.5
+		wantHigh             bool // true = expect conf > 0.5
 	}{
-		{"healthy system",          0.9, 0.9, 0.9, 0.0,  true},
-		{"oscillating system",      0.8, 0.8, 0.8, 0.9,  false},
-		{"low effectiveness",       0.9, 0.9, 0.05, 0.0, false},
-		{"signal disagreement",     0.9, 0.2, 0.8, 0.0,  false},
-		{"moderate all-round",      0.6, 0.6, 0.6, 0.3,  false}, // conf=0.31 — stability factor dominates
+		{"healthy system", 0.9, 0.9, 0.9, 0.0, true},
+		{"oscillating system", 0.8, 0.8, 0.8, 0.9, false},
+		{"low effectiveness", 0.9, 0.9, 0.05, 0.0, false},
+		{"signal disagreement", 0.9, 0.2, 0.8, 0.0, false},
+		{"moderate all-round", 0.6, 0.6, 0.6, 0.3, false}, // conf=0.31 — stability factor dominates
 	}
 
 	for _, tc := range tests {
@@ -660,11 +695,19 @@ func TestQ4_ConfidenceEngine_CoherenceAndStabilityFactor(t *testing.T) {
 // TEST 3-D  InstabilityEngine — critical on high concurrent failure modes
 func TestQ4_InstabilityEngine_CriticalOnConcurrentFailures(t *testing.T) {
 	computeInstability := func(backlog, backlogRate, latency, latencyRate, retryRate, oscillation, utilization float64) (float64, string) {
-		b  := pos(backlog);  br := pos(backlogRate)
-		l  := pos(latency);  lr := pos(latencyRate)
-		r  := clamp01(retryRate); o := clamp01(oscillation); u := clamp01(utilization)
+		b := pos(backlog)
+		br := pos(backlogRate)
+		l := pos(latency)
+		lr := pos(latencyRate)
+		r := clamp01(retryRate)
+		o := clamp01(oscillation)
+		u := clamp01(utilization)
 
-		bs := norm(b); bm := norm(br); ls := norm(l); lm := norm(lr); rr := norm(r)
+		bs := norm(b)
+		bm := norm(br)
+		ls := norm(l)
+		lm := norm(lr)
+		rr := norm(r)
 
 		pressure := bs * (1.0 + 0.5*ls) / (1.0 + 0.5*bs*ls)
 		momentum := bm * (1.0 + lm) / (1.0 + bm*lm)
@@ -673,15 +716,19 @@ func TestQ4_InstabilityEngine_CriticalOnConcurrentFailures(t *testing.T) {
 
 		loadContext := pressure + momentum
 		oscScaled := o * (loadContext / (1.0 + loadContext))
-		oscFloor  := 0.25 * o
+		oscFloor := 0.25 * o
 		oscEffect := math.Max(oscFloor, oscScaled)
 
-		cascadeBL := bs * ls; cascadeLR := ls * rr
-		cascadeRU := rr * utilStress; cascadeFull := bs * ls * rr
+		cascadeBL := bs * ls
+		cascadeLR := ls * rr
+		cascadeRU := rr * utilStress
+		cascadeFull := bs * ls * rr
 		cascade := (cascadeBL + cascadeLR + cascadeRU + cascadeFull) /
 			(1.0 + cascadeBL + cascadeLR + cascadeRU + cascadeFull)
 
-		pm := pressure*momentum; pf := pressure*failure; mf := momentum*failure
+		pm := pressure * momentum
+		pf := pressure * failure
+		mf := momentum * failure
 		coupling := (pm + pf + mf) / (1.0 + pm + pf + mf)
 		persistence := pressure * momentum
 
@@ -692,20 +739,24 @@ func TestQ4_InstabilityEngine_CriticalOnConcurrentFailures(t *testing.T) {
 		score := clamp01(energy / (1.0 + energy))
 
 		level := "stable"
-		if score >= 0.7 { level = "critical" } else if score >= 0.3 { level = "warning" }
+		if score >= 0.7 {
+			level = "critical"
+		} else if score >= 0.3 {
+			level = "warning"
+		}
 		return score, level
 	}
 
 	tests := []struct {
-		name      string
+		name                  string
 		b, br, l, lr, r, o, u float64
-		wantLevel string
+		wantLevel             string
 	}{
-		{"all zero — fully stable",        0,   0,   0,   0,   0,   0,   0,   "stable"},
+		{"all zero — fully stable", 0, 0, 0, 0, 0, 0, 0, "stable"},
 		{"moderate load (nonlinear energy→critical)", 50, 5, 200, 10, 0.1, 0.1, 0.6, "critical"},
-		{"extreme backlog+latency+retry",  500, 100, 500, 50,  0.8, 0.7, 0.95,"critical"},
-		{"oscillation only (no load)",     0,   0,   0,   0,   0,   0.9, 0,   "stable"},
-		{"high utilization alone",         0,   0,   0,   0,   0,   0,   0.99,"stable"},
+		{"extreme backlog+latency+retry", 500, 100, 500, 50, 0.8, 0.7, 0.95, "critical"},
+		{"oscillation only (no load)", 0, 0, 0, 0, 0, 0.9, 0, "stable"},
+		{"high utilization alone", 0, 0, 0, 0, 0, 0, 0.99, "stable"},
 	}
 
 	for _, tc := range tests {
@@ -738,10 +789,10 @@ func TestQ4_SafetyEngine_LyapunovEnergyFormula(t *testing.T) {
 		disturbance    float64
 		wantIncreasing bool // compared to "healthy" baseline
 	}{
-		{"healthy baseline",      5,   100, 10, 10, 0.1, false},
-		{"backlog spike",         100, 100, 10, 10, 0.1, true},
-		{"overloaded capacity",   5,   200, 10, 10, 0.1, true},
-		{"large disturbance",     5,   100, 10, 10, 5.0, true},
+		{"healthy baseline", 5, 100, 10, 10, 0.1, false},
+		{"backlog spike", 100, 100, 10, 10, 0.1, true},
+		{"overloaded capacity", 5, 200, 10, 10, 0.1, true},
+		{"large disturbance", 5, 100, 10, 10, 5.0, true},
 	}
 
 	baselineE := energy(5, 100, 10, 10, 0.1, alpha, beta)
@@ -766,16 +817,30 @@ func TestQ4_Authority_ReplicaBoundsFromAdvisory(t *testing.T) {
 	// From authority.go deriveBounds() — autopilot and policy can both tighten bounds
 	deriveBounds := func(stateMin, stateMax int, advPolicyMin, advPolicyMax, advAutopilotMin, advAutopilotMax int) (int, int) {
 		minR := stateMin
-		if minR < 1 { minR = 1 }
+		if minR < 1 {
+			minR = 1
+		}
 		maxR := stateMax
-		if maxR <= 0 { maxR = minR + 4 }
+		if maxR <= 0 {
+			maxR = minR + 4
+		}
 
-		if advPolicyMin > 0 && advPolicyMin > minR { minR = advPolicyMin }
-		if advPolicyMax > 0 && advPolicyMax < maxR  { maxR = advPolicyMax }
-		if advAutopilotMin > 0 && advAutopilotMin > minR { minR = advAutopilotMin }
-		if advAutopilotMax > 0 && advAutopilotMax < maxR  { maxR = advAutopilotMax }
+		if advPolicyMin > 0 && advPolicyMin > minR {
+			minR = advPolicyMin
+		}
+		if advPolicyMax > 0 && advPolicyMax < maxR {
+			maxR = advPolicyMax
+		}
+		if advAutopilotMin > 0 && advAutopilotMin > minR {
+			minR = advAutopilotMin
+		}
+		if advAutopilotMax > 0 && advAutopilotMax < maxR {
+			maxR = advAutopilotMax
+		}
 
-		if minR > maxR { maxR = minR }
+		if minR > maxR {
+			maxR = minR
+		}
 		return minR, maxR
 	}
 
@@ -786,10 +851,10 @@ func TestQ4_Authority_ReplicaBoundsFromAdvisory(t *testing.T) {
 		wantMin, wantMax int
 		name             string
 	}{
-		{1, 10, 3, 8, 0, 0, 3, 8,  "policy tightens bounds"},
-		{1, 10, 0, 0, 4, 7, 4, 7,  "autopilot tightens bounds"},
-		{1, 10, 5, 3, 0, 0, 5, 5,  "inversion → widened to min"},
-		{1,  0, 0, 0, 0, 0, 1, 5,  "no max → default to min+4"},
+		{1, 10, 3, 8, 0, 0, 3, 8, "policy tightens bounds"},
+		{1, 10, 0, 0, 4, 7, 4, 7, "autopilot tightens bounds"},
+		{1, 10, 5, 3, 0, 0, 5, 5, "inversion → widened to min"},
+		{1, 0, 0, 0, 0, 0, 1, 5, "no max → default to min+4"},
 	}
 
 	for _, tc := range tests {
@@ -814,11 +879,11 @@ func TestQ4_Authority_ReplicaBoundsFromAdvisory(t *testing.T) {
 func TestQ5_PID_ConvergesToSetpoint(t *testing.T) {
 	// Mirrors PIDController.Update() from pid.go
 	kp, ki, kd := 0.8, 0.05, 0.1
-	setpoint   := 0.70
-	deadband   := 0.02
+	setpoint := 0.70
+	deadband := 0.02
 	integralMax := 5.0
 	outputMin, outputMax := -1.0, 1.0
-	maxStep     := 0.15
+	maxStep := 0.15
 	hysteresisT := 0.02
 
 	rho := 1.0 // start heavily overloaded
@@ -864,7 +929,11 @@ func TestQ5_PID_ConvergesToSetpoint(t *testing.T) {
 
 		// Apply to plant: rho moves toward setpoint via scale factor
 		scaleFactor := 1.0 + output
-		if scaleFactor > 1 { rho = rho / scaleFactor } else { rho = rho * (2 - scaleFactor) }
+		if scaleFactor > 1 {
+			rho = rho / scaleFactor
+		} else {
+			rho = rho * (2 - scaleFactor)
+		}
 		rho = math.Max(0.1, math.Min(rho, 2.0))
 		finalRho = rho
 	}
@@ -934,7 +1003,7 @@ func TestQ5_MPC_TrajectoryCostHigherAtHighRho(t *testing.T) {
 // TEST 4-D  MPC overshoot damping — scale reduced when path goes below setpoint
 func TestQ5_MPC_OvershootDamping(t *testing.T) {
 	// From mpc.go: if overshootRisk && scale>1 → damped = 1 + (scale-1)×dampFactor
-	setpoint    := 0.70
+	setpoint := 0.70
 	maxOvershoot := 0.05
 	currentScale := 1.5
 
@@ -1029,11 +1098,11 @@ func TestQ5_Engine_PressureAdaptiveDeadband(t *testing.T) {
 		collapseZone  string
 		wantDeadband  float64
 	}{
-		{0, "safe",    math.Min(baseDeadband*1.5, 0.06)}, // wider at low pressure
-		{1, "safe",    math.Max(baseDeadband*0.5, 0.005)},
-		{2, "safe",    math.Max(baseDeadband*0.4, 0.005)},
+		{0, "safe", math.Min(baseDeadband*1.5, 0.06)}, // wider at low pressure
+		{1, "safe", math.Max(baseDeadband*0.5, 0.005)},
+		{2, "safe", math.Max(baseDeadband*0.4, 0.005)},
 		{0, "collapse", math.Max(baseDeadband*0.5, 0.005)},
-		{0, "warning",  baseDeadband},
+		{0, "warning", baseDeadband},
 	}
 	for _, tc := range cases {
 		var db float64
@@ -1068,22 +1137,36 @@ func TestQ5_Engine_PressureAdaptiveDeadband(t *testing.T) {
 func TestQ6_RegimeMemory_HysteresisPreventsFlagging(t *testing.T) {
 	// From regime_memory.go: transitions have margin hysteresisMargin
 	type regime int
-	const (calm regime = 0; stressed regime = 1; unstable regime = 2)
+	const (
+		calm     regime = 0
+		stressed regime = 1
+		unstable regime = 2
+	)
 
 	hysteresisMargin := 0.05
-	riskThresh       := 0.4
-	utilThresh       := 0.7
+	riskThresh := 0.4
+	utilThresh := 0.7
 
 	transition := func(current regime, riskEWMA, utilEWMA, latencyRatio float64) regime {
 		switch current {
 		case calm:
-			if riskEWMA > riskThresh { return unstable }
-			if utilEWMA > utilThresh || latencyRatio > 1.1 { return stressed }
+			if riskEWMA > riskThresh {
+				return unstable
+			}
+			if utilEWMA > utilThresh || latencyRatio > 1.1 {
+				return stressed
+			}
 		case stressed:
-			if riskEWMA > riskThresh+hysteresisMargin { return unstable }
-			if utilEWMA < utilThresh-hysteresisMargin && latencyRatio < 1.05 { return calm }
+			if riskEWMA > riskThresh+hysteresisMargin {
+				return unstable
+			}
+			if utilEWMA < utilThresh-hysteresisMargin && latencyRatio < 1.05 {
+				return calm
+			}
 		case unstable:
-			if riskEWMA < riskThresh-hysteresisMargin { return stressed }
+			if riskEWMA < riskThresh-hysteresisMargin {
+				return stressed
+			}
 		}
 		return current
 	}
@@ -1095,7 +1178,9 @@ func TestQ6_RegimeMemory_HysteresisPreventsFlagging(t *testing.T) {
 	for _, risk := range []float64{0.42, 0.43, 0.41, 0.44, 0.42} {
 		// util is at boundary but below hysteresis recovery threshold
 		state = transition(state, risk, 0.66, 1.04) // util < 0.70-0.05=0.65? no, 0.66>0.65
-		if state == stressed { ticksAtStressed++ }
+		if state == stressed {
+			ticksAtStressed++
+		}
 	}
 
 	if ticksAtStressed < 4 {
@@ -1113,14 +1198,18 @@ func TestQ6_RegimeMemory_ExplorationProbAdaptsByRegime(t *testing.T) {
 
 	explorationProb := func(riskEWMA float64, regimeType string, stabilityAge int) float64 {
 		base := 0.02 + 0.22*riskEWMA
-		if regimeType == "calm" && stabilityAge > 10 { base *= 0.5 }
-		if regimeType == "unstable" && stabilityAge > 5 { base *= 1.4 }
+		if regimeType == "calm" && stabilityAge > 10 {
+			base *= 0.5
+		}
+		if regimeType == "unstable" && stabilityAge > 5 {
+			base *= 1.4
+		}
 		return clampF(base, 0.01, 0.40)
 	}
 
-	calmStable   := explorationProb(0.1, "calm",     15)
-	stressed      := explorationProb(0.5, "stressed",  3)
-	unstableOld  := explorationProb(0.6, "unstable",  8)
+	calmStable := explorationProb(0.1, "calm", 15)
+	stressed := explorationProb(0.5, "stressed", 3)
+	unstableOld := explorationProb(0.6, "unstable", 8)
 
 	if calmStable >= stressed {
 		t.Errorf("Calm+stable should explore less than stressed: calm=%.4f stressed=%.4f",
@@ -1145,8 +1234,14 @@ func TestQ6_Supervisor_AdaptReducesWeightsOnHighConfidence(t *testing.T) {
 
 	adapt := func(modelConf, predErr float64) (float64, float64) {
 		a, b := alpha, beta
-		if modelConf > 0.7 { a *= (1 - adaptGain); b *= (1 - adaptGain) }
-		if predErr > 0.3   { a *= (1 + adaptGain); b *= (1 + adaptGain) }
+		if modelConf > 0.7 {
+			a *= (1 - adaptGain)
+			b *= (1 - adaptGain)
+		}
+		if predErr > 0.3 {
+			a *= (1 + adaptGain)
+			b *= (1 + adaptGain)
+		}
 		return a, b
 	}
 
@@ -1210,10 +1305,16 @@ func TestQ6_AdaptiveSignalLearner_RegimeProbSumToOne(t *testing.T) {
 	// From adaptive_signal_learner.go regimeFilter(): normalize(next) must sum to 1.0
 	normalize := func(v []float64) []float64 {
 		s := 0.0
-		for _, x := range v { s += x }
-		if s == 0 { return v }
+		for _, x := range v {
+			s += x
+		}
+		if s == 0 {
+			return v
+		}
 		out := make([]float64, len(v))
-		for i, x := range v { out[i] = x / s }
+		for i, x := range v {
+			out[i] = x / s
+		}
 		return out
 	}
 
@@ -1222,14 +1323,18 @@ func TestQ6_AdaptiveSignalLearner_RegimeProbSumToOne(t *testing.T) {
 	probs := normalize(rawLikes)
 
 	sum := 0.0
-	for _, p := range probs { sum += p }
+	for _, p := range probs {
+		sum += p
+	}
 	if math.Abs(sum-1.0) > 1e-9 {
 		t.Errorf("Regime probabilities do not sum to 1.0: sum=%.10f", sum)
 	}
 
 	bestRegime := 0
 	for i, p := range probs {
-		if p > probs[bestRegime] { bestRegime = i }
+		if p > probs[bestRegime] {
+			bestRegime = i
+		}
 	}
 	if bestRegime != 0 {
 		t.Errorf("Best regime should be 0 (highest likelihood): got %d", bestRegime)
@@ -1271,10 +1376,10 @@ func TestQ6_DecisionFusion_SafetyOverrideBelowDynamicThreshold(t *testing.T) {
 		uncTrend     float64
 		wantOverride bool
 	}{
-		{"calm system",         0.0, []float64{0.0, 0.0}, 0.1, 0.0, 0.0, false},
-		{"risky forecast",      0.5, []float64{0.7, 0.8}, 0.5, 0.0, 0.0, true},
-		{"high hazard",         0.9, []float64{0.5, 0.5}, 0.5, 0.0, 0.0, true},
-		{"stable with bias",    0.3, []float64{0.2, 0.2}, 0.2, 0.5, 0.0, false},
+		{"calm system", 0.0, []float64{0.0, 0.0}, 0.1, 0.0, 0.0, false},
+		{"risky forecast", 0.5, []float64{0.7, 0.8}, 0.5, 0.0, 0.0, true},
+		{"high hazard", 0.9, []float64{0.5, 0.5}, 0.5, 0.0, 0.0, true},
+		{"stable with bias", 0.3, []float64{0.2, 0.2}, 0.2, 0.5, 0.0, false},
 	}
 
 	for _, tc := range tests {
@@ -1299,21 +1404,21 @@ func TestQ6_DecisionFusion_FreqDampingReducesOscillation(t *testing.T) {
 	//   alpha = clamp(0.4 + 0.5×tanh(phaseEW), 0.35, 0.92)
 	//   out[i] = alpha×lastAction[i] + (1-alpha)×a[i]
 
-	freqEW  := 0.0
+	freqEW := 0.0
 	phaseEW := 0.0
 	lastAction := 1.0
-	newAction  := -1.0 // high-frequency toggle
+	newAction := -1.0 // high-frequency toggle
 
 	var smoothed float64
 	for i := 0; i < 20; i++ {
 		d := math.Abs(newAction) // derivative proxy
-		freqEW  = 0.9*freqEW  + 0.1*d
+		freqEW = 0.9*freqEW + 0.1*d
 		phaseEW = 0.92*phaseEW + 0.08*math.Abs(d-freqEW)
 
 		alpha := clampF(0.4+0.5*tanh(phaseEW), 0.35, 0.92)
 		smoothed = alpha*lastAction + (1-alpha)*newAction
 		lastAction = smoothed
-		newAction  = -newAction // toggle
+		newAction = -newAction // toggle
 	}
 
 	// After 20 oscillation cycles the smoothed value must be near zero (damped out)
@@ -1330,13 +1435,17 @@ func TestQ6_Orchestrator_TrajectoryRejectedOnNaNOrLargeNorm(t *testing.T) {
 
 	hasNaN := func(a []float64) bool {
 		for _, v := range a {
-			if math.IsNaN(v) { return true }
+			if math.IsNaN(v) {
+				return true
+			}
 		}
 		return false
 	}
 	vecNorm2 := func(a []float64) float64 {
 		s := 0.0
-		for _, v := range a { s += v * v }
+		for _, v := range a {
+			s += v * v
+		}
 		return math.Sqrt(s)
 	}
 	certify := func(a []float64) bool {
@@ -1349,11 +1458,11 @@ func TestQ6_Orchestrator_TrajectoryRejectedOnNaNOrLargeNorm(t *testing.T) {
 		wantPass bool
 		desc     string
 	}{
-		{[]float64{1.0, 0.5, -0.3},    true,  "normal action"},
-		{[]float64{math.NaN(), 0.5},   false, "NaN action"},
-		{[]float64{8.0, 8.0, 8.0},    false, "large norm (> 9 threshold)"},
-		{[]float64{0.1, 0.2, 0.3},    true,  "small action"},
-		{[]float64{6.0, 6.0, 5.0},    false, "norm just over 9 (√97≈9.85)"},
+		{[]float64{1.0, 0.5, -0.3}, true, "normal action"},
+		{[]float64{math.NaN(), 0.5}, false, "NaN action"},
+		{[]float64{8.0, 8.0, 8.0}, false, "large norm (> 9 threshold)"},
+		{[]float64{0.1, 0.2, 0.3}, true, "small action"},
+		{[]float64{6.0, 6.0, 5.0}, false, "norm just over 9 (√97≈9.85)"},
 	}
 
 	for _, tc := range tests {
@@ -1378,11 +1487,11 @@ func TestQ6_Orchestrator_TrajectoryRejectedOnNaNOrLargeNorm(t *testing.T) {
 // TEST 6-A  Full signal chain: healthy system → scale_down decision
 func TestE2E_HealthySystem_ConvergesOnScaleDown(t *testing.T) {
 	// Healthy signal input
-	arrivalRate   := 50.0
-	serviceRate   := 10.0
+	arrivalRate := 50.0
+	serviceRate := 10.0
 	activeWorkers := 10.0 // capacity already over-provisioned
-	backlog        := 0.0
-	latencyMs      := 80.0
+	backlog := 0.0
+	latencyMs := 80.0
 
 	// Stage 1: Signal EWMA
 	fastEWMA := arrivalRate
@@ -1390,12 +1499,17 @@ func TestE2E_HealthySystem_ConvergesOnScaleDown(t *testing.T) {
 
 	// Stage 2: Instability
 	instScore, instLevel := func() (float64, string) {
-		bs := norm(backlog); ls := norm(latencyMs)
+		bs := norm(backlog)
+		ls := norm(latencyMs)
 		pressure := bs * (1 + 0.5*ls) / (1 + 0.5*bs*ls)
 		energy := pressure
 		score := clamp01(energy / (1 + energy))
-		if score >= 0.7 { return score, "critical" }
-		if score >= 0.3 { return score, "warning" }
+		if score >= 0.7 {
+			return score, "critical"
+		}
+		if score >= 0.3 {
+			return score, "warning"
+		}
 		return score, "stable"
 	}()
 
@@ -1409,8 +1523,12 @@ func TestE2E_HealthySystem_ConvergesOnScaleDown(t *testing.T) {
 	// Stage 5: Decision
 	gap := targetCap - activeWorkers
 	action := "hold"
-	if gap > 0.05 { action = "scale_up" }
-	if gap < -0.05 { action = "scale_down" }
+	if gap > 0.05 {
+		action = "scale_up"
+	}
+	if gap < -0.05 {
+		action = "scale_down"
+	}
 
 	// Stage 6: Advisory risk
 	advRisk := aggregateAdvisoryRisk(SystemState{Risk: instScore}, AdvisoryBundle{
@@ -1439,32 +1557,42 @@ func TestE2E_HealthySystem_ConvergesOnScaleDown(t *testing.T) {
 
 // TEST 6-B  Full signal chain: overloaded system → scale_up decision
 func TestE2E_OverloadedSystem_ConvergesOnScaleUp(t *testing.T) {
-	arrivalRate   := 200.0
-	serviceRate   := 10.0
+	arrivalRate := 200.0
+	serviceRate := 10.0
 	activeWorkers := 5.0 // severely under-provisioned
-	backlog        := 150.0
-	latencyMs      := 800.0
+	backlog := 150.0
+	latencyMs := 800.0
 
 	fastEWMA := arrivalRate
 
 	instScore, instLevel := func() (float64, string) {
-		b := pos(backlog); l := pos(latencyMs)
-		bs := norm(b); ls := norm(l)
+		b := pos(backlog)
+		l := pos(latencyMs)
+		bs := norm(b)
+		ls := norm(l)
 		pressure := bs * (1 + 0.5*ls) / (1 + 0.5*bs*ls)
 		energy := pressure + 0.8*pressure
 		shape := energy / (1 + 0.5*energy)
 		energy = energy * (1 + shape)
 		score := clamp01(energy / (1 + energy))
-		if score >= 0.7 { return score, "critical" }
-		if score >= 0.3 { return score, "warning" }
+		if score >= 0.7 {
+			return score, "critical"
+		}
+		if score >= 0.3 {
+			return score, "warning"
+		}
 		return score, "stable"
 	}()
 
 	steadyCap := 1.4 * fastEWMA / (serviceRate + 1e-6)
 	gap := steadyCap - activeWorkers
 	action := "hold"
-	if gap > 0.05 { action = "scale_up" }
-	if gap < -0.05 { action = "scale_down" }
+	if gap > 0.05 {
+		action = "scale_up"
+	}
+	if gap < -0.05 {
+		action = "scale_down"
+	}
 
 	advRisk := aggregateAdvisoryRisk(SystemState{Risk: instScore}, AdvisoryBundle{
 		Autopilot:    AutopilotAdvice{InstabilityRisk: instScore, Confidence: 0.6},
@@ -1500,15 +1628,15 @@ func TestE2E_BurstRecovery_SystemSelfCorrects(t *testing.T) {
 
 	// Phase 1: normal, Phase 2: burst, Phase 3: recovery
 	timeline := []tick{
-		{50, 0},   // normal
+		{50, 0}, // normal
 		{50, 0},
 		{200, 80}, // burst arrives
 		{200, 200},
 		{200, 150},
-		{80, 80},  // arrival drops
-		{50, 30},  // recovery
+		{80, 80}, // arrival drops
+		{50, 30}, // recovery
 		{50, 5},
-		{50, 0},   // recovered
+		{50, 0}, // recovered
 	}
 
 	serviceRate := 10.0
@@ -1516,11 +1644,15 @@ func TestE2E_BurstRecovery_SystemSelfCorrects(t *testing.T) {
 
 	decisions := make([]string, 0, len(timeline))
 	for _, t2 := range timeline {
-		gap := (1.4*t2.arrival/serviceRate) - (t2.arrival/serviceRate + 2)
+		gap := (1.4 * t2.arrival / serviceRate) - (t2.arrival/serviceRate + 2)
 		var d string
-		if t2.backlog > 10 || gap > 1 { d = "scale_up"
-		} else if t2.backlog == 0 && t2.arrival < prev.arrival { d = "scale_down"
-		} else { d = "hold" }
+		if t2.backlog > 10 || gap > 1 {
+			d = "scale_up"
+		} else if t2.backlog == 0 && t2.arrival < prev.arrival {
+			d = "scale_down"
+		} else {
+			d = "hold"
+		}
 		decisions = append(decisions, d)
 		prev = t2
 	}
@@ -1528,12 +1660,18 @@ func TestE2E_BurstRecovery_SystemSelfCorrects(t *testing.T) {
 	// Must see scale_up during burst
 	hasBurstUp := false
 	for i := 2; i <= 5; i++ {
-		if decisions[i] == "scale_up" { hasBurstUp = true; break }
+		if decisions[i] == "scale_up" {
+			hasBurstUp = true
+			break
+		}
 	}
 	// Must see scale_down or hold during recovery
 	hasRecovery := false
 	for i := 6; i < len(decisions); i++ {
-		if decisions[i] == "scale_down" || decisions[i] == "hold" { hasRecovery = true; break }
+		if decisions[i] == "scale_down" || decisions[i] == "hold" {
+			hasRecovery = true
+			break
+		}
 	}
 
 	if !hasBurstUp {
@@ -1601,18 +1739,22 @@ func TestQ3_RouterBackend_ServiceRoutePriority(t *testing.T) {
 		"svc-auth":     "auth-backend",
 	}
 	defaultBackend := "default-backend"
-	fallback       := "log-only"
+	fallback := "log-only"
 
 	resolve := func(svcID string) string {
-		if b, ok := routes[svcID]; ok { return b }
-		if defaultBackend != "" { return defaultBackend }
+		if b, ok := routes[svcID]; ok {
+			return b
+		}
+		if defaultBackend != "" {
+			return defaultBackend
+		}
 		return fallback
 	}
 
 	tests := []struct{ svc, want string }{
 		{"svc-payments", "payments-backend"},
-		{"svc-auth",     "auth-backend"},
-		{"svc-unknown",  "default-backend"},
+		{"svc-auth", "auth-backend"},
+		{"svc-unknown", "default-backend"},
 	}
 	for _, tc := range tests {
 		got := resolve(tc.svc)

@@ -43,10 +43,10 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 	start := time.Now()
 
 	const (
-		capacity       = 1024
-		writerCount    = 10
-		readerCount    = 10
-		testDurationS  = 30
+		capacity      = 1024
+		writerCount   = 10
+		readerCount   = 10
+		testDurationS = 30
 	)
 
 	rb := telemetry.NewRingBuffer(capacity)
@@ -91,7 +91,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 				p := &telemetry.MetricPoint{
 					ServiceID:   fmt.Sprintf("svc-%d", wid),
 					Timestamp:   time.Now(),
-					RequestRate: float64(seq),           // always positive and increasing
+					RequestRate: float64(seq), // always positive and increasing
 					ErrorRate:   0.01,
 					Latency: telemetry.LatencyStats{
 						Mean: 50.0 + float64(wid),
@@ -130,7 +130,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 					snap := rb.Snapshot()
 					atomic.AddInt64(&snapshotsDone, 1)
 					for i, pt := range snap {
-	if pt.ServiceID == "" {
+						if pt.ServiceID == "" {
 							// nil entry from Snapshot is a logic error — buffer returned
 							// a slot that was never written.
 							atomic.AddInt64(&tornReads, 1)
@@ -155,7 +155,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 				case 2: // Last — returns most recent entry
 					last := rb.Last()
 					atomic.AddInt64(&lastCallsDone, 1)
-	if last.ServiceID != "" {
+					if last.ServiceID != "" {
 						if last.RequestRate < 0 {
 							atomic.AddInt64(&tornReads, 1)
 							t.Errorf("L3-TEL-001 TORN READ via Last(): RequestRate=%.4f", last.RequestRate)
@@ -243,10 +243,10 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 					"%d total pushes",
 				capacity, writerCount, readerCount, testDurationS, atomic.LoadInt64(&pushesDone),
 			),
-			WhyThisThreshold:    "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
-			WhatHappensIfFails:  "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
-			HowRacesWereDetected: "Go race detector (-race flag on test binary) — any race causes non-zero exit",
-			HowLeaksWereDetected: "N/A — goroutine lifecycle not the focus of this test",
+			WhyThisThreshold:       "Any negative RequestRate or zero Timestamp in a returned entry means a partial write was observed — the sync.RWMutex failed to protect the slot",
+			WhatHappensIfFails:     "QueuePhysicsEngine.RunQueueModel receives MetricPoint with garbage state → CollapseRisk computed incorrectly → phaseRuntime.mergeDirective produces wrong ScaleFactor",
+			HowRacesWereDetected:   "Go race detector (-race flag on test binary) — any race causes non-zero exit",
+			HowLeaksWereDetected:   "N/A — goroutine lifecycle not the focus of this test",
 			WhatConcurrencyPattern: "MRSW: multiple concurrent writers via Push (exclusive lock) + multiple concurrent readers via Snapshot/Last/Size/SummaryStats (shared lock)",
 		},
 		RunAt:     l3Now(),

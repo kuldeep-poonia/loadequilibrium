@@ -97,7 +97,7 @@ func (sp *SignalProcessor) Update(w *telemetry.ServiceWindow) SignalState {
 
 	// Variance tracks the filtered signal, not the raw outlier.
 	diff := filteredX - prevFast
-	st.fastVariance = (1-sp.fastAlpha)*(st.fastVariance+sp.fastAlpha*diff*diff)
+	st.fastVariance = (1 - sp.fastAlpha) * (st.fastVariance + sp.fastAlpha*diff*diff)
 
 	// Spike detection compares raw vs filtered to flag outliers.
 	ss.SpikeDetected = math.Abs(x-prevFast) > sp.spikeK*stdDev

@@ -164,7 +164,7 @@ func (p *phaseRuntime) apply(
 		}
 
 		infra := intelligence.InfraState{
-			QueueDepth: bundle.Queue.MeanQueueLen,
+			QueueDepth:       bundle.Queue.MeanQueueLen,
 			LatencyP95:       bundle.Queue.AdjustedWaitMs,
 			CPUUsage:         phaseClamp(bundle.Queue.Utilisation, 0, 1.5),
 			RetryRate:        phaseClamp(float64(phase1.Retry.RetryLimit)/phaseMax(float64(p.currentRetry(bundle)), 1), 0, 4),
@@ -454,7 +454,7 @@ func (p *phaseRuntime) evaluatePolicy(
 			TargetLatency:     500,
 			ObservedLatency:   phaseMax(bundle.Queue.AdjustedWaitMs, 1),
 			MinReplicas:       1,
-			MaxReplicas: phaseMaxInt(currentReplicas*3, currentReplicas+2),
+			MaxReplicas:       phaseMaxInt(currentReplicas*3, currentReplicas+2),
 			ScaleCooldownCost: 0.1,
 			InstanceCost:      1.0,
 			SlaPenaltyWeight:  1.0,
@@ -812,7 +812,7 @@ func (p *phaseRuntime) selectControlDirective(
 		Utilisation:      phaseClamp(bundle.Queue.Utilisation, 0, 2),
 		SLATarget:        phaseMax(objective.ReferenceLatencyMs, 500),
 		MinReplicas:      1,
-		MaxReplicas: phaseMaxInt(autopilotReplicas*3, autopilotReplicas+2),
+		MaxReplicas:      phaseMaxInt(autopilotReplicas*3, autopilotReplicas+2),
 		MinRetry:         1,
 		MaxRetry:         phaseMaxInt(currentRetry+3, 3),
 	}

@@ -11,57 +11,57 @@ import (
 func main() {
 	// Configure the scenario
 	scenarioCfg := sandbox.ScenarioConfig{
-		BaseArrival: 500,
-		BaseService: 80,
-		Duration:    3 * time.Hour,
-		Step:        time.Second,
-		Seed:        42,
-		NoiseStd:    0.05,
-		ARCoef:      0.8,
-		RetryGain:   1.5,
-		RetryDecay:  0.95,
-		RetryJitter: 0.1,
+		BaseArrival:   500,
+		BaseService:   80,
+		Duration:      3 * time.Hour,
+		Step:          time.Second,
+		Seed:          42,
+		NoiseStd:      0.05,
+		ARCoef:        0.8,
+		RetryGain:     1.5,
+		RetryDecay:    0.95,
+		RetryJitter:   0.1,
 		SaturationCap: 200,
-		BurstOnProb: 0.1,
-		BurstOffProb: 0.2,
-		ParetoAlpha: 1.5,
-		BurstCeiling: 300,
+		BurstOnProb:   0.1,
+		BurstOffProb:  0.2,
+		ParetoAlpha:   1.5,
+		BurstCeiling:  300,
 		HeavyTailProb: 0.05,
-		Harmonics: []float64{10, 5, 2},
-		PhaseDrift: 0.01,
-		ShockTimes: []time.Duration{15 * time.Minute, 45 * time.Minute},
-		ShockMag: 50,
-		RelaxTau: 300, // 5 minutes in seconds
-		CapacityDrop: 0.3,
-		CollapseProb: 0.2,
-		RateLimit: 200,
-		ShedProb: 0.1,
+		Harmonics:     []float64{10, 5, 2},
+		PhaseDrift:    0.01,
+		ShockTimes:    []time.Duration{15 * time.Minute, 45 * time.Minute},
+		ShockMag:      50,
+		RelaxTau:      300, // 5 minutes in seconds
+		CapacityDrop:  0.3,
+		CollapseProb:  0.2,
+		RateLimit:     200,
+		ShedProb:      0.1,
 		BreakerThresh: 5.0,
-		FanoutBase: 1.0,
-		FanoutLoad: 0.1,
-		FanoutVar: 0.05,
+		FanoutBase:    1.0,
+		FanoutLoad:    0.1,
+		FanoutVar:     0.05,
 	}
 
 	// Configure the executor
 	execCfg := sandbox.ExecutorConfig{
-		InitWorkers:    4,
-		MaxWorkers:     8,
-		JobBuffer:      32,
-		ResultBuffer:   16,
-		ScalerInterval: 300 * time.Millisecond,
+		InitWorkers:     4,
+		MaxWorkers:      8,
+		JobBuffer:       32,
+		ResultBuffer:    16,
+		ScalerInterval:  300 * time.Millisecond,
 		EnableAutoscale: true,
-		IdleTimeout:    2 * time.Second,
-		ReorderWindow:  128,
-		FlushOnCancel:  false,
+		IdleTimeout:     2 * time.Second,
+		ReorderWindow:   128,
+		FlushOnCancel:   false,
 	}
 
 	// Run Phase 1 comparison
 	fmt.Println("Starting Phase 1: Baseline vs Engine Comparison...")
 	result, err := sandbox.RunPhase1Comparison(
-		42,                        // seed
-		sandbox.ScenarioSpike,     // scenario kind
-		scenarioCfg,               // scenario configuration
-		execCfg,                   // executor configuration
+		42,                    // seed
+		sandbox.ScenarioSpike, // scenario kind
+		scenarioCfg,           // scenario configuration
+		execCfg,               // executor configuration
 	)
 	if err != nil {
 		log.Fatalf("Phase 1 comparison failed: %v", err)

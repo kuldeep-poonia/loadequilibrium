@@ -237,8 +237,8 @@ func normalizeActuatorConfig(sys SystemState, cmd Bundle, cfg ActuatorConfig) Ac
 	}
 
 	if cfg.MaxScaleRate < 5 {
-    cfg.MaxScaleRate = 5
-}
+		cfg.MaxScaleRate = 5
+	}
 	return cfg
 }
 

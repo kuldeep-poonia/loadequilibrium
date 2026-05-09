@@ -3,22 +3,22 @@ package modelling
 import "time"
 
 type QueueModel struct {
-	ServiceID               string
-	ComputedAt              time.Time
-	ArrivalRate             float64
-	ServiceRate             float64
-	Concurrency             float64
-	Utilisation             float64
-	MeanQueueLen            float64
-	MeanWaitMs              float64
-	MeanSojournMs           float64
-	BurstFactor             float64
-	AdjustedWaitMs          float64
-	UtilisationTrend        float64
-	SaturationHorizon       time.Duration
-	Confidence              float64
+	ServiceID         string
+	ComputedAt        time.Time
+	ArrivalRate       float64
+	ServiceRate       float64
+	Concurrency       float64
+	Utilisation       float64
+	MeanQueueLen      float64
+	MeanWaitMs        float64
+	MeanSojournMs     float64
+	BurstFactor       float64
+	AdjustedWaitMs    float64
+	UtilisationTrend  float64
+	SaturationHorizon time.Duration
+	Confidence        float64
 	// Network-coupled metrics
-	UpstreamPressure        float64       // normalised upstream load pressure [0..1]
+	UpstreamPressure         float64       // normalised upstream load pressure [0..1]
 	NetworkSaturationHorizon time.Duration // saturation horizon accounting for upstream pressure
 	// Physics Engine States
 	Hazard    float64
@@ -47,14 +47,14 @@ type SignalState struct {
 }
 
 type StabilityAssessment struct {
-	ServiceID                string
-	ComputedAt               time.Time
-	StabilityMargin          float64
-	CollapseRisk             float64
-	OscillationRisk          float64
-	FeedbackGain             float64
-	IsUnstable               bool
-	PredictedCollapseMs      float64
+	ServiceID           string
+	ComputedAt          time.Time
+	StabilityMargin     float64
+	CollapseRisk        float64
+	OscillationRisk     float64
+	FeedbackGain        float64
+	IsUnstable          bool
+	PredictedCollapseMs float64
 	// Enhanced fields
 	CascadeAmplificationScore float64 // FeedbackGain × CollapseRisk × (1+OscillationRisk)
 	CollapseZone              string  // "safe" | "warning" | "collapse"

@@ -112,7 +112,7 @@ func (p *FinalFluidPlant) Step(control float64, dBH float64) (float64, float64, 
 
 	// -------- arrival drift (TAMED) ----
 	driftA :=
-		p.KappaA*(rhoEff*p.Mu - p.A) +
+		p.KappaA*(rhoEff*p.Mu-p.A) +
 			p.psi(p.Q) -
 			p.ChiA*p.A*p.A
 

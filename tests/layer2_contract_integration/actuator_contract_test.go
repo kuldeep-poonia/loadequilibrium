@@ -18,9 +18,11 @@ import (
 // ---------------------------------------------------------------
 // L2-ACT-001 — CoalescingActuator dispatch + feedback contract
 // AIM: Dispatch N active directives via CoalescingActuator backed
-//      by LogOnlyBackend. Every dispatched directive must produce
-//      exactly one ActuationResult on the feedback channel with
-//      Success=true and DirectiveID populated.
+//
+//	by LogOnlyBackend. Every dispatched directive must produce
+//	exactly one ActuationResult on the feedback channel with
+//	Success=true and DirectiveID populated.
+//
 // THRESHOLD: 0 missing/failed feedbacks
 // ON EXCEED: Actuator swallows directives → control loop blind
 // ---------------------------------------------------------------
@@ -109,7 +111,9 @@ done:
 // ---------------------------------------------------------------
 // L2-ACT-002 — Coalescer map-overwrite contract (same-key merge)
 // AIM: When multiple directives arrive for the same ServiceID,
-//      only the LATEST one should be executed (map-coalesce).
+//
+//	only the LATEST one should be executed (map-coalesce).
+//
 // THRESHOLD: exactly 1 execution per service key
 // ON EXCEED: Stale directives execute → actuator fights itself
 // ---------------------------------------------------------------
@@ -195,7 +199,9 @@ func TestL2_ACT_002_CoalescerMapOverwrite(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-ACT-003 — RouterBackend dispatches to correct service backend
 // AIM: RouterBackend must route directives to service-specific
-//      backends, falling back to defaultBackend for unknown services.
+//
+//	backends, falling back to defaultBackend for unknown services.
+//
 // THRESHOLD: 0 misrouted directives
 // ON EXCEED: Directives go to wrong backend → wrong system actuated
 // ---------------------------------------------------------------
@@ -298,7 +304,9 @@ func TestL2_ACT_003_RouterBackendCorrectRouting(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-ACT-004 — Actuator dispatch latency SLA
 // AIM: CoalescingActuator dispatch-to-feedback latency must meet
-//      real-time SLA: p50<5ms, p95<15ms, p99<30ms
+//
+//	real-time SLA: p50<5ms, p95<15ms, p99<30ms
+//
 // THRESHOLD: p99 < 30ms
 // ON EXCEED: Actuator too slow → control loop timing violated
 // ---------------------------------------------------------------
@@ -380,7 +388,9 @@ func TestL2_ACT_004_DispatchLatencySLA(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-ACT-005 — QueueBackend worker scaling correctness
 // AIM: QueueBackend.Execute must correctly calculate next worker
-//      count as round(current * scaleFactor), clamped to minWorkers=1
+//
+//	count as round(current * scaleFactor), clamped to minWorkers=1
+//
 // THRESHOLD: 0 deviations from expected
 // ON EXCEED: Worker scaling formula broken → wrong capacity
 // ---------------------------------------------------------------
@@ -389,9 +399,9 @@ func TestL2_ACT_005_QueueBackendWorkerScaling(t *testing.T) {
 	qb := backends.NewQueueBackend()
 
 	type testCase struct {
-		serviceID    string
-		scaleFactor  float64
-		expectedMin  int // minimum acceptable workers
+		serviceID   string
+		scaleFactor float64
+		expectedMin int // minimum acceptable workers
 	}
 
 	cases := []testCase{
@@ -457,8 +467,10 @@ func TestL2_ACT_005_QueueBackendWorkerScaling(t *testing.T) {
 // ---------------------------------------------------------------
 // L2-ACT-006 — No silent drop on feedback channel full
 // AIM: When feedback buffer is full, verify behavior — the coalescer
-//      does `select { case fb <- res: default: }` so it drops silently.
-//      This test documents that behavior and measures drop rate.
+//
+//	does `select { case fb <- res: default: }` so it drops silently.
+//	This test documents that behavior and measures drop rate.
+//
 // THRESHOLD: test records actual drop count (informational)
 // ON EXCEED: informational — documents current backpressure behavior
 // ---------------------------------------------------------------

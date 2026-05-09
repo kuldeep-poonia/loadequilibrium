@@ -40,9 +40,9 @@ func TestL3_TEL_002_RingBufferMemoryStability(t *testing.T) {
 	start := time.Now()
 
 	const (
-		capacity = 1000           // ring size — must stay fixed
-		entries  = 10_000_000     // total pushes
-		gcEvery  = 1_000_000      // force GC every million pushes to get accurate heap snapshot
+		capacity = 1000       // ring size — must stay fixed
+		entries  = 10_000_000 // total pushes
+		gcEvery  = 1_000_000  // force GC every million pushes to get accurate heap snapshot
 	)
 
 	rb := telemetry.NewRingBuffer(capacity)
@@ -161,10 +161,10 @@ func TestL3_TEL_002_RingBufferMemoryStability(t *testing.T) {
 				"RingBuffer(capacity=%d).Push called %d times; HeapInuse sampled every %d pushes with forced GC",
 				capacity, entries, gcEvery,
 			),
-			WhyThisThreshold:    "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
-			WhatHappensIfFails:  "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
-			HowRacesWereDetected: "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
-			HowLeaksWereDetected: "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
+			WhyThisThreshold:       "2× allows for GC overhead and Go runtime internals; any larger growth means entries are escaping the fixed-size ring",
+			WhatHappensIfFails:     "Memory grows proportionally to ingestion volume → OOM kill in production after hours of operation",
+			HowRacesWereDetected:   "N/A — single-goroutine memory test; run TestL3_TEL_001 for concurrent safety",
+			HowLeaksWereDetected:   "runtime.MemStats.HeapInuse before and after 10M pushes with GC forced between samples",
 			WhatConcurrencyPattern: "Single-writer sequential push to verify allocation semantics, not concurrent safety",
 		},
 		RunAt:     l3Now(),

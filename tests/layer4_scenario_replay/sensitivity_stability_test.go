@@ -168,11 +168,11 @@ func TestL4_REP_003_SensitivityComputationStable100Calls(t *testing.T) {
 				"ComputeTopologySensitivity called %d times on same GraphSnapshot (keystone collapse: 7 nodes, 6 edges)",
 				runs,
 			),
-			WhyThisThreshold:     "1e-12 is below float64 arithmetic rounding — any deviation is a state side-effect, not precision",
-			WhatHappensIfFails:   "Orchestrator tick produces different fragility values on consecutive calls → dashboard flickers → operator can't trust readings",
+			WhyThisThreshold:       "1e-12 is below float64 arithmetic rounding — any deviation is a state side-effect, not precision",
+			WhatHappensIfFails:     "Orchestrator tick produces different fragility values on consecutive calls → dashboard flickers → operator can't trust readings",
 			HowDeterminismVerified: "Direct float64 comparison with 1e-12 epsilon across 100 calls",
-			IsGoldenFileFrozen:   "N/A",
-			HowToUpdateGolden:    "N/A",
+			IsGoldenFileFrozen:     "N/A",
+			HowToUpdateGolden:      "N/A",
 		},
 		RunAt:     l4Now(),
 		GoVersion: l4GoVer(),
@@ -230,12 +230,12 @@ func TestL4_REP_003b_InjectTopologySnapshotCaptureFidelity(t *testing.T) {
 	replay := integration.NewReplayEngine(hub)
 
 	type checkResult struct {
-		name           string
-		fragilityDelta float64
+		name            string
+		fragilityDelta  float64
 		missingServices []string
 		missingEdges    []string
 		invalidPressure []string
-		passed         bool
+		passed          bool
 	}
 
 	allChecks := make([]checkResult, 0, len(scenarios))
@@ -359,11 +359,11 @@ func TestL4_REP_003b_InjectTopologySnapshotCaptureFidelity(t *testing.T) {
 				"InjectTopologySnapshot on %d scenarios; capture fields compared to direct ComputeTopologySensitivity output",
 				len(scenarios),
 			),
-			WhyThisThreshold:     "1e-9 — the values should be identical since InjectTopologySnapshot calls ComputeTopologySensitivity internally",
-			WhatHappensIfFails:   "Golden files written from wrong values — regression detection broken from the start",
+			WhyThisThreshold:       "1e-9 — the values should be identical since InjectTopologySnapshot calls ComputeTopologySensitivity internally",
+			WhatHappensIfFails:     "Golden files written from wrong values — regression detection broken from the start",
 			HowDeterminismVerified: "Direct comparison of capture.FinalFragility against ComputeTopologySensitivity(same snap)",
-			IsGoldenFileFrozen:   "N/A",
-			HowToUpdateGolden:    "N/A",
+			IsGoldenFileFrozen:     "N/A",
+			HowToUpdateGolden:      "N/A",
 		},
 		RunAt:     l4Now(),
 		GoVersion: l4GoVer(),

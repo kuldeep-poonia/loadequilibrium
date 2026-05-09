@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 type RingBuffer struct {
 	mu   sync.RWMutex
 	buf  []MetricPoint
@@ -31,7 +30,7 @@ func (r *RingBuffer) Push(p *MetricPoint) {
 	dst := &r.buf[r.head]
 
 	// 1. CRITICAL: Release the previous slice reference so GC can claim it
-	dst.UpstreamCalls = nil 
+	dst.UpstreamCalls = nil
 
 	// 2. Copy scalars
 	dst.ServiceID = p.ServiceID
@@ -55,7 +54,6 @@ func (r *RingBuffer) Push(p *MetricPoint) {
 		r.size++
 	}
 }
-
 
 func (r *RingBuffer) Snapshot(n ...int) []MetricPoint {
 	r.mu.RLock()
@@ -96,18 +94,16 @@ func (r *RingBuffer) Size() int {
 	return r.size
 }
 
-
 type RingSummary struct {
-	Count          int
-	MeanReqRate    float64
-	StdReqRate     float64
-	MeanLatencyMs  float64
-	MaxLatencyMs   float64
-	MeanErrorRate  float64
-	OldestAt       time.Time
-	NewestAt       time.Time
+	Count         int
+	MeanReqRate   float64
+	StdReqRate    float64
+	MeanLatencyMs float64
+	MaxLatencyMs  float64
+	MeanErrorRate float64
+	OldestAt      time.Time
+	NewestAt      time.Time
 }
-
 
 // full point slice.
 func (r *RingBuffer) SummaryStats() RingSummary {
@@ -155,5 +151,3 @@ func (r *RingBuffer) SummaryStats() RingSummary {
 		NewestAt:      newestAt,
 	}
 }
-	
-

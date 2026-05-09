@@ -16,11 +16,17 @@ import (
 // ---------------------------------------------------------------
 // L1-PHY-001 — Bounded state evolution (no divergence)
 // AIM: FluidPlant.Step must never produce NaN, Inf, or unbounded Q
-//      for any valid arrival rate input across 100 consecutive ticks.
+//
+//	for any valid arrival rate input across 100 consecutive ticks.
+//
 // THRESHOLD: max |Q| <= 100 (physically: queue length is bounded)
-//            0 NaN/Inf states
+//
+//	0 NaN/Inf states
+//
 // ON EXCEED: Unbounded queue length → MPC diverges → actuator
-//            receives unbounded command → system crash
+//
+//	receives unbounded command → system crash
+//
 // ---------------------------------------------------------------
 func TestL1_PHY_001_BoundedStateEvolution(t *testing.T) {
 	const seed int64 = 42
@@ -114,10 +120,14 @@ func TestL1_PHY_001_BoundedStateEvolution(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-PHY-002 — Deterministic reproducibility with same seed
 // AIM: Two FluidPlant instances with identical seed and inputs must
-//      produce bit-identical state traces.
+//
+//	produce bit-identical state traces.
+//
 // THRESHOLD: max |Q_diff| <= 0 (exact bit equality)
 // ON EXCEED: Stochastics break reproducibility → debugging impossible,
-//            simulation replay worthless
+//
+//	simulation replay worthless
+//
 // ---------------------------------------------------------------
 func TestL1_PHY_002_DeterministicReproducibility(t *testing.T) {
 	const seed int64 = 99
@@ -217,10 +227,14 @@ func TestL1_PHY_002_DeterministicReproducibility(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-PHY-003 — Hazard non-negativity invariant
 // AIM: FluidPlant.Z (hazard state) must never go negative.
-//      The plant enforces Z >= 0 via clamp in updateHazard.
+//
+//	The plant enforces Z >= 0 via clamp in updateHazard.
+//
 // THRESHOLD: min Z >= 0 across all ticks and inputs
 // ON EXCEED: Negative hazard → service rate boost from degradation
-//            → physics model inverted → MPC steers into collapse
+//
+//	→ physics model inverted → MPC steers into collapse
+//
 // ---------------------------------------------------------------
 func TestL1_PHY_003_HazardNonNegativity(t *testing.T) {
 	const seed int64 = 1337

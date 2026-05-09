@@ -59,11 +59,11 @@ func TestL3_HUB_001_BroadcastConcurrentRace(t *testing.T) {
 	hub.SetMaxClients(0) // no clients — we only test the Broadcast path itself
 
 	var (
-		broadcastsDone  int64
-		panics          int64
-		seqRegressions  int64
-		lastSeq         uint64
-		lastSeqMu       sync.Mutex
+		broadcastsDone int64
+		panics         int64
+		seqRegressions int64
+		lastSeq        uint64
+		lastSeqMu      sync.Mutex
 	)
 
 	ctx, cancel := testContextWithTimeout(durationS * time.Second)
@@ -207,10 +207,10 @@ func TestL3_HUB_001_BroadcastConcurrentRace(t *testing.T) {
 				"Hub.Broadcast called from %d concurrent goroutines for %ds while GetLastPayload and ClientCount polled simultaneously",
 				concurrentBroadcasters, durationS,
 			),
-			WhyThisThreshold:    "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
-			WhatHappensIfFails:  "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
-			HowRacesWereDetected: "Go race detector on binary; also seqNo continuity check catches silent corruption",
-			HowLeaksWereDetected: "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
+			WhyThisThreshold:       "Any race on h.mu or h.lastPayload causes either silent corruption or a runtime panic — both are unacceptable for a live control room",
+			WhatHappensIfFails:     "Dashboard operators see inconsistent or corrupt tick payloads — wrong risk scores, wrong topology",
+			HowRacesWereDetected:   "Go race detector on binary; also seqNo continuity check catches silent corruption",
+			HowLeaksWereDetected:   "N/A — goroutine lifecycle not tested here; see L3-HUB-003",
 			WhatConcurrencyPattern: "MRSW on h.clients map: Broadcast holds Lock to copy client slice; GetLastPayload holds RLock; concurrent Broadcasts serialise via Lock",
 		},
 		RunAt:     l3Now(),
@@ -256,7 +256,7 @@ func TestL3_HUB_002_SlowClientDroppedFastClientUnaffected(t *testing.T) {
 
 	const (
 		// sendBufferSize in hub.go is 16. We need to fill it + 1 to trigger drop.
-		sendBufSize   = 16
+		sendBufSize     = 16
 		totalBroadcasts = sendBufSize + 10 // enough to overflow slow client buffer
 		broadcastDelay  = 5 * time.Millisecond
 		maxBroadcastMs  = 10 // each Broadcast must complete within this many ms
@@ -315,8 +315,8 @@ func TestL3_HUB_002_SlowClientDroppedFastClientUnaffected(t *testing.T) {
 
 	// ── Broadcast totalBroadcasts messages, measuring each call duration ──────
 	var (
-		broadcastsSent     int
-		blockedBroadcasts  int
+		broadcastsSent    int
+		blockedBroadcasts int
 	)
 
 	for i := 0; i < totalBroadcasts; i++ {
@@ -400,10 +400,10 @@ func TestL3_HUB_002_SlowClientDroppedFastClientUnaffected(t *testing.T) {
 				"%d broadcasts with sendBufSize=%d, 1 slow (never reads) + 1 fast (drains immediately) client",
 				totalBroadcasts, sendBufSize,
 			),
-			WhyThisThreshold:    "Broadcast uses 'select { case c.send <- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
-			WhatHappensIfFails:  "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
-			HowRacesWereDetected: "Go race detector on binary + timing assertions on each Broadcast call",
-			HowLeaksWereDetected: "ClientCount checked after drops to verify remove() cleaned up correctly",
+			WhyThisThreshold:       "Broadcast uses 'select { case c.send <- data: default: h.remove(c) }' — the default branch makes it non-blocking; any block means this code path was not reached",
+			WhatHappensIfFails:     "One slow browser tab causes ALL dashboard operators to see frozen metrics — control room becomes blind",
+			HowRacesWereDetected:   "Go race detector on binary + timing assertions on each Broadcast call",
+			HowLeaksWereDetected:   "ClientCount checked after drops to verify remove() cleaned up correctly",
 			WhatConcurrencyPattern: "Non-blocking fan-out: Broadcast iterates snapshot of client list (no lock held) and sends via buffered channel with non-blocking select",
 		},
 		RunAt:     l3Now(),

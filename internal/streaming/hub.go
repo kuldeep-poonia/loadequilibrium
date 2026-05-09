@@ -552,9 +552,9 @@ func (h *Hub) remove(c *client) {
 	}
 
 	h.mu.Lock()
-defer h.mu.Unlock()
+	defer h.mu.Unlock()
 
-delete(h.clients, c)
+	delete(h.clients, c)
 
 	for {
 		select {

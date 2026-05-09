@@ -2,8 +2,6 @@ package autopilot
 
 import "math"
 
-
-
 type ControlInput struct {
 	CapacityTarget float64
 	RetryFactor    float64
@@ -32,9 +30,9 @@ func (c *Controller) Compute(
 	mpc ControlInput,
 ) ControlInput {
 
-	// 
+	//
 	// 1. SIGNALS
-	// 
+	//
 
 	backlog := curr.Backlog
 	prevBacklog := prev.Backlog
@@ -50,9 +48,9 @@ func (c *Controller) Compute(
 
 	vol := math.Abs(curr.ArrivalP95 - curr.ArrivalMean)
 
-	// 
+	//
 	// 2. LYAPUNOV DRIFT
-	// 
+	//
 
 	drift := 2 * backlog * pressure / (service + 1e-6)
 	driftNorm := drift / (backlog + 1.0)
@@ -68,16 +66,16 @@ func (c *Controller) Compute(
 			0.1*dClamped +
 			0.5*trackingError
 
-	// 
+	//
 	// 3. STEADY STATE (CRITICAL FIX)
-	// 
+	//
 
 	steadyCap :=
 		1.4 * curr.ArrivalMean / (curr.ServiceRate + 1e-6)
 
-	// 
+	//
 	// 4. SAFE REQUIRED REGION
-	// 
+	//
 
 	required :=
 		steadyCap * (1 + math.Min(0.5, vol/10.0))
@@ -85,16 +83,16 @@ func (c *Controller) Compute(
 	maxSafe :=
 		required * (2.2 + 0.8*math.Min(1.0, vol/10.0))
 
-	// 
+	//
 	// 5. LYAPUNOV CAPACITY
-	// 
+	//
 
 	lyapunovCap :=
 		required * (1 + lyapunovSignal)
 
-	// 
+	//
 	// 6. INSTABILITY + MPC FUSION
-	// 
+	//
 
 	instability :=
 		math.Sqrt(
@@ -115,7 +113,6 @@ func (c *Controller) Compute(
 		math.Min(maxSafe, baseTarget),
 	)
 
-	
 	err := math.Abs(target - curr.CapacityActive)
 
 	if backlog > 0.6*curr.ArrivalMean*10 {
@@ -134,12 +131,12 @@ func (c *Controller) Compute(
 
 	delta := target - curr.CapacityActive
 
-	stress := backlog/(curr.ArrivalMean+1e-6)
+	stress := backlog / (curr.ArrivalMean + 1e-6)
 
-maxRate := math.Max(
-    5.0,
-    (0.25+0.75*math.Min(1.0, stress))*curr.CapacityActive,
-)
+	maxRate := math.Max(
+		5.0,
+		(0.25+0.75*math.Min(1.0, stress))*curr.CapacityActive,
+	)
 	maxStep := maxRate * c.Dt
 
 	// Apply maxStep bound
@@ -152,13 +149,10 @@ maxRate := math.Max(
 	finalCap :=
 		curr.CapacityActive + delta
 
-		
 	smoothPressure := math.Max(0, p)
 	queueStress := backlog / 50.0
 
 	retry := 0.4 * (1.0 - math.Exp(-(smoothPressure + queueStress)))
-
-	
 
 	rawCache :=
 		math.Min(1.0,
@@ -168,8 +162,6 @@ maxRate := math.Max(
 	alpha := 0.2
 	cache := c.PrevCache + alpha*(rawCache-c.PrevCache)
 	c.PrevCache = cache
-
-	
 
 	c.PrevCapacity = finalCap
 

@@ -224,20 +224,20 @@ func (r *RolloutController) successProb(
 capacity ramp
 */
 func (r *RolloutController) rampCap(
-    active float64,
-    target float64,
-    mode GovernanceMode,
-    queuePressure float64,
-    backlog float64,
+	active float64,
+	target float64,
+	mode GovernanceMode,
+	queuePressure float64,
+	backlog float64,
 ) float64 {
 
-    err := target - active
+	err := target - active
 
-    rate := r.CapRampUpNormal
+	rate := r.CapRampUpNormal
 
-    if mode == ModeEmergency || mode == ModeDegraded {
-        rate = r.CapRampUpEmergency
-    }
+	if mode == ModeEmergency || mode == ModeDegraded {
+		rate = r.CapRampUpEmergency
+	}
 
 	// Proportional assist for large capacity deficits — bounded to prevent panic scaling.
 	// BEFORE: rate += err * 3.0  →  at err=50 (emergency): rate = 14 + 150 = 164 reps/tick!
@@ -250,11 +250,11 @@ func (r *RolloutController) rampCap(
 		rate += boost
 	}
 
-    if err < 0 {
-        rate = r.CapRampDown
-    }
+	if err < 0 {
+		rate = r.CapRampDown
+	}
 
-    rate *= 1 + r.QueuePressureRampGain*queuePressure
+	rate *= 1 + r.QueuePressureRampGain*queuePressure
 
 	// Proportional queue pressure multiplier with hard cap.
 	// BEFORE: `if backlog > 100 { rate *= 2.0 }` — step-function that double-fires when
@@ -271,14 +271,15 @@ func (r *RolloutController) rampCap(
 		rate *= 1.0 + 0.5*pressureRatio // max 1.5× boost, not 2×
 	}
 
-    step :=
-        math.Max(
-            -rate*r.Dt,
-            math.Min(rate*r.Dt, err),
-        )
+	step :=
+		math.Max(
+			-rate*r.Dt,
+			math.Min(rate*r.Dt, err),
+		)
 
-    return active + step
+	return active + step
 }
+
 /*
 main step
 */

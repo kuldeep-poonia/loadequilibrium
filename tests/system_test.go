@@ -14,18 +14,18 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
 	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
+	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 	"github.com/loadequilibrium/loadequilibrium/internal/policy"
+	"github.com/loadequilibrium/loadequilibrium/internal/reasoning"
 	"github.com/loadequilibrium/loadequilibrium/internal/simulation"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
-	 "github.com/loadequilibrium/loadequilibrium/internal/optimisation"
-	  "github.com/loadequilibrium/loadequilibrium/internal/reasoning"
 )
 
-// 
+//
 // LOAD TESTS
-// 
+//
 
 // TestLoad_HighRPSTelemetryIngest verifies the telemetry store survives high ingestion rates
 func TestLoad_HighRPSTelemetryIngest(t *testing.T) {
@@ -173,7 +173,7 @@ func TestLoad_ActuatorHighDispatchRate(t *testing.T) {
 
 	// Drain feedback — should not block
 	feedbackCount := 0
-	drain:
+drain:
 	for {
 		select {
 		case res := <-act.Feedback():
@@ -188,9 +188,9 @@ func TestLoad_ActuatorHighDispatchRate(t *testing.T) {
 	t.Logf("Received %d feedback events", feedbackCount)
 }
 
-// 
+//
 // SOAK TESTS
-// 
+//
 
 // TestSoak_QueuePhysicsEngineStability checks for memory leaks and drift over many ticks
 func TestSoak_QueuePhysicsEngineStability(t *testing.T) {
@@ -262,9 +262,9 @@ func TestSoak_ReasoningEngineCooldownNoLeak(t *testing.T) {
 	t.Log("Reasoning engine survived 1000-tick soak without panic")
 }
 
-// 
+//
 // PHYSICS VALIDATION TESTS
-// 
+//
 
 // TestPhysics_MMcErlangCQueuingModel validates M/M/c queue model properties
 func TestPhysics_MMcErlangCQueuingModel(t *testing.T) {
@@ -400,15 +400,16 @@ func TestPhysics_SimulationRunnerProducesResult(t *testing.T) {
 	}
 
 	t.Logf("Simulation: cascade=%v SLAViolation=%v horizon=%.0fms",
-	res.CascadeFailureProbability,
-	res.SLAViolationProbability,
-	res.HorizonMs,
-)
-		
+		res.CascadeFailureProbability,
+		res.SLAViolationProbability,
+		res.HorizonMs,
+	)
+
 }
-// 
+
+//
 // INTELLIGENCE TESTS
-// 
+//
 
 // TestIntelligence_PolicyGradientOptimizerStep verifies RL optimizer produces valid actions
 func TestIntelligence_PolicyGradientOptimizerStep(t *testing.T) {
@@ -537,21 +538,21 @@ func TestIntelligence_HazardCriticEstimatesRisk(t *testing.T) {
 	}
 }
 
-// 
+//
 // POLICY VALIDATION TESTS
-// 
+//
 
 // TestPolicy_ScalingRecommendsScaleUpOnHighLoad verifies scale-up recommendation
 func TestPolicy_ScalingRecommendsScaleUpOnHighLoad(t *testing.T) {
 	input := policy.ScalingSignal{
-		PredictedLoad:     950,   // very high
-		CurrentReplicas:   2,
-		TargetLatency:     500,
-		ObservedLatency:   2000,  // 4× over SLA
-		MinReplicas:       1,
-		MaxReplicas:       20,
-		InstanceCost:      1.0,
-		SlaPenaltyWeight:  1.0,
+		PredictedLoad:    950, // very high
+		CurrentReplicas:  2,
+		TargetLatency:    500,
+		ObservedLatency:  2000, // 4× over SLA
+		MinReplicas:      1,
+		MaxReplicas:      20,
+		InstanceCost:     1.0,
+		SlaPenaltyWeight: 1.0,
 	}
 	dec := policy.RecommendScaling(input)
 	if dec.DesiredReplicas <= input.CurrentReplicas {
@@ -602,7 +603,7 @@ func TestPolicy_RetryPolicyReducesRetryUnderHighLoad(t *testing.T) {
 // TestPolicy_QueuePolicyTightensUnderSaturation verifies queue limit reduced near saturation
 func TestPolicy_QueuePolicyTightensUnderSaturation(t *testing.T) {
 	critical := policy.QueueSignal{
-		CurrentQueueDepth: 450,  // near limit
+		CurrentQueueDepth: 450, // near limit
 		PredictedArrival:  900,
 		ServiceCapacity:   100,
 		ObservedLatency:   3000,

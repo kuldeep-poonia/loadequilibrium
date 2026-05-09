@@ -53,9 +53,9 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 	// ── Construct minimal dependencies ───────────────────────────────────────
 
 	store := telemetry.NewStore(
-		64,             // bufferCapacity per service
-		20,             // maxServices
-		5*time.Second,  // staleAge
+		64,            // bufferCapacity per service
+		20,            // maxServices
+		5*time.Second, // staleAge
 	)
 
 	hub := streaming.NewHub()
@@ -103,10 +103,10 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 		MaxStreamClients: 5,
 
 		// Modelling
-		EWMAFastAlpha: 0.30,
-		EWMASlowAlpha: 0.10,
-		SpikeZScore:   3.0,
-		CollapseThreshold: 0.80,
+		EWMAFastAlpha:       0.30,
+		EWMASlowAlpha:       0.10,
+		SpikeZScore:         3.0,
+		CollapseThreshold:   0.80,
 		UtilisationSetpoint: 0.70,
 
 		// Control
@@ -115,11 +115,11 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 		ArrivalEstimatorMode:   "mean",
 
 		// Simulation
-		SimHorizonMs:       500,
-		SimShockFactor:     1.5,
-		SimAsyncBuffer:     4,
-		SimStochasticMode:  "disabled",
-		SimBudget:          20 * time.Millisecond,
+		SimHorizonMs:      500,
+		SimShockFactor:    1.5,
+		SimAsyncBuffer:    4,
+		SimStochasticMode: "disabled",
+		SimBudget:         20 * time.Millisecond,
 
 		// Reasoning
 		MaxReasoningCooldowns: 5,
@@ -220,7 +220,7 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 		TestID: "L3-ORC-001",
 		Layer:  3,
 		Name:   "Orchestrator.Run goroutine leak after context cancellation",
-		Aim: "After Run(ctx) returns, goroutine count must be within 3 of pre-Run baseline within 5s",
+		Aim:    "After Run(ctx) returns, goroutine count must be within 3 of pre-Run baseline within 5s",
 		PackagesInvolved: []string{
 			"internal/runtime",
 			"internal/telemetry",
@@ -238,15 +238,15 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 			Rationale: "Any goroutine not exiting after ctx.Done compounds across Kubernetes restarts → OOM",
 		},
 		Result: L3ResultData{
-			Status:           l3Status(passed),
-			ActualValue:      float64(leaked),
-			ActualUnit:       "goroutines",
-			GoroutinesBefore: goroutinesBefore,
-			GoroutinesPeak:   goroutinesPeak,
-			GoroutinesAfter:  goroutinesAfter,
-			GoroutinesLeaked: leaked,
+			Status:             l3Status(passed),
+			ActualValue:        float64(leaked),
+			ActualUnit:         "goroutines",
+			GoroutinesBefore:   goroutinesBefore,
+			GoroutinesPeak:     goroutinesPeak,
+			GoroutinesAfter:    goroutinesAfter,
+			GoroutinesLeaked:   leaked,
 			RaceDetectorActive: raceDetectorEnabled(),
-			DurationMs:       durationMs,
+			DurationMs:         durationMs,
 			ErrorMessages: []string{fmt.Sprintf(
 				"before=%d peak=%d after=%d leaked=%d",
 				goroutinesBefore, goroutinesPeak, goroutinesAfter, leaked,
@@ -257,10 +257,10 @@ func TestL3_ORC_001_OrchestratorNoGoroutineLeakAfterShutdown(t *testing.T) {
 		Questions: L3Questions{
 			WhatWasTested: "Orchestrator.Run with 3s of operation and concurrent Store.Ingest, " +
 				"then ctx.Cancel() followed by 5s drain window",
-			WhyThisThreshold:    "Threshold=3 allows Go test runner overhead; any real Orchestrator goroutine that did not respond to ctx.Done() is a leak",
-			WhatHappensIfFails:  "Pod restart doubles goroutine count → N restarts → 2^N × baseline goroutines → OOM kill",
-			HowRacesWereDetected: "Go race detector on binary — concurrent Store.Ingest and Orchestrator.tick share the Store",
-			HowLeaksWereDetected: "runtime.NumGoroutine() delta before/after with 5s drain window; runtime.Stack dump on failure",
+			WhyThisThreshold:       "Threshold=3 allows Go test runner overhead; any real Orchestrator goroutine that did not respond to ctx.Done() is a leak",
+			WhatHappensIfFails:     "Pod restart doubles goroutine count → N restarts → 2^N × baseline goroutines → OOM kill",
+			HowRacesWereDetected:   "Go race detector on binary — concurrent Store.Ingest and Orchestrator.tick share the Store",
+			HowLeaksWereDetected:   "runtime.NumGoroutine() delta before/after with 5s drain window; runtime.Stack dump on failure",
 			WhatConcurrencyPattern: "Orchestrator.Run owns a time.Timer goroutine + simulation runner goroutine + worker pool; all must exit on ctx.Done()",
 		},
 		RunAt:     l3Now(),

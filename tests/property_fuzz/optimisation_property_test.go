@@ -17,7 +17,9 @@ import (
 // ---------------------------------------------------------------
 // L1-OPT-001 — MPC trajectory cost bounded [0, 1]
 // AIM: MPCHorizonEval.Evaluate must produce TrajectoryCostAvg and
-//      MaxTrajectoryCost within [0, 1] for any ServiceModelBundle.
+//
+//	MaxTrajectoryCost within [0, 1] for any ServiceModelBundle.
+//
 // THRESHOLD: 0 out-of-bound values
 // ON EXCEED: Cost normalisation broken → optimizer makes wrong decisions
 // ---------------------------------------------------------------
@@ -85,11 +87,11 @@ func TestL1_OPT_001_MPCTrajectoryCostBounds(t *testing.T) {
 			}
 			return true
 		},
-		gen.Float64Range(0.0, 1.5),   // rho from idle to overloaded
-		gen.Float64Range(-0.5, 0.5),  // trend
-		gen.Float64Range(0.1, 1000),  // service rate
-		gen.Float64Range(-1.0, 1.0),  // PID output
-		gen.Float64Range(0.5, 3.0),   // scale factor
+		gen.Float64Range(0.0, 1.5),  // rho from idle to overloaded
+		gen.Float64Range(-0.5, 0.5), // trend
+		gen.Float64Range(0.1, 1000), // service rate
+		gen.Float64Range(-1.0, 1.0), // PID output
+		gen.Float64Range(0.5, 3.0),  // scale factor
 	))
 
 	properties.TestingRun(t)
@@ -132,7 +134,9 @@ func TestL1_OPT_001_MPCTrajectoryCostBounds(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-OPT-002 — PID output saturation invariant
 // AIM: PIDController.Update must always return output within
-//      [OutputMin, OutputMax] for any gain/setpoint/measurement.
+//
+//	[OutputMin, OutputMax] for any gain/setpoint/measurement.
+//
 // THRESHOLD: 0 bound violations across 500,000 inputs
 // ON EXCEED: Actuator receives command beyond configured limits
 // ---------------------------------------------------------------
@@ -235,10 +239,14 @@ func TestL1_OPT_002_PIDBoundSafety(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-OPT-003 — MPC adjusted scale factor within [0.5, 3.0]
 // AIM: MPC must never produce an AdjustedScaleFactor outside [0.5, 3.0].
-//      This is enforced by an explicit clamp in Evaluate.
+//
+//	This is enforced by an explicit clamp in Evaluate.
+//
 // THRESHOLD: 0 violations
 // ON EXCEED: Scale factor exceeds range → downstream Engine applies
-//            out-of-range capacity change → system instability
+//
+//	out-of-range capacity change → system instability
+//
 // ---------------------------------------------------------------
 func TestL1_OPT_003_MPCScaleFactorBounds(t *testing.T) {
 	const seed int64 = 2024
@@ -340,11 +348,17 @@ func TestL1_OPT_003_MPCScaleFactorBounds(t *testing.T) {
 // ---------------------------------------------------------------
 // L1-OPT-004 — Trajectory planner feasibility monotonicity
 // AIM: PlanTrajectory must select a feasible candidate when one exists.
-//      A candidate is feasible if it stays below collapseThreshold.
+//
+//	A candidate is feasible if it stays below collapseThreshold.
+//
 // THRESHOLD: 0 cases where a feasible candidate exists but planner
-//            selects an infeasible one
+//
+//	selects an infeasible one
+//
 // ON EXCEED: Planner recommends a trajectory that crosses collapse,
-//            defeating the safety purpose of the planner
+//
+//	defeating the safety purpose of the planner
+//
 // ---------------------------------------------------------------
 func TestL1_OPT_004_TrajectoryPlannerFeasibility(t *testing.T) {
 	const seed int64 = 54321

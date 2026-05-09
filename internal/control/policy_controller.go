@@ -136,7 +136,6 @@ func (c *Controller) Tick(
 		)
 
 		// 🔥 AUTOPILOT AS MINIMUM GUARANTEE (CRITICAL FIX)
-	
 
 	utilAfter :=
 		sys.PredictedArrival /
@@ -146,23 +145,22 @@ func (c *Controller) Tick(
 		best.Replicas++
 	}
 
-
 	best = c.Memory.ApplyDamping(
-    c.LastDecision,
-    best,
-    ActionBounds{
-        MinReplicas: sys.MinReplicas,
-        MaxReplicas: sys.MaxReplicas,
-        MinQueue:    1,
-        MaxQueue:    sys.QueueLimit * 2,
-        MinRetry:    1,
-        MaxRetry:    sys.MaxRetry,
-        MinCache:    0,
-        MaxCache:    1,
-    },
-)
+		c.LastDecision,
+		best,
+		ActionBounds{
+			MinReplicas: sys.MinReplicas,
+			MaxReplicas: sys.MaxReplicas,
+			MinQueue:    1,
+			MaxQueue:    sys.QueueLimit * 2,
+			MinRetry:    1,
+			MaxRetry:    sys.MaxRetry,
+			MinCache:    0,
+			MaxCache:    1,
+		},
+	)
 
-c.LastDecision = best
+	c.LastDecision = best
 
 	ApplyActuatorDynamics(
 		sys,

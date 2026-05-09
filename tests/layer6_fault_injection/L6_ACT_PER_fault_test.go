@@ -1,7 +1,5 @@
 package layer6
 
-
-
 import (
 	"context"
 	"fmt"
@@ -15,7 +13,6 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
 )
-
 
 // L6-ACT-001 — CoalescingActuator: N dispatches for same service → 1 execution
 //
@@ -32,11 +29,11 @@ func TestL6_ACT_001_CoalescingReducesBackendCalls(t *testing.T) {
 	start := time.Now()
 
 	const (
-		dispatches      = 50
-		svcID           = "svc-coalesce"
+		dispatches       = 50
+		svcID            = "svc-coalesce"
 		finalScaleFactor = 2.5 // last dispatched value
-		feedbackBuf     = 128
-		maxExecutions   = 2
+		feedbackBuf      = 128
+		maxExecutions    = 2
 	)
 
 	qb := backends.NewQueueBackend()
@@ -123,12 +120,12 @@ collected:
 		},
 		OnExceed: "CoalescingActuator sends every directive to backend — backend overwhelmed under burst dispatch",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  fmt.Sprintf("%d rapid dispatches for same serviceID with no yield between them", dispatches+1),
-			WhyThisThreshold:      "pending map keyed by serviceID must overwrite — this is the stated contract of CoalescingActuator",
-			WhatHappensIfFails:    "Backend overwhelmed with 50+ requests per control tick → backend latency spikes → actuator timeout cascade",
-			HowFaultWasInjected:   "Rapid-fire dispatches with no sleep; pending map should accumulate into one entry",
-			HowRecoveryVerified:   "N/A — coalescing property test",
-			WhatDegradedMeans:     "Only latest ScaleFactor is executed; intermediate values discarded (by design)",
+			WhatFaultWasInjected: fmt.Sprintf("%d rapid dispatches for same serviceID with no yield between them", dispatches+1),
+			WhyThisThreshold:     "pending map keyed by serviceID must overwrite — this is the stated contract of CoalescingActuator",
+			WhatHappensIfFails:   "Backend overwhelmed with 50+ requests per control tick → backend latency spikes → actuator timeout cascade",
+			HowFaultWasInjected:  "Rapid-fire dispatches with no sleep; pending map should accumulate into one entry",
+			HowRecoveryVerified:  "N/A — coalescing property test",
+			WhatDegradedMeans:    "Only latest ScaleFactor is executed; intermediate values discarded (by design)",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -145,7 +142,6 @@ collected:
 	}
 	t.Logf("L6-ACT-001 PASS | dispatches=%d executions=%d workers=%d", dispatches+1, finalExecutions, workers)
 }
-
 
 // L6-ACT-002 — CoalescingActuator.Close() drains all pending before exit
 //
@@ -195,8 +191,8 @@ func TestL6_ACT_002_CloseWaitsForDrain(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-ACT-002", Layer: 6,
-		Name: "CoalescingActuator.Close() drains all pending before returning",
-		Aim:  fmt.Sprintf("Dispatch %d services then Close — all %d must be executed before Close returns", svcCount, svcCount),
+		Name:             "CoalescingActuator.Close() drains all pending before returning",
+		Aim:              fmt.Sprintf("Dispatch %d services then Close — all %d must be executed before Close returns", svcCount, svcCount),
 		PackagesInvolved: []string{"internal/actuator", "internal/actuator/backends"},
 		FunctionsTested:  []string{"(*CoalescingActuator).Close", "(*CoalescingActuator).drain"},
 		Threshold: L6Threshold{
@@ -215,12 +211,12 @@ func TestL6_ACT_002_CloseWaitsForDrain(t *testing.T) {
 		},
 		OnExceed: "Pending directives silently lost on shutdown — last control action before restart never applied",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "Dispatch then immediately call Close(ctx)",
-			WhyThisThreshold:      "All pending must be flushed — graceful shutdown contract",
-			WhatHappensIfFails:    "On Kubernetes restart, last directive not applied — system state doesn't match controller's model",
-			HowFaultWasInjected:   "Immediate Close() after single Dispatch — races with background execution loop",
-			HowRecoveryVerified:   "QueueBackend.WorkerCount verifies each service's directive was actually executed",
-			WhatDegradedMeans:     "N/A — this is the normal shutdown path",
+			WhatFaultWasInjected: "Dispatch then immediately call Close(ctx)",
+			WhyThisThreshold:     "All pending must be flushed — graceful shutdown contract",
+			WhatHappensIfFails:   "On Kubernetes restart, last directive not applied — system state doesn't match controller's model",
+			HowFaultWasInjected:  "Immediate Close() after single Dispatch — races with background execution loop",
+			HowRecoveryVerified:  "QueueBackend.WorkerCount verifies each service's directive was actually executed",
+			WhatDegradedMeans:    "N/A — this is the normal shutdown path",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -236,7 +232,6 @@ func TestL6_ACT_002_CloseWaitsForDrain(t *testing.T) {
 	}
 	t.Logf("L6-ACT-002 PASS | close_ok executed=%d/%d", executedCount, svcCount)
 }
-
 
 // L6-ACT-003 — QueueBackend worker count bounded and correct under scale sequence
 //
@@ -312,8 +307,8 @@ func TestL6_ACT_003_QueueBackendWorkerCountCorrect(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-ACT-003", Layer: 6,
-		Name: "QueueBackend worker count correct through scale-up/down sequence",
-		Aim:  "scale sequence [3.0, 2.0, 0.5, 0.3] applied to svcID produces correct worker counts; floor at 1",
+		Name:             "QueueBackend worker count correct through scale-up/down sequence",
+		Aim:              "scale sequence [3.0, 2.0, 0.5, 0.3] applied to svcID produces correct worker counts; floor at 1",
 		PackagesInvolved: []string{"internal/actuator/backends"},
 		FunctionsTested:  []string{"backends.NewQueueBackend", "(*QueueBackend).Execute", "(*QueueBackend).WorkerCount"},
 		Threshold: L6Threshold{
@@ -332,12 +327,12 @@ func TestL6_ACT_003_QueueBackendWorkerCountCorrect(t *testing.T) {
 		},
 		OnExceed: "QueueBackend produces wrong worker count → scale decisions do not match what backend applies",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "Scale factors: 3.0 → 2.0 → 0.5 → 0.3 (last floors at minWorkers=1)",
-			WhyThisThreshold:      "Worker count must match math.Round(current × scaleFactor) with floor at minWorkers",
-			WhatHappensIfFails:    "Control loop believes it scaled service down but backend has wrong worker count",
-			HowFaultWasInjected:   "Sub-floor scale factor (0.3 × 3 = 0.9 → must floor at 1)",
-			HowRecoveryVerified:   "N/A — functional correctness test",
-			WhatDegradedMeans:     "N/A — this tests the in-memory mock backend, not a degraded path",
+			WhatFaultWasInjected: "Scale factors: 3.0 → 2.0 → 0.5 → 0.3 (last floors at minWorkers=1)",
+			WhyThisThreshold:     "Worker count must match math.Round(current × scaleFactor) with floor at minWorkers",
+			WhatHappensIfFails:   "Control loop believes it scaled service down but backend has wrong worker count",
+			HowFaultWasInjected:  "Sub-floor scale factor (0.3 × 3 = 0.9 → must floor at 1)",
+			HowRecoveryVerified:  "N/A — functional correctness test",
+			WhatDegradedMeans:    "N/A — this tests the in-memory mock backend, not a degraded path",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -412,8 +407,8 @@ func TestL6_PER_001_WriterNilSafeWhenDBUnavailable(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-PER-001", Layer: 6,
-		Name: "persistence.NewWriter nil-safe when DB unavailable",
-		Aim:  "NewWriter(unreachable DB) returns nil; Enqueue(nil) and Close(nil) do not panic",
+		Name:             "persistence.NewWriter nil-safe when DB unavailable",
+		Aim:              "NewWriter(unreachable DB) returns nil; Enqueue(nil) and Close(nil) do not panic",
 		PackagesInvolved: []string{"internal/persistence"},
 		FunctionsTested: []string{
 			"persistence.NewWriter (unreachable DSN)",
@@ -435,12 +430,12 @@ func TestL6_PER_001_WriterNilSafeWhenDBUnavailable(t *testing.T) {
 		},
 		OnExceed: "NewWriter panics on DB unavailable → orchestrator startup crashes → system never starts",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "DSN with port 1 (connection refused) passed to NewWriter",
-			WhyThisThreshold:      "Zero panics: DATABASE_URL may be unset in deployment; system must start without it",
-			WhatHappensIfFails:    "Orchestrator panics at startup when DATABASE_URL points to unavailable DB → pod crash loop",
-			HowFaultWasInjected:   `persistence.NewWriter("postgres://...localhost:1/nonexistentdb", 10)`,
-			HowRecoveryVerified:   "N/A — nil-safety test",
-			WhatDegradedMeans:     "Writer is nil; all Enqueue/Close calls are no-ops; snapshots not persisted (acceptable)",
+			WhatFaultWasInjected: "DSN with port 1 (connection refused) passed to NewWriter",
+			WhyThisThreshold:     "Zero panics: DATABASE_URL may be unset in deployment; system must start without it",
+			WhatHappensIfFails:   "Orchestrator panics at startup when DATABASE_URL points to unavailable DB → pod crash loop",
+			HowFaultWasInjected:  `persistence.NewWriter("postgres://...localhost:1/nonexistentdb", 10)`,
+			HowRecoveryVerified:  "N/A — nil-safety test",
+			WhatDegradedMeans:    "Writer is nil; all Enqueue/Close calls are no-ops; snapshots not persisted (acceptable)",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})
@@ -456,7 +451,6 @@ func TestL6_PER_001_WriterNilSafeWhenDBUnavailable(t *testing.T) {
 	}
 	t.Logf("L6-PER-001 PASS | panics=0 writer_is_nil=true (no DB required)")
 }
-
 
 // L6-PER-002 — persistence.Writer.Enqueue is non-blocking under full queue
 //
@@ -496,8 +490,8 @@ func TestL6_PER_002_EnqueueNonBlockingNilPath(t *testing.T) {
 
 	writeL6Result(L6Record{
 		TestID: "L6-PER-002", Layer: 6,
-		Name: fmt.Sprintf("Writer.Enqueue non-blocking: %d calls on nil writer < %.0fms", enqueueCount, maxTotalMs),
-		Aim:  fmt.Sprintf("%d Enqueue calls on nil Writer must complete in < %.0fms total (no blocking)", enqueueCount, maxTotalMs),
+		Name:             fmt.Sprintf("Writer.Enqueue non-blocking: %d calls on nil writer < %.0fms", enqueueCount, maxTotalMs),
+		Aim:              fmt.Sprintf("%d Enqueue calls on nil Writer must complete in < %.0fms total (no blocking)", enqueueCount, maxTotalMs),
 		PackagesInvolved: []string{"internal/persistence"},
 		FunctionsTested:  []string{"(*Writer).Enqueue (nil path)"},
 		Threshold: L6Threshold{
@@ -515,12 +509,12 @@ func TestL6_PER_002_EnqueueNonBlockingNilPath(t *testing.T) {
 		},
 		OnExceed: "Enqueue blocks → orchestrator tick stage 9 (persistence) blocks → tick overrun → safety mode",
 		Questions: L6Questions{
-			WhatFaultWasInjected:  "nil Writer (simulates DB unavailable or queue full drop path)",
-			WhyThisThreshold:      "10ms for 10k calls = 1µs each — the nil guard must be a single branch check",
-			WhatHappensIfFails:    "Persistence blocking orchestrator tick → tick deadline exceeded → stage skipping → data loss",
-			HowFaultWasInjected:   "var w *persistence.Writer = nil; w.Enqueue(...) calls nil-safe guard",
-			HowRecoveryVerified:   "N/A — throughput test",
-			WhatDegradedMeans:     "nil Writer drops all snapshots silently — system runs without DB persistence",
+			WhatFaultWasInjected: "nil Writer (simulates DB unavailable or queue full drop path)",
+			WhyThisThreshold:     "10ms for 10k calls = 1µs each — the nil guard must be a single branch check",
+			WhatHappensIfFails:   "Persistence blocking orchestrator tick → tick deadline exceeded → stage skipping → data loss",
+			HowFaultWasInjected:  "var w *persistence.Writer = nil; w.Enqueue(...) calls nil-safe guard",
+			HowRecoveryVerified:  "N/A — throughput test",
+			WhatDegradedMeans:    "nil Writer drops all snapshots silently — system runs without DB persistence",
 		},
 		RunAt: l6Now(), GoVersion: l6GoVer(),
 	})

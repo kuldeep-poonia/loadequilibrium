@@ -28,14 +28,14 @@ type L2PercentileResult struct {
 }
 
 type L2ResultData struct {
-	Status        string              `json:"status"`
-	ActualValue   float64             `json:"actual_value"`
-	ActualUnit    string              `json:"actual_unit"`
-	SampleCount   int                 `json:"sample_count"`
-	Percentiles   *L2PercentileResult `json:"percentiles,omitempty"`
-	WorstCaseInput interface{}        `json:"worst_case_input,omitempty"`
-	ErrorMessages []string            `json:"error_messages,omitempty"`
-	DurationMs    int64               `json:"duration_ms"`
+	Status         string              `json:"status"`
+	ActualValue    float64             `json:"actual_value"`
+	ActualUnit     string              `json:"actual_unit"`
+	SampleCount    int                 `json:"sample_count"`
+	Percentiles    *L2PercentileResult `json:"percentiles,omitempty"`
+	WorstCaseInput interface{}         `json:"worst_case_input,omitempty"`
+	ErrorMessages  []string            `json:"error_messages,omitempty"`
+	DurationMs     int64               `json:"duration_ms"`
 }
 
 type L2Questions struct {

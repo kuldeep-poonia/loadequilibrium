@@ -9,12 +9,12 @@ import (
 )
 
 type couplerState struct {
-	queueBaseline      float64
-	latencyPersisted   float64
-	demandMemory       float64
-	varianceAcc        float64
-	propBuffer         [3]float64
-	propIdx            int
+	queueBaseline    float64
+	latencyPersisted float64
+	demandMemory     float64
+	varianceAcc      float64
+	propBuffer       [3]float64
+	propIdx          int
 }
 
 // TelemetryCoupler enforces persistent physical state continuity across disjoint ticks.
@@ -89,13 +89,13 @@ func (c *TelemetryCoupler) ApplyCoupling(windows map[string]*telemetry.ServiceWi
 		// Latency growth caused by backlog must be written and decay gradually
 		latencyPenalty := normalizedQueue * 60.0 // ms of injected wait-time
 		rawExpectedLatency := w.MeanLatencyMs + latencyPenalty
-		
+
 		if rawExpectedLatency > st.latencyPersisted {
 			st.latencyPersisted = 0.8*rawExpectedLatency + 0.2*st.latencyPersisted // rapid assault
 		} else {
 			st.latencyPersisted = 0.1*rawExpectedLatency + 0.9*st.latencyPersisted // slow draining decay
 		}
-		
+
 		w.MeanLatencyMs = st.latencyPersisted
 		w.LastLatencyMs = st.latencyPersisted
 

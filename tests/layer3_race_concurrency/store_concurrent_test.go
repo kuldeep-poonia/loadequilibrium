@@ -40,14 +40,14 @@ func TestL3_TEL_003_StoreConcurrentIngestPruneAllWindows(t *testing.T) {
 	start := time.Now()
 
 	const (
-		bufCap      = 256
-		maxSvc      = 50
-		staleAge    = 2 * time.Second
-		ingesters   = 20
-		pruners     = 5
-		readers     = 5
+		bufCap       = 256
+		maxSvc       = 50
+		staleAge     = 2 * time.Second
+		ingesters    = 20
+		pruners      = 5
+		readers      = 5
 		serviceCount = 10 // rotate across N service IDs to create delete/re-add cycles
-		durationS   = 30
+		durationS    = 30
 	)
 
 	store := telemetry.NewStore(bufCap, maxSvc, staleAge)
@@ -254,10 +254,10 @@ func TestL3_TEL_003_StoreConcurrentIngestPruneAllWindows(t *testing.T) {
 				"Store(bufCap=%d maxSvc=%d staleAge=%s) under %d ingesters + %d pruners + %d readers for %ds",
 				bufCap, maxSvc, staleAge, ingesters, pruners, readers, durationS,
 			),
-			WhyThisThreshold:    "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
-			WhatHappensIfFails:  "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
-			HowRacesWereDetected: "Go race detector on test binary + explicit panic recovery in each goroutine",
-			HowLeaksWereDetected: "N/A — not the focus of this test",
+			WhyThisThreshold:       "Go's map is not concurrency-safe; unguarded concurrent access panics the runtime — not a data race, an outright crash",
+			WhatHappensIfFails:     "The Orchestrator tick goroutine panics on map access → entire control loop stops → system runs open-loop indefinitely",
+			HowRacesWereDetected:   "Go race detector on test binary + explicit panic recovery in each goroutine",
+			HowLeaksWereDetected:   "N/A — not the focus of this test",
 			WhatConcurrencyPattern: "Double-checked locking (RLock for read, upgrade to Lock for write) + delete-under-lock in Prune racing with Ingest",
 		},
 		RunAt:     l3Now(),
@@ -334,7 +334,7 @@ func TestL3_TEL_004_StoreCardinalityCapConcurrent(t *testing.T) {
 					Timestamp:   time.Now(),
 					RequestRate: float64(i + 1),
 					ErrorRate:   0.01,
-					Latency: telemetry.LatencyStats{Mean: 50.0, P50: 45.0, P95: 80.0, P99: 100.0},
+					Latency:     telemetry.LatencyStats{Mean: 50.0, P50: 45.0, P95: 80.0, P99: 100.0},
 				})
 				atomic.AddInt64(&ingestsDone, 1)
 
@@ -402,10 +402,10 @@ func TestL3_TEL_004_StoreCardinalityCapConcurrent(t *testing.T) {
 				"%d goroutines trying to register %d unique services against Store(maxSvc=%d) simultaneously",
 				goroutines, goroutines, maxSvcCap,
 			),
-			WhyThisThreshold:    "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
-			WhatHappensIfFails:  "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
-			HowRacesWereDetected: "Go race detector on test binary detects race on len(s.buffers) check vs map write",
-			HowLeaksWereDetected: "N/A",
+			WhyThisThreshold:       "Cap must be a hard guarantee; exceeding it by even one service breaks the memory budget calculation",
+			WhatHappensIfFails:     "Production system with high service cardinality fills memory → OOM kill → control loop restarts → brief open-loop operation",
+			HowRacesWereDetected:   "Go race detector on test binary detects race on len(s.buffers) check vs map write",
+			HowLeaksWereDetected:   "N/A",
 			WhatConcurrencyPattern: "TOCTOU (Time-of-Check-Time-of-Use) race: check len(s.buffers) then add — must be guarded by single Lock across both operations",
 		},
 		RunAt:     l3Now(),

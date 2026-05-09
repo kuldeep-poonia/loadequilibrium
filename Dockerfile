@@ -12,6 +12,7 @@ FROM alpine:3.19
 RUN addgroup -S le && adduser -S le -G le
 WORKDIR /app
 COPY --from=builder /build/loadequilibrium .
+COPY ui/ ./ui/
 
 USER le
 

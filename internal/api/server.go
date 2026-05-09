@@ -65,6 +65,23 @@ func (s *Server) routes() {
 	// WebSocket
 	s.mux.HandleFunc("/ws", s.hub.HandleUpgrade)
 
+	// UI static files — serve ./ui/ directory at /
+	// Drop index.html, app.js, styles.css into a folder named "ui" beside the binary.
+	// Falls through to API routes for /api/, /ws, /health, /metrics paths.
+	uiDir := http.Dir("ui")
+	uiServer := http.FileServer(uiDir)
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Only serve static files for non-API paths
+		if strings.HasPrefix(r.URL.Path, "/api/") ||
+			strings.HasPrefix(r.URL.Path, "/ws") ||
+			strings.HasPrefix(r.URL.Path, "/health") ||
+			strings.HasPrefix(r.URL.Path, "/metrics") {
+			http.NotFound(w, r)
+			return
+		}
+		uiServer.ServeHTTP(w, r)
+	})
+
 	// Telemetry ingestion
 	s.mux.HandleFunc("/api/v1/ingest", s.handleIngest())
 

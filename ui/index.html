@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LoadEquilibrium — Control Room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- top bar -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <span class="logo-mark">LE</span>
+      <span class="logo-text">LOADEQUILIBRIUM</span>
+      <span class="divider"></span>
+      <span class="label-sm">CONTROL ROOM</span>
+    </div>
+    <div class="topbar-center">
+      <div id="ws-indicator" class="ws-dot disconnected" title="WebSocket"></div>
+      <span id="ws-label" class="label-sm">CONNECTING…</span>
+      <span class="divider"></span>
+      <span class="label-sm">TICK</span>
+      <span id="tick-count" class="mono bright">—</span>
+      <span class="divider"></span>
+      <span class="label-sm">UPTIME</span>
+      <span id="uptime" class="mono bright">—</span>
+    </div>
+    <div class="topbar-right">
+      <span id="clock" class="mono bright">--:--:--</span>
+    </div>
+  </header>
+
+  <!-- ── STATUS HERO  -->
+  <section id="hero">
+    <div class="hero-status-block">
+      <div id="system-badge" class="system-badge waiting">
+        <span class="badge-icon">◌</span>
+        <span class="badge-text" id="badge-text">WAITING FOR TELEMETRY</span>
+      </div>
+      <div id="safety-mode-banner" class="safety-banner hidden">
+        ⚠ SAFETY MODE ACTIVE — CONTROL ACTIONS CONSTRAINED
+      </div>
+    </div>
+    <div class="hero-metrics">
+      <div class="hmetric" id="hm-rps">
+        <span class="hmetric-label">REQ/S</span>
+        <span class="hmetric-value" id="hv-rps">—</span>
+      </div>
+      <div class="hmetric" id="hm-lat">
+        <span class="hmetric-label">LATENCY</span>
+        <span class="hmetric-value" id="hv-lat">—</span>
+      </div>
+      <div class="hmetric" id="hm-queue">
+        <span class="hmetric-label">QUEUE DEPTH</span>
+        <span class="hmetric-value" id="hv-queue">—</span>
+      </div>
+      <div class="hmetric" id="hm-risk">
+        <span class="hmetric-label">COLLAPSE RISK</span>
+        <span class="hmetric-value" id="hv-risk">—</span>
+      </div>
+      <div class="hmetric" id="hm-services">
+        <span class="hmetric-label">SERVICES</span>
+        <span class="hmetric-value" id="hv-services">—</span>
+      </div>
+      <div class="hmetric" id="hm-rho">
+        <span class="hmetric-label">SYSTEM ρ</span>
+        <span class="hmetric-value" id="hv-rho">—</span>
+      </div>
+      <div class="hmetric" id="hm-degraded">
+        <span class="hmetric-label">DEGRADED</span>
+        <span class="hmetric-value" id="hv-degraded">—</span>
+      </div>
+      <div class="hmetric" id="hm-hottest">
+        <span class="hmetric-label">HOTTEST SVC</span>
+        <span class="hmetric-value" id="hv-hottest">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── MAIN GRID  -->
+  <main id="main-grid">
+
+    <!-- LEFT: LIVE CHARTS -->
+    <section class="panel" id="charts-panel">
+      <div class="panel-header">
+        <span class="panel-title">LIVE METRICS</span>
+        <span class="panel-sub" id="chart-svc-label">all services</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-block">
+          <div class="chart-label">REQUESTS / SEC</div>
+          <canvas class="sparkline" id="chart-rps" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-rps">—</span>
+        </div>
+        <div class="chart-block">
+          <div class="chart-label">LATENCY (ms)</div>
+          <canvas class="sparkline" id="chart-lat" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-lat">—</span>
+        </div>
+        <div class="chart-block">
+          <div class="chart-label">QUEUE DEPTH</div>
+          <canvas class="sparkline" id="chart-queue" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-queue">—</span>
+        </div>
+        <div class="chart-block">
+          <div class="chart-label">UTILISATION ρ</div>
+          <canvas class="sparkline" id="chart-rho" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-rho">—</span>
+        </div>
+        <div class="chart-block">
+          <div class="chart-label">COLLAPSE RISK</div>
+          <canvas class="sparkline" id="chart-risk" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-risk">—</span>
+        </div>
+        <div class="chart-block">
+          <div class="chart-label">BURST AMPLIFICATION</div>
+          <canvas class="sparkline" id="chart-burst" width="360" height="60"></canvas>
+          <span class="chart-val" id="cval-burst">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: INCIDENTS + ACTIONS -->
+    <section class="panel" id="right-panel">
+
+      <!-- Incidents -->
+      <div class="panel-header">
+        <span class="panel-title">ACTIVE INCIDENTS</span>
+        <span class="panel-badge" id="incident-count">0</span>
+      </div>
+      <div id="incident-list" class="incident-list">
+        <div class="empty-state">No active incidents detected</div>
+      </div>
+
+      <!-- Causal Flow -->
+      <div class="panel-header mt-sm">
+        <span class="panel-title">CAUSAL CHAIN</span>
+      </div>
+      <div id="causal-chain" class="causal-chain">
+        <div class="empty-state">Waiting for events to build chain…</div>
+      </div>
+
+      <!-- Recommended Actions -->
+      <div class="panel-header mt-sm">
+        <span class="panel-title">RECOMMENDED ACTIONS</span>
+        <span class="panel-badge neutral" id="action-count">0</span>
+      </div>
+      <div id="action-list" class="action-list">
+        <div class="empty-state">No recommendations at this time</div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- ── SERVICE HEALTH TABLE  -->
+  <section class="panel" id="service-panel">
+    <div class="panel-header">
+      <span class="panel-title">SERVICE HEALTH</span>
+      <span class="panel-sub" id="svc-table-meta">live · 2s refresh</span>
+    </div>
+    <div class="table-scroll">
+      <table id="service-table">
+        <thead>
+          <tr>
+            <th>SERVICE</th>
+            <th>STATUS</th>
+            <th>REQ/S</th>
+            <th>LATENCY</th>
+            <th>QUEUE</th>
+            <th>UTILISATION</th>
+            <th>COLLAPSE RISK</th>
+            <th>BURST AMP</th>
+            <th>STABILITY ZONE</th>
+            <th>TREND</th>
+          </tr>
+        </thead>
+        <tbody id="service-tbody">
+          <tr><td colspan="10" class="empty-cell">Waiting for telemetry…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── BOTTOM PANELS  -->
+  <div id="bottom-grid">
+
+    <!-- Event Stream -->
+    <section class="panel" id="event-panel">
+      <div class="panel-header">
+        <span class="panel-title">EVENT STREAM</span>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="event-pause" />
+          <span class="toggle-label">PAUSE</span>
+        </label>
+      </div>
+      <div id="event-stream" class="event-stream"></div>
+    </section>
+
+    <!-- Runtime Log -->
+    <section class="panel" id="log-panel">
+      <div class="panel-header">
+        <span class="panel-title">RUNTIME LOG</span>
+        <div class="log-controls">
+          <label class="toggle-wrap">
+            <input type="checkbox" id="log-pause" />
+            <span class="toggle-label">PAUSE</span>
+          </label>
+          <button class="btn-ghost" id="log-clear">CLR</button>
+        </div>
+      </div>
+      <div id="log-terminal" class="log-terminal"></div>
+    </section>
+
+  </div>
+
+  <!-- ── ACTION APPROVAL MODAL  -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">APPLY RECOMMENDATION?</span>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-service" id="modal-service-name">—</p>
+        <p class="modal-desc" id="modal-action-desc">—</p>
+        <div class="modal-evidence" id="modal-evidence"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-danger" id="modal-deny">DENY</button>
+        <button class="btn-confirm" id="modal-approve">APPLY ACTION</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ADVANCED DEBUG TAB  -->
+  <details id="debug-tab">
+    <summary class="debug-summary">▸ ADVANCED DEBUG</summary>
+    <div class="debug-content">
+      <div class="debug-col">
+        <div class="debug-section-title">FIXED POINT EQUILIBRIUM</div>
+        <div id="debug-fp" class="debug-kv"></div>
+      </div>
+      <div class="debug-col">
+        <div class="debug-section-title">NETWORK EQUILIBRIUM</div>
+        <div id="debug-neq" class="debug-kv"></div>
+      </div>
+      <div class="debug-col">
+        <div class="debug-section-title">STABILITY ENVELOPE</div>
+        <div id="debug-env" class="debug-kv"></div>
+      </div>
+      <div class="debug-col">
+        <div class="debug-section-title">RUNTIME METRICS</div>
+        <div id="debug-rt" class="debug-kv"></div>
+      </div>
+      <div class="debug-col">
+        <div class="debug-section-title">RAW PAYLOAD</div>
+        <pre id="debug-raw" class="debug-raw"></pre>
+      </div>
+    </div>
+  </details>
+
+  <script src="app.js"></script>
+</body>
+</html>

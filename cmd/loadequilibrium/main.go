@@ -72,6 +72,10 @@ func main() {
 	srv.SetActuator(act)
 	srv.SetScenarios(scenarios)
 
+	// Wire Prometheus counters into the orchestrator so scale decisions,
+	// tick counts, and SLA breaches are actually exported via /metrics.
+	orch.SetCounters(srv.Counters)
+
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      srv.Handler(),

@@ -7,12 +7,13 @@ import (
 )
 
 type Store struct {
-	mu       sync.RWMutex
-	buffers  map[string]*RingBuffer
-	lastSeen map[string]time.Time
-	bufCap   int
-	maxSvc   int
-	staleAge time.Duration
+	mu            sync.RWMutex
+	buffers       map[string]*RingBuffer
+	lastSeen      map[string]time.Time
+	appliedScales map[string]float64 // last scale directive per service, set by orchestrator
+	bufCap        int
+	maxSvc        int
+	staleAge      time.Duration
 }
 
 func finiteOrZero(v float64) float64 {
@@ -20,6 +21,17 @@ func finiteOrZero(v float64) float64 {
 		return 0
 	}
 	return v
+}
+
+// SetAppliedScale records the last scale directive for a service so it is
+// reflected in ServiceWindow.AppliedScale and exported via /metrics.
+func (s *Store) SetAppliedScale(serviceID string, scale float64) {
+	s.mu.Lock()
+	if s.appliedScales == nil {
+		s.appliedScales = make(map[string]float64)
+	}
+	s.appliedScales[serviceID] = scale
+	s.mu.Unlock()
 }
 
 func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
@@ -197,6 +209,11 @@ func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*Ser
 
 		w := computeWindow(id, points)
 		if w != nil {
+			if s.appliedScales != nil {
+				if scale, ok := s.appliedScales[id]; ok {
+					w.AppliedScale = scale
+				}
+			}
 			out[id] = w
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
 	"github.com/loadequilibrium/loadequilibrium/internal/debug"
+	"github.com/loadequilibrium/loadequilibrium/internal/metrics"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/optimisation"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
@@ -68,6 +69,7 @@ type Orchestrator struct {
 	scenarioEngine *scenario.SuperpositionEngine
 	pw             *persistence.Writer
 	phaseRuntime   *phaseRuntime
+	counters       *metrics.Counters // incremented each tick; nil-safe
 
 	tickCount       uint64
 	publicTickCount uint64
@@ -219,7 +221,7 @@ func New(
 	o.actuationEnabled.Store(true)
 
 	if scen != nil {
-		scen.SetMode(cfg.ScenarioMode)
+		scen.SetMode("off") // synthetic scenarios disabled — data must come from real ingestion only
 	}
 
 	return o
@@ -505,13 +507,9 @@ func (o *Orchestrator) tick(now time.Time) {
 	}
 
 	// observedWindows: real telemetry — used for modelling, optimization, reasoning, dashboard.
-	// simulationWindows: may include synthetic scenarios — used ONLY for Stage 6 simulation.
+	// simulationWindows: synthetic overlay disabled — uses real telemetry only.
 	observedWindows := windows
-	simulationWindows := windows
-	if o.scenarioEngine != nil {
-		// ApplySuperposition already clones; result is safe to use independently.
-		simulationWindows = o.scenarioEngine.ApplySuperposition(o.tickCount, windows, o.prevTopo)
-	}
+	simulationWindows := windows // scenario overlay bypassed: ApplySuperposition not called
 
 	if o.consumeSimulationReset() {
 		o.lastSimResult = nil
@@ -850,6 +848,22 @@ func (o *Orchestrator) tick(now time.Time) {
 	optimizerCandidates := o.optEngine.EvaluateCandidates(bundles, costGradients, o.lastSimResult, topoSnap, now)
 	objective := optimisation.ComputeObjective(bundles, topoSnap, now)
 	directives := o.phaseRuntime.apply(o.tickCount, now, bundles, objective, optimizerCandidates)
+
+	// ── Metrics: increment scale decision counters and write AppliedScale back ──
+	if o.counters != nil {
+		o.counters.TicksTotal.Add(1)
+		for svc, dir := range directives {
+			o.store.SetAppliedScale(svc, dir.ScaleFactor)
+			switch {
+			case dir.ScaleFactor > 1.02:
+				o.counters.ScaleUpTotal.Add(1)
+			case dir.ScaleFactor < 0.98:
+				o.counters.ScaleDownTotal.Add(1)
+			default:
+				o.counters.HoldTotal.Add(1)
+			}
+		}
+	}
 
 	if o.actuator != nil && o.ActuationEnabled() {
 		ctrl.Dispatch(o.actuator, o.tickCount, directives)
@@ -1204,6 +1218,13 @@ func (o *Orchestrator) tick(now time.Time) {
 // ReentrantTickCount returns the number of reentrant ticks detected
 func (o *Orchestrator) ReentrantTickCount() uint64 {
 	return atomic.LoadUint64(&o.reentrantTicks)
+}
+
+// SetCounters wires the Prometheus metrics counters into the orchestrator so
+// tick counts, scale decisions, and SLA breaches are exported via /metrics.
+// Call this after runtime.New() and before Run().
+func (o *Orchestrator) SetCounters(c *metrics.Counters) {
+	o.counters = c
 }
 
 // ProcessedTickCount returns the number of ticks that completed successfully

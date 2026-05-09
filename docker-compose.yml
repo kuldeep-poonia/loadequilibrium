@@ -1,6 +1,6 @@
 services:
 
-  # ─── Core control plane ──────────────────────────────────────────────────────
+  #  Core control plane ──
   loadequilibrium:
     build:
       context: .
@@ -38,7 +38,7 @@ services:
     networks:
       - internal
 
-  # ─── Automatic telemetry collector ────────────────────────────────────────
+  #  Automatic telemetry collector 
   le-collector:
     build:
       context: .
@@ -70,7 +70,7 @@ services:
     networks:
       - internal
 
-  # ─── Postgres ─────────────────────────────────────────────────────────────
+  #  Postgres 
   postgres:
     image: postgres:16-alpine
     environment:
@@ -92,7 +92,7 @@ services:
     networks:
       - internal
 
-  # ─── Dashboard (temporarily disabled) ─────────────────────────────────────
+  #  Dashboard (temporarily disabled) ─
   #
   # dashboard:
   #   build:
@@ -118,7 +118,7 @@ services:
   #   networks:
   #     - internal
 
-  # ─── Prometheus ───────────────────────────────────────────────────────────
+  #  Prometheus ─
   prometheus:
     image: prom/prometheus:v2.53.0
     command:
@@ -140,7 +140,7 @@ services:
     networks:
       - internal
 
-  # ─── Grafana ──────────────────────────────────────────────────────────────
+  #  Grafana ─
   grafana:
     image: grafana/grafana:10.4.0
     environment:

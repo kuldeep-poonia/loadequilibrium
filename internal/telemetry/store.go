@@ -73,10 +73,18 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.RequestRate > maxReasonableRPS {
 		p.RequestRate = maxReasonableRPS
 	}
-	if p.Latency.Mean > maxReasonableLatencyMs { p.Latency.Mean = maxReasonableLatencyMs }
-	if p.Latency.P50 > maxReasonableLatencyMs  { p.Latency.P50 = maxReasonableLatencyMs }
-	if p.Latency.P95 > maxReasonableLatencyMs  { p.Latency.P95 = maxReasonableLatencyMs }
-	if p.Latency.P99 > maxReasonableLatencyMs  { p.Latency.P99 = maxReasonableLatencyMs }
+	if p.Latency.Mean > maxReasonableLatencyMs {
+		p.Latency.Mean = maxReasonableLatencyMs
+	}
+	if p.Latency.P50 > maxReasonableLatencyMs {
+		p.Latency.P50 = maxReasonableLatencyMs
+	}
+	if p.Latency.P95 > maxReasonableLatencyMs {
+		p.Latency.P95 = maxReasonableLatencyMs
+	}
+	if p.Latency.P99 > maxReasonableLatencyMs {
+		p.Latency.P99 = maxReasonableLatencyMs
+	}
 	if p.ErrorRate < 0 {
 		p.ErrorRate = 0
 	}

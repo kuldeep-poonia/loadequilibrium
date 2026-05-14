@@ -10,21 +10,16 @@ type Store struct {
 	mu            sync.RWMutex
 	buffers       map[string]*RingBuffer
 	lastSeen      map[string]time.Time
-	appliedScales map[string]float64 // last scale directive per service, set by orchestrator
+	appliedScales map[string]float64 // last control directive scale per service
 	bufCap        int
 	maxSvc        int
 	staleAge      time.Duration
 }
 
-func finiteOrZero(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0
-	}
-	return v
-}
-
-// SetAppliedScale records the last scale directive for a service so it is
-// reflected in ServiceWindow.AppliedScale and exported via /metrics.
+// SetAppliedScale records the last scale directive issued for a service.
+// Called by the orchestrator after directives are computed each tick.
+// The value is injected into ServiceWindow.AppliedScale so Prometheus
+// and the queueing engine can use the actual applied scale factor.
 func (s *Store) SetAppliedScale(serviceID string, scale float64) {
 	s.mu.Lock()
 	if s.appliedScales == nil {
@@ -32,6 +27,13 @@ func (s *Store) SetAppliedScale(serviceID string, scale float64) {
 	}
 	s.appliedScales[serviceID] = scale
 	s.mu.Unlock()
+}
+
+func finiteOrZero(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
 }
 
 func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
@@ -53,7 +55,6 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.ServiceID == "" {
 		return false
 	}
-	// Clamp to physically meaningful ranges.
 	p.RequestRate = finiteOrZero(p.RequestRate)
 	p.ErrorRate = finiteOrZero(p.ErrorRate)
 	p.Latency.Mean = finiteOrZero(p.Latency.Mean)
@@ -65,14 +66,23 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.RequestRate < 0 {
 		p.RequestRate = 0
 	}
+	// Hard ceiling: chaosgen out_of_range_rate injects finite but huge values (e.g. 1e15)
+	// that pass NaN/Inf check, corrupt window averages, and compound via EWMA momentum.
+	const maxReasonableRPS = 10_000_000.0      // 10M req/s ceiling
+	const maxReasonableLatencyMs = 3_600_000.0 // 1 hour ceiling
+	if p.RequestRate > maxReasonableRPS {
+		p.RequestRate = maxReasonableRPS
+	}
+	if p.Latency.Mean > maxReasonableLatencyMs { p.Latency.Mean = maxReasonableLatencyMs }
+	if p.Latency.P50 > maxReasonableLatencyMs  { p.Latency.P50 = maxReasonableLatencyMs }
+	if p.Latency.P95 > maxReasonableLatencyMs  { p.Latency.P95 = maxReasonableLatencyMs }
+	if p.Latency.P99 > maxReasonableLatencyMs  { p.Latency.P99 = maxReasonableLatencyMs }
 	if p.ErrorRate < 0 {
 		p.ErrorRate = 0
 	}
 	if p.ErrorRate > 1 {
-		p.ErrorRate = 1 // error rate is a fraction [0,1]
+		p.ErrorRate = 1
 	}
-	// Latency values of 0 cause division-by-zero in service rate formula.
-	// Floor at 0.1ms — if a service truly responds in <0.1ms, physics is fine.
 	const minLatencyMs = 0.1
 	if p.Latency.Mean < 0 {
 		p.Latency.Mean = 0

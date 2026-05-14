@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { API_BASE } from '../lib/backend'
 import { ms, n, pct, safe, ts } from '../lib/fmt'
-
-const API_BASE = `${location.protocol}//${location.hostname}:8080/api/v1`
 
 const SEVERITY = {
   2: { label: 'CRIT', cls: 'border-red bg-red/10 text-red', dot: 'bg-red animate-blink' },

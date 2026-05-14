@@ -38,6 +38,20 @@ services:
     networks:
       - internal
 
+  #  Browser UI
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      loadequilibrium:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
   #  Automatic telemetry collector 
   le-collector:
     build:

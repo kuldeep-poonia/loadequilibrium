@@ -24,21 +24,19 @@ export default function App() {
   }, [connect])
 
   return (
-    <div className="min-h-screen h-screen bg-bg text-text flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-bg text-text flex flex-col">
       <Topbar />
       <HeroBar />
 
-      <main className="flex-1 min-h-0 p-2 overflow-hidden">
-        <div className="h-full min-h-0 grid grid-cols-[minmax(0,1fr)_390px] gap-2 max-[1180px]:grid-cols-1 max-[1180px]:overflow-y-auto">
-          <section className="min-h-0 flex flex-col gap-2 overflow-hidden">
+      <main className="flex-1 p-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_390px] gap-2 items-start max-[1180px]:grid-cols-1">
+          <section className="min-w-0 flex flex-col gap-2">
             <MetricCharts />
             <IntelPanel />
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ServiceTable />
-            </div>
+            <ServiceTable />
           </section>
 
-          <aside className="min-h-0 overflow-hidden">
+          <aside className="min-w-0 h-[calc(100vh-76px)] sticky top-2 overflow-hidden max-[1180px]:static max-[1180px]:h-[680px]">
             <EventStream />
           </aside>
         </div>

@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { aggregate } from '../lib/agg'
+import { WS_URL } from '../lib/backend'
 
 const MAX_HIST = 60
-const WS_URL   = `ws://${location.hostname}:8080/ws`
 
 const INIT_HIST = { rps: [], lat: [], queue: [], rho: [], risk: [], burst: [] }
 

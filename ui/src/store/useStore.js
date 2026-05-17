@@ -1,8 +1,9 @@
+import { incidentFromEvent, shouldResolve, advanceStage, deriveSystemMode, mkId, LIFECYCLE_LABEL } from '../lib/incidents'
 import { create } from 'zustand'
 import { aggregate } from '../lib/agg'
-import { WS_URL } from '../lib/backend'
 
 const MAX_HIST = 60
+const WS_URL   = `ws://${location.hostname}:8080/ws`
 
 const INIT_HIST = { rps: [], lat: [], queue: [], rho: [], risk: [], burst: [] }
 
@@ -20,6 +21,11 @@ export const useStore = create((set, get) => ({
   prevBundles:  {},
   toasts:       [],
   pendingAction:null,
+  incidents:    [],   // persistent incident records
+  opsLog:       [],   // immutable operations timeline
+  systemMode:   'offline', // offline|normal|degraded|emergency
+  selectedInc:  null, // id of incident open in detail drawer
+  _incFP:       new Set(), // fingerprint dedup within window
   thresholds:   { latWarn:false, queueWarn:false, riskWarn:false, rhoWarn:false },
   prevStatus:   'waiting',
 
@@ -99,7 +105,58 @@ export const useStore = create((set, get) => ({
     if (agg) {
       get()._checkThresholds(agg)
       get()._checkStatus(agg.status)
+      get()._processIncidents(payload, agg)
     }
+  },
+
+  _processIncidents(payload, agg) {
+    const events = (payload.events || []).filter(e => e?.description && e.severity >= 1)
+    const dirs   = payload.directives || {}
+    const now    = Date.now()
+    const KEEP   = 5 * 60 * 1000 // keep resolved incidents 5 min
+
+    set(s => {
+      let incidents = [...s.incidents]
+      let opsLog    = [...s.opsLog]
+      let fp        = new Set(s._incFP)
+
+      // Create new incidents from events not yet seen this cycle
+      // Reset fingerprint window every 30 seconds (allow re-detection)
+      if (incidents.every(i => now - i.createdAt > 30000)) fp = new Set()
+
+      for (const e of events) {
+        const fprint = `${e.description}|${e.service_id}`
+        if (fp.has(fprint)) continue
+        fp.add(fprint)
+        const inc = incidentFromEvent(e, dirs)
+        incidents.push(inc)
+        opsLog.push({ id: mkId(), at: now, incidentId: inc.id, source: 'reasoning',
+          stage: inc.stage, text: inc.problem, service: inc.affectedServices[0] || null,
+          severity: inc.severity })
+      }
+
+      // Advance stages for open incidents
+      incidents = incidents.map(inc => {
+        const advanced = advanceStage(inc, agg)
+        if (advanced.stage !== inc.stage) {
+          opsLog.push({ id: mkId(), at: now, incidentId: inc.id, source: 'control',
+            stage: advanced.stage, text: `${inc.affectedServices[0] || 'System'}: ${LIFECYCLE_LABEL[advanced.stage]}`,
+            service: inc.affectedServices[0] || null, severity: inc.severity })
+        }
+        return advanced
+      })
+
+      // Prune resolved incidents older than KEEP, keep max 50
+      incidents = incidents
+        .filter(i => !['resolved','failed','overridden'].includes(i.stage) || now - i.resolvedAt < KEEP)
+        .slice(-50)
+
+      // Keep ops log last 200 entries
+      opsLog = opsLog.slice(-200)
+
+      const systemMode = deriveSystemMode(agg, incidents)
+      return { incidents, opsLog, systemMode, _incFP: fp }
+    })
   },
 
   _checkThresholds(agg) {
@@ -148,6 +205,35 @@ export const useStore = create((set, get) => ({
     const id  = `${Date.now()}-${Math.random()}`
     set(s => ({ toasts: [...s.toasts, { id, type, title, msg, duration }] }))
     setTimeout(() => get().removeToast(id), duration + 400)
+  },
+
+  selectIncident(id) { set({ selectedInc: id }) },
+  closeIncident()   { set({ selectedInc: null }) },
+
+  overrideIncident(id, note) {
+    const now = Date.now()
+    set(s => {
+      const incidents = s.incidents.map(i => i.id !== id ? i : {
+        ...i, stage: 'overridden', humanOverride: true, updatedAt: now, resolvedAt: now,
+        entries: [...i.entries, { at: now, stage: 'overridden', note: note || 'Operator override', source: 'human' }]
+      })
+      const opsLog = [...s.opsLog, {
+        id: mkId(), at: now, incidentId: id, source: 'human',
+        stage: 'overridden', text: note || 'Operator override applied', service: null, severity: 'info'
+      }]
+      return { incidents, opsLog }
+    })
+    get().addToast('info', 'Override Applied', note || 'Incident marked as overridden by operator', 4000)
+  },
+
+  logHumanAction(text, service, severity) {
+    const now = Date.now()
+    set(s => ({
+      opsLog: [...s.opsLog.slice(-199), {
+        id: mkId(), at: now, incidentId: null, source: 'human',
+        stage: 'overridden', text, service: service || null, severity: severity || 'info'
+      }]
+    }))
   },
 
   removeToast(id) {

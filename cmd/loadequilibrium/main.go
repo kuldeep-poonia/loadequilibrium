@@ -13,6 +13,7 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator/backends"
 	"github.com/loadequilibrium/loadequilibrium/internal/api"
+	"github.com/loadequilibrium/loadequilibrium/internal/collector"
 	"github.com/loadequilibrium/loadequilibrium/internal/config"
 	"github.com/loadequilibrium/loadequilibrium/internal/persistence"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
@@ -23,14 +24,12 @@ import (
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
-	log.Println("[loadequilibrium] starting - VER_2.2_SYNC_CHECK")
-	time.Sleep(3 * time.Second)
+	log.Println("[loadequilibrium] starting")
 
 	cfg := config.Load()
 
 	store := telemetry.NewStore(cfg.RingBufferDepth, cfg.MaxServices, cfg.StaleServiceAge)
 	hub := streaming.NewHub()
-	// MaxStreamClients is wired inside runtime.New via hub.SetMaxClients — no action needed here.
 
 	var pw *persistence.Writer
 	if cfg.DatabaseURL != "" {
@@ -66,7 +65,6 @@ func main() {
 
 	orch := runtime.New(cfg, store, hub, pw, act, scenarios)
 
-	// Now create headless api server with full backend references
 	srv := api.NewServer(store, hub, cfg.IngestToken)
 	srv.SetOrchestrator(orch)
 	srv.SetActuator(act)
@@ -96,6 +94,12 @@ func main() {
 		}
 	}()
 
+	// ── Embedded collector ────────────────────────────────────────────────────
+	// Discovers Docker containers labelled le.enable=true on the Docker socket,
+	// scrapes their /metrics endpoints, and POSTs to our own ingest API.
+	// Runs as a goroutine inside the same process — no separate container needed.
+	go startEmbeddedCollector(ctx, cfg.ListenAddr, cfg.IngestToken)
+
 	<-ctx.Done()
 	log.Println("[loadequilibrium] shutting down")
 
@@ -106,6 +110,38 @@ func main() {
 	pw.Close() // Writer.Close() is nil-safe
 
 	log.Println("[loadequilibrium] exit")
+}
+
+// startEmbeddedCollector starts the Docker-socket-based collector inside this
+// process. It overrides IngestURL to localhost so there is no network hop.
+// The collector's IngestClient has built-in retry/backoff, so the brief window
+// before the HTTP server is ready is handled automatically.
+func startEmbeddedCollector(ctx context.Context, listenAddr, ingestToken string) {
+	collCfg := collector.LoadConfig()
+
+	// Point at ourselves — listenAddr is ":8080", so "http://127.0.0.1:8080"
+	collCfg.IngestURL = "http://127.0.0.1" + listenAddr + "/api/v1/ingest"
+	collCfg.IngestToken = ingestToken
+
+	// Small grace period: let the HTTP listener bind before the first scrape
+	// batch arrives. The IngestClient retries on failure so this is a soft guard.
+	select {
+	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
+		return
+	}
+
+	coll, err := collector.New(collCfg)
+	if err != nil {
+		// Docker socket not available (e.g. running outside Docker).
+		// This is not fatal — the user can still push metrics via the ingest API
+		// using collector.py or any Prometheus-compatible push method.
+		log.Printf("[collector] disabled (Docker socket unavailable): %v", err)
+		return
+	}
+
+	log.Printf("[collector] embedded collector started — watching Docker socket for le.enable=true labels")
+	coll.Run(ctx) // blocks until ctx is cancelled
 }
 
 func actuatorHTTPServices(raw string) []string {

@@ -1,164 +1,73 @@
+
+
 services:
-
-  #  Core control plane ──
-  loadequilibrium:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      LISTEN_ADDR: ":8080"
-      TICK_INTERVAL: "2s"
-      TICK_DEADLINE: "1800ms"
-      RING_BUFFER_DEPTH: "300"
-      MAX_SERVICES: "200"
-      STALE_SERVICE_AGE: "5m"
-      SIM_BUDGET: "45ms"
-      SIM_HORIZON_MS: "60000"
-      SIM_SHOCK_FACTOR: "2.0"
-      UTILISATION_SETPOINT: "0.70"
-      COLLAPSE_THRESHOLD: "0.90"
-      WINDOW_FRACTION: "0.10"
-      EWMA_FAST_ALPHA: "0.30"
-      EWMA_SLOW_ALPHA: "0.10"
-      SPIKE_Z_SCORE: "3.0"
-      INGEST_TOKEN: "${INGEST_TOKEN:-changeme-set-in-production}"
-      DATABASE_URL: "${DATABASE_URL:-postgres://le:le@postgres:5432/le?sslmode=disable}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - internal
-
-  #  Browser UI
-  ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    ports:
-      - "5173:80"
-    depends_on:
-      loadequilibrium:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - internal
-
-  #  Automatic telemetry collector 
-  le-collector:
-    build:
-      context: .
-      dockerfile: Dockerfile.collector
-    ports:
-      - "9091:9091"
-    environment:
-      LE_COLLECTOR_LISTEN_ADDR: ":9091"
-      DOCKER_HOST: "unix:///var/run/docker.sock"
-      LE_INGEST_URL: "http://loadequilibrium:8080/api/v1/ingest"
-      INGEST_TOKEN: "${INGEST_TOKEN:-changeme-set-in-production}"
-      LE_DISCOVERY_INTERVAL: "15s"
-      LE_SCRAPE_INTERVAL: "2s"
-      LE_SCRAPE_TIMEOUT: "1500ms"
-      LE_BATCH_MAX_POINTS: "128"
-      LE_BATCH_MAX_AGE: "2s"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      loadequilibrium:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9091/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - internal
-
-  #  Postgres 
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: le
-      POSTGRES_PASSWORD: le
-      POSTGRES_DB: le
-      POSTGRES_HOST_AUTH_METHOD: md5
-    command: >
-      postgres
-      -c password_encryption=md5
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U le"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-    networks:
-      - internal
 
   
 
-  #  Prometheus ─
-  prometheus:
-    image: prom/prometheus:v2.53.0
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --web.enable-lifecycle
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - promdata:/prometheus
+  loadequilibrium:
+    image: ghcr.io/your-org/loadequilibrium:latest
+    # To build locally instead:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     ports:
-      - "9090:9090"
-    depends_on:
-      loadequilibrium:
-        condition: service_healthy
-      le-collector:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - internal
-
-  #  Grafana ─
-  grafana:
-    image: grafana/grafana:10.4.0
+      - "${LE_PORT:-8080}:8080"
+    volumes:
+      # Docker socket — required for auto-discovery of your services
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: changeme
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadequilibrium-dashboard.json
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-    volumes:
-      - ./monitoring/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
-      - ./monitoring/grafana/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
-      - ./monitoring/grafana/loadequilibrium-dashboard.json:/var/lib/grafana/dashboards/loadequilibrium-dashboard.json:ro
-      - grafanadata:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
+      LISTEN_ADDR: ":8080"
+
+      # ── Security ───
+      # Token required on all POST /api/v1/ingest calls.
+      # Leave empty to disable auth (fine for private networks).
+      INGEST_TOKEN: "${INGEST_TOKEN:-}"
+
+      # ── Persistence (optional) 
+      # Without DATABASE_URL the engine runs fully in-memory.
+      # Data is lost on restart but the system works perfectly.
+      # To enable: set DATABASE_URL=postgres://user:pass@host:5432/db
+      DATABASE_URL: "${DATABASE_URL:-}"
+
+      # ── Tuning (all optional — defaults are sensible) 
+      TICK_INTERVAL:         "${TICK_INTERVAL:-2s}"
+      UTILISATION_SETPOINT:  "${UTILISATION_SETPOINT:-0.70}"
+      COLLAPSE_THRESHOLD:    "${COLLAPSE_THRESHOLD:-0.90}"
+      MAX_SERVICES:          "${MAX_SERVICES:-200}"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 15s
     restart: unless-stopped
-    networks:
-      - internal
 
-volumes:
-  pgdata:
-  promdata:
-  grafanadata:
+  # ── Optional: PostgreSQL for persistent snapshot history ─────────
+  # Uncomment this block and set DATABASE_URL above to enable.
+  # Without it, the engine runs in-memory (perfectly functional).
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER:     le
+  #     POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-le}"
+  #     POSTGRES_DB:       le
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U le"]
+  #     interval: 5s
+  #     timeout:  3s
+  #     retries:  10
+  #   restart: unless-stopped
+  #
+  # Then set:
+  # DATABASE_URL: "postgres://le:${POSTGRES_PASSWORD:-le}@postgres:5432/le?sslmode=disable"
+  # And add to loadequilibrium:
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
 
-networks:
-  internal:
-    driver: bridge
+# volumes:
+#   pgdata:

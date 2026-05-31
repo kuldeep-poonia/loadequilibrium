@@ -1,9 +1,9 @@
 import { incidentFromEvent, shouldResolve, advanceStage, deriveSystemMode, mkId, LIFECYCLE_LABEL } from '../lib/incidents'
 import { create } from 'zustand'
 import { aggregate } from '../lib/agg'
+import { WS_URL } from '../lib/backend'
 
 const MAX_HIST = 60
-const WS_URL   = `ws://${location.hostname}:8080/ws`
 
 const INIT_HIST = { rps: [], lat: [], queue: [], rho: [], risk: [], burst: [] }
 
@@ -42,7 +42,7 @@ export const useStore = create((set, get) => ({
 
     ws.onopen = () => {
       set({ connected: true })
-      get().addToast('info', 'Connected', `Live feed from ${WS_URL}`, 3000)
+      get().addToast('info', 'Connected', `Live feed active`, 3000)
       get()._resetWatchdog()
     }
 

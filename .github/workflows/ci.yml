@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags:     ['v*.*.*']
   pull_request:
     branches: [main]
 
@@ -11,11 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.22"
+  GO_VERSION:    "1.22"
+  REGISTRY:      ghcr.io
+  IMAGE_NAME:    ${{ github.repository }}   # e.g. your-org/loadequilibrium
 
 jobs:
 
-  # ── 1. Lint 
+  # ── 1. Lint ────────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -42,7 +45,7 @@ jobs:
             exit 1
           fi
 
-  # ── 2. Unit & integration tests 
+  # ── 2. Unit & integration tests ───────────────────────────────
   unit-test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -73,7 +76,7 @@ jobs:
           path: coverage.out
           retention-days: 7
 
-  # ── 3. System tests 
+  # ── 3. System tests ───────────────────────────────────────────
   system-test:
     name: System Tests (Autopilot)
     runs-on: ubuntu-latest
@@ -131,23 +134,58 @@ jobs:
           path: system_test_report.json
           retention-days: 30
 
-  # ── 4. Docker build check 
-  # Builds both images to prove they compile correctly.
-  # Does NOT push anywhere — no registry, no secrets needed.
-  docker-build:
-    name: Docker Build Check
+  # ── 4. Build & push Docker image ─────────────────────────────
+  # Builds the single unified image (backend + UI + embedded collector).
+  # Pushes to ghcr.io on: main branch commits, and version tags (v*.*.*).
+  # Pull requests get a build-only check (no push).
+  docker:
+    name: Docker Build & Push
     runs-on: ubuntu-latest
     needs: [unit-test, system-test]
+    permissions:
+      contents: read
+      packages: write   # needed to push to ghcr.io
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build backend image
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derive image tags:
+      #   main branch  → ghcr.io/your-org/loadequilibrium:latest
+      #   v1.2.3 tag   → ghcr.io/your-org/loadequilibrium:1.2.3
+      #                   ghcr.io/your-org/loadequilibrium:1.2
+      #                   ghcr.io/your-org/loadequilibrium:1
+      #                   ghcr.io/your-org/loadequilibrium:latest
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          tags: loadequilibrium:ci
-
-      
+          dockerfile: Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags:   ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          # Multi-platform: builds for both x86_64 and ARM (Apple Silicon, Raspberry Pi, AWS Graviton)
+          platforms: linux/amd64,linux/arm64

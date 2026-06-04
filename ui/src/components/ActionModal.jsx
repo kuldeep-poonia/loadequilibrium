@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/useStore'
 import { pct, ms, n } from '../lib/fmt'
+import { setActuation, setPolicy, triggerRollout, runStressTest } from '../lib/api'
 
 export default function ActionModal() {
   const action       = useStore(s => s.pendingAction)
@@ -26,17 +27,40 @@ export default function ActionModal() {
 
   const handleApply = async () => {
     setLoading(true)
-    await new Promise(r => setTimeout(r, 900))
-    setLoading(false)
-    setApplied(true)
-    addToast('info', '⚙ Action Dispatched', `${action.title} — engine applies on next tick`)
-    setTimeout(() => {
-      addToast('info', '🔄 Stabilising', 'Engine recalculating control surface — watch metrics')
-    }, 3000)
-    setTimeout(() => {
-      clearPending()
-      setApplied(false)
-    }, 1400)
+    try {
+      const title = (action.title || '').toLowerCase()
+      const svc   = action.svc || ''
+
+      if (title.includes('scale up') || title.includes('scale down')) {
+        // Scale directive: trigger a rollout so the engine re-evaluates with urgency
+        await triggerRollout(10)
+      } else if (title.includes('freeze') || title.includes('disable')) {
+        await setActuation(false)
+      } else if (title.includes('enable') || title.includes('resume')) {
+        await setActuation(true)
+      } else if (title.includes('safe mode') || title.includes('conservative')) {
+        await setPolicy('conservative')
+      } else if (title.includes('balanced') || title.includes('reset')) {
+        await setPolicy('balanced')
+      } else {
+        // Default: trigger an intelligence rollout so the engine recalculates urgently
+        await triggerRollout(10)
+      }
+
+      setLoading(false)
+      setApplied(true)
+      addToast('info', '⚙ Action Dispatched', `${action.title} — engine applies on next tick`)
+      setTimeout(() => {
+        addToast('info', '🔄 Stabilising', 'Engine recalculating control surface — watch metrics')
+      }, 3000)
+      setTimeout(() => {
+        clearPending()
+        setApplied(false)
+      }, 1400)
+    } catch (err) {
+      setLoading(false)
+      addToast('crit', 'Dispatch Failed', `API error: ${err.message || 'check connection'}`, 8000)
+    }
   }
 
   const handleDeny = () => {

@@ -1,39 +1,58 @@
-
+## ══════════════════════════════════════════════════════════════════════════════
+## LoadEquilibrium — docker-compose.yml (hardened)
+##
+## BEFORE STARTING: copy .env.example to .env and fill in real values.
+##   cp .env.example .env && nano .env
+##
+## GENERATE STRONG TOKENS (run once):
+##   openssl rand -hex 32   # for INGEST_TOKEN
+##   openssl rand -hex 32   # for CONTROL_TOKEN (different value!)
+##   openssl rand -hex 32   # for DASHBOARD_TOKEN
+##   openssl rand -hex 32   # for POSTGRES_PASSWORD
+##   openssl rand -hex 16   # for GRAFANA_ADMIN_PASSWORD
+## ══════════════════════════════════════════════════════════════════════════════
 
 services:
 
-  
-
+  # ── LoadEquilibrium control plane ─────────────────────────────────────────
   loadequilibrium:
     image: ghcr.io/your-org/loadequilibrium:latest
-    # To build locally instead:
+    # To build locally: uncomment and remove image: line above
     # build:
     #   context: .
     #   dockerfile: Dockerfile
     ports:
       - "${LE_PORT:-8080}:8080"
-    volumes:
-      # Docker socket — required for auto-discovery of your services
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       LISTEN_ADDR: ":8080"
 
-      # ── Security ───
-      # Token required on all POST /api/v1/ingest calls.
-      # Leave empty to disable auth (fine for private networks).
-      INGEST_TOKEN: "${INGEST_TOKEN:-}"
+      # ── Security tokens (REQUIRED — no defaults) ────────────────────────────
+      # Never commit real values. Always load from .env or a secrets manager.
+      INGEST_TOKEN:    "${INGEST_TOKEN:?INGEST_TOKEN must be set — run: openssl rand -hex 32}"
+      CONTROL_TOKEN:   "${CONTROL_TOKEN:?CONTROL_TOKEN must be set — must differ from INGEST_TOKEN}"
+      DASHBOARD_TOKEN: "${DASHBOARD_TOKEN:-}"    # optional — set for internet-accessible deployments
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"    # e.g. https://dashboard.example.com
 
-      # ── Persistence (optional) 
-      # Without DATABASE_URL the engine runs fully in-memory.
-      # Data is lost on restart but the system works perfectly.
-      # To enable: set DATABASE_URL=postgres://user:pass@host:5432/db
+      # ── Rate limits ─────────────────────────────────────────────────────────
+      INGEST_RATE_LIMIT_RPS:  "${INGEST_RATE_LIMIT_RPS:-5000}"
+      CONTROL_RATE_LIMIT_RPS: "${CONTROL_RATE_LIMIT_RPS:-10}"
+
+      # ── Persistence ─────────────────────────────────────────────────────────
       DATABASE_URL: "${DATABASE_URL:-}"
 
-      # ── Tuning (all optional — defaults are sensible) 
-      TICK_INTERVAL:         "${TICK_INTERVAL:-2s}"
-      UTILISATION_SETPOINT:  "${UTILISATION_SETPOINT:-0.70}"
-      COLLAPSE_THRESHOLD:    "${COLLAPSE_THRESHOLD:-0.90}"
-      MAX_SERVICES:          "${MAX_SERVICES:-200}"
+      # ── Engine tuning ───────────────────────────────────────────────────────
+      TICK_INTERVAL:        "${TICK_INTERVAL:-2s}"
+      TICK_DEADLINE:        "1800ms"
+      RING_BUFFER_DEPTH:    "${RING_BUFFER_DEPTH:-150}"
+      MAX_SERVICES:         "${MAX_SERVICES:-2000}"
+      STALE_SERVICE_AGE:    "5m"
+      UTILISATION_SETPOINT: "${UTILISATION_SETPOINT:-0.70}"
+      COLLAPSE_THRESHOLD:   "0.90"
+      SIM_BUDGET:           "45ms"
+
+    volumes:
+      # Docker socket for embedded collector — read-only
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
@@ -41,33 +60,134 @@ services:
       timeout:  5s
       retries:  5
       start_period: 15s
+
+    security_opt:
+      - no-new-privileges:true   # process cannot gain new capabilities after start
+
+    # Read-only filesystem: prevents an exploited container from modifying its own binary.
+    # The /tmp tmpfs mount provides a writable scratch space if needed.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    # Drop ALL Linux capabilities. The binary needs none — it is a pure Go HTTP server.
+    # Re-add specific caps only if a future feature requires them.
+    cap_drop:
+      - ALL
+
     restart: unless-stopped
+    networks:
+      - internal
 
-  # ── Optional: PostgreSQL for persistent snapshot history ─────────
-  # Uncomment this block and set DATABASE_URL above to enable.
-  # Without it, the engine runs in-memory (perfectly functional).
-  #
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_USER:     le
-  #     POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-le}"
-  #     POSTGRES_DB:       le
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U le"]
-  #     interval: 5s
-  #     timeout:  3s
-  #     retries:  10
-  #   restart: unless-stopped
-  #
-  # Then set:
-  # DATABASE_URL: "postgres://le:${POSTGRES_PASSWORD:-le}@postgres:5432/le?sslmode=disable"
-  # And add to loadequilibrium:
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  # Optional: only needed for persistent snapshot history.
+  # Comment out this service and DATABASE_URL above to run fully in-memory.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     "${POSTGRES_USER:-le}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — run: openssl rand -hex 32}"
+      POSTGRES_DB:       "${POSTGRES_DB:-le}"
+    command: >
+      postgres
+      -c password_encryption=scram-sha-256
+      -c ssl=off
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_failed_authentications=on
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No port exposed to host — only reachable via the internal network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-le}"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    restart: unless-stopped
+    networks:
+      - internal
 
-# volumes:
-#   pgdata:
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+      # Disable admin API unless you need it
+      # - --web.enable-admin-api
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    # No port exposed to host — access via port-forward or Grafana proxy only
+    # Uncomment to expose: ports: ["9090:9090"]
+    depends_on:
+      loadequilibrium:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER:          "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD:      "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}"
+      GF_SECURITY_SECRET_KEY:          "${GRAFANA_SECRET_KEY:?GRAFANA_SECRET_KEY must be set — run: openssl rand -hex 32}"
+      GF_USERS_ALLOW_SIGN_UP:          "false"
+      GF_USERS_ALLOW_ORG_CREATE:       "false"
+      GF_AUTH_ANONYMOUS_ENABLED:       "false"
+      GF_AUTH_BASIC_ENABLED:           "true"
+      GF_ANALYTICS_REPORTING_ENABLED:  "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES:  "false"
+      GF_SECURITY_DISABLE_GRAVATAR:    "true"
+      # Prevent embedding Grafana in iframes (clickjacking protection)
+      GF_SECURITY_ALLOW_EMBEDDING:     "false"
+      # Cookie security
+      GF_SECURITY_COOKIE_SECURE:       "${GF_SECURITY_COOKIE_SECURE:-false}"
+      GF_SECURITY_COOKIE_SAMESITE:     "lax"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadequilibrium-dashboard.json
+    volumes:
+      - ./monitoring/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./monitoring/grafana/loadequilibrium-dashboard.json:/var/lib/grafana/dashboards/loadequilibrium-dashboard.json:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:
+
+networks:
+  # internal: isolated bridge network. Only the loadequilibrium port (8080)
+  # and grafana port (3000) are mapped to the host. Postgres and Prometheus
+  # are not reachable from outside the Docker network.
+  internal:
+    driver: bridge
+    internal: false   # set to true for air-gapped deployments

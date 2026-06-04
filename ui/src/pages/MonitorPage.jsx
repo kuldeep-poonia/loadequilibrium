@@ -1,5 +1,5 @@
 import EventStream from '../components/EventStream'
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { serviceName, serviceDesc, ZONE_TEXT, METRIC_HELP, isTestService } from '../lib/names'
 import { LIFECYCLE_COLOR, LIFECYCLE_LABEL, SOURCE_LABEL, SOURCE_COLOR } from '../lib/incidents'
@@ -7,6 +7,8 @@ import { n, pct, rho as fmtRho, ms, ts } from '../lib/fmt'
 import { safe } from '../lib/fmt'
 import Charts from '../components/MetricCharts'
 import { motion, AnimatePresence } from 'framer-motion'
+import IntelPanel from '../components/IntelRow'
+import ServiceTable from '../components/ServiceTable'
 
 // ── Service health cards ──────────────────────────────────────────
 function ServiceCard({ svcId, bundle, prevBundle }) {
@@ -341,6 +343,15 @@ export default function MonitorPage() {
         {/* Live charts */}
         <Charts />
 
+        {/* Intelligence panel: active incidents + causal chain + recommended actions */}
+        {/* This surfaces the reasoning engine output that was computed but never displayed */}
+        <div>
+          <h2 className="font-cond text-[11px] font-bold tracking-wider text-muted uppercase mb-3">
+            Intelligence — Active Incidents & Recommended Actions
+          </h2>
+          <IntelPanel />
+        </div>
+
         {/* Service cards */}
         {svcs.length > 0 && (
           <div>
@@ -357,6 +368,16 @@ export default function MonitorPage() {
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Service table: compact tabular view of all services with key metrics */}
+        {svcs.length > 0 && (
+          <div>
+            <h2 className="font-cond text-[11px] font-bold tracking-wider text-muted uppercase mb-3">
+              Service Health Table
+            </h2>
+            <ServiceTable />
           </div>
         )}
 

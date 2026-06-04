@@ -1,9 +1,15 @@
 import { incidentFromEvent, shouldResolve, advanceStage, deriveSystemMode, mkId, LIFECYCLE_LABEL } from '../lib/incidents'
 import { create } from 'zustand'
 import { aggregate } from '../lib/agg'
-import { WS_URL } from '../lib/backend'
 
 const MAX_HIST = 60
+
+// Derive WebSocket URL from current page location so it works on any port and any host.
+// - In production (Go binary serving UI on :8080): connects to same host+port
+// - In Vite dev mode: vite.config.js proxy forwards /ws to backend
+// - No hardcoded port - changing LE_PORT env var works automatically
+const _proto  = location.protocol === 'https:' ? 'wss:' : 'ws:'
+const WS_URL  = `${_proto}//${location.host}/ws`
 
 const INIT_HIST = { rps: [], lat: [], queue: [], rho: [], risk: [], burst: [] }
 
@@ -19,6 +25,7 @@ export const useStore = create((set, get) => ({
   agg:          null,
   history:      INIT_HIST,
   prevBundles:  {},
+  actuationEnabled: true,  // synced from backend control_plane.actuation_enabled on each tick
   toasts:       [],
   pendingAction:null,
   incidents:    [],   // persistent incident records
@@ -42,7 +49,7 @@ export const useStore = create((set, get) => ({
 
     ws.onopen = () => {
       set({ connected: true })
-      get().addToast('info', 'Connected', `Live feed active`, 3000)
+      get().addToast('info', 'Connected', `Live feed from ${WS_URL}`, 3000)
       get()._resetWatchdog()
     }
 
@@ -88,6 +95,9 @@ export const useStore = create((set, get) => ({
     const bundles = payload.bundles || {}
     const agg     = aggregate(bundles, payload)
     const tick    = payload.control_plane?.tick ?? null
+    // Sync autopilot enabled state from the backend truth (control_plane.actuation_enabled)
+    // so the UI always reflects reality even after a backend restart or API call from another client.
+    const actuationEnabled = payload.control_plane?.actuation_enabled ?? true
 
     set(s => {
       const h = s.history
@@ -99,7 +109,7 @@ export const useStore = create((set, get) => ({
         risk:  push(h.risk,  agg.maxRisk),
         burst: push(h.burst, agg.maxBurst),
       } : h
-      return { payload, agg, tick, history: newHist, prevBundles: s.payload?.bundles || {} }
+      return { payload, agg, tick, actuationEnabled, history: newHist, prevBundles: s.payload?.bundles || {} }
     })
 
     if (agg) {

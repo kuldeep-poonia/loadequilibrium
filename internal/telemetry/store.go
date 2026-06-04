@@ -3,52 +3,67 @@ package telemetry
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
+// numShards is the number of independent lock domains.
+// Must be a power of two so shardFor() can use bitwise AND.
+// 64 shards → lock contention drops to ~1/64 of a single-mutex design.
+const numShards = 64
+
+type storeShard struct {
+	mu       sync.RWMutex
+	buffers  map[string]*RingBuffer
+	lastSeen map[string]time.Time
+}
+
+// Store is a sharded, concurrent telemetry store.
+// Each service is assigned to a shard by FNV-1a hash of its service ID.
+// Writes to different services never contend. AllWindows() locks shards
+// one at a time (never all at once) so ingest is only blocked for the
+// duration of a single shard snapshot, not the entire window computation.
 type Store struct {
-	mu            sync.RWMutex
-	buffers       map[string]*RingBuffer
-	lastSeen      map[string]time.Time
-	appliedScales map[string]float64 // last control directive scale per service
+	shards        [numShards]storeShard
+	appliedScales sync.Map // map[string]float64 — no lock needed
 	bufCap        int
 	maxSvc        int
+	svcCount      atomic.Int64 // fast path: admit check without locking all shards
 	staleAge      time.Duration
 }
 
-// SetAppliedScale records the last scale directive issued for a service.
-// Called by the orchestrator after directives are computed each tick.
-// The value is injected into ServiceWindow.AppliedScale so Prometheus
-// and the queueing engine can use the actual applied scale factor.
-func (s *Store) SetAppliedScale(serviceID string, scale float64) {
-	s.mu.Lock()
-	if s.appliedScales == nil {
-		s.appliedScales = make(map[string]float64)
+// shardFor maps a service ID to a shard index using FNV-1a (no import needed).
+func shardFor(serviceID string) int {
+	h := uint32(2166136261)
+	for i := 0; i < len(serviceID); i++ {
+		h ^= uint32(serviceID[i])
+		h *= 16777619
 	}
-	s.appliedScales[serviceID] = scale
-	s.mu.Unlock()
+	return int(h & (numShards - 1))
 }
+
+func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
+	s := &Store{
+		bufCap:   bufferCapacity,
+		maxSvc:   maxServices,
+		staleAge: staleAge,
+	}
+	for i := range s.shards {
+		s.shards[i].buffers = make(map[string]*RingBuffer, maxServices/numShards+1)
+		s.shards[i].lastSeen = make(map[string]time.Time, maxServices/numShards+1)
+	}
+	return s
+}
+
+func (s *Store) StaleAge() time.Duration { return s.staleAge }
+
+// ── sanitize ─────────────────────────────────────────────────────────────────
 
 func finiteOrZero(v float64) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
 	}
 	return v
-}
-
-func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
-	return &Store{
-		buffers:  make(map[string]*RingBuffer),
-		lastSeen: make(map[string]time.Time),
-		bufCap:   bufferCapacity,
-		maxSvc:   maxServices,
-		staleAge: staleAge,
-	}
-}
-
-// StaleAge returns the prune threshold configured for this Store.
-func (s *Store) StaleAge() time.Duration {
-	return s.staleAge
 }
 
 func sanitizePoint(p *MetricPoint) bool {
@@ -66,10 +81,8 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.RequestRate < 0 {
 		p.RequestRate = 0
 	}
-	// Hard ceiling: chaosgen out_of_range_rate injects finite but huge values (e.g. 1e15)
-	// that pass NaN/Inf check, corrupt window averages, and compound via EWMA momentum.
-	const maxReasonableRPS = 10_000_000.0      // 10M req/s ceiling
-	const maxReasonableLatencyMs = 3_600_000.0 // 1 hour ceiling
+	const maxReasonableRPS = 10_000_000.0
+	const maxReasonableLatencyMs = 3_600_000.0
 	if p.RequestRate > maxReasonableRPS {
 		p.RequestRate = maxReasonableRPS
 	}
@@ -91,7 +104,6 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.ErrorRate > 1 {
 		p.ErrorRate = 1
 	}
-	const minLatencyMs = 0.1
 	if p.Latency.Mean < 0 {
 		p.Latency.Mean = 0
 	}
@@ -104,8 +116,7 @@ func sanitizePoint(p *MetricPoint) bool {
 	if p.Latency.P99 < 0 {
 		p.Latency.P99 = 0
 	}
-	// A mean of 0 with any other latency percentile set is suspicious but legal.
-	// We only floor when ALL are zero to avoid masking real ultra-fast services.
+	const minLatencyMs = 0.1
 	if p.Latency.Mean == 0 && p.Latency.P50 == 0 && p.Latency.P95 == 0 {
 		p.Latency.Mean = minLatencyMs
 	}
@@ -118,7 +129,11 @@ func sanitizePoint(p *MetricPoint) bool {
 	return true
 }
 
+// ── Ingest ────────────────────────────────────────────────────────────────────
+
 // Ingest appends a MetricPoint. New services are admitted up to maxSvc.
+// Lock scope: one shard only. Concurrent writes to different services
+// never serialise against each other.
 func (s *Store) Ingest(p *MetricPoint) {
 	if !sanitizePoint(p) {
 		return
@@ -127,68 +142,91 @@ func (s *Store) Ingest(p *MetricPoint) {
 		p.Timestamp = time.Now()
 	}
 
-	s.mu.Lock()
-	buf, ok := s.buffers[p.ServiceID]
+	sh := &s.shards[shardFor(p.ServiceID)]
+
+	sh.mu.Lock()
+	buf, ok := sh.buffers[p.ServiceID]
 	if !ok {
-		if len(s.buffers) >= s.maxSvc {
-			s.mu.Unlock()
+		// Admission check: count across all shards via atomic — no cross-shard lock.
+		if s.svcCount.Load() >= int64(s.maxSvc) {
+			sh.mu.Unlock()
 			return
 		}
 		buf = NewRingBuffer(s.bufCap)
-		s.buffers[p.ServiceID] = buf
+		sh.buffers[p.ServiceID] = buf
+		s.svcCount.Add(1)
 	}
-	s.lastSeen[p.ServiceID] = p.Timestamp
-	s.mu.Unlock()
+	sh.lastSeen[p.ServiceID] = p.Timestamp
+	sh.mu.Unlock()
 
-	// Push uses the RingBuffer's internal lock, not the Store's lock
+	// RingBuffer.Push has its own per-buffer lock. No shard lock held here.
 	buf.Push(p)
 }
 
-// Prune removes services not seen within staleAge. Call from tick loop.
+// ── SetAppliedScale ───────────────────────────────────────────────────────────
+
+// SetAppliedScale records the last scale directive for a service.
+// Uses sync.Map — zero mutex overhead on the hot read path.
+func (s *Store) SetAppliedScale(serviceID string, scale float64) {
+	s.appliedScales.Store(serviceID, scale)
+}
+
+// ── Prune ─────────────────────────────────────────────────────────────────────
+
+// Prune removes stale services shard by shard. Holds one shard lock at a time.
 func (s *Store) Prune(now time.Time) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var pruned []string
-	for id, t := range s.lastSeen {
-		if now.Sub(t) > s.staleAge {
-			delete(s.buffers, id)
-			delete(s.lastSeen, id)
-			pruned = append(pruned, id)
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		for id, t := range sh.lastSeen {
+			if now.Sub(t) > s.staleAge {
+				delete(sh.buffers, id)
+				delete(sh.lastSeen, id)
+				s.svcCount.Add(-1)
+				pruned = append(pruned, id)
+			}
 		}
+		sh.mu.Unlock()
 	}
 	return pruned
 }
 
-// HasServices returns true if the store has any buffered services.
-// Zero allocation, O(1) — safe to call in hot paths (e.g. adaptInterval).
+// ── HasServices ───────────────────────────────────────────────────────────────
+
+// HasServices is O(1), zero-allocation. Safe in hot paths.
 func (s *Store) HasServices() bool {
-	s.mu.RLock()
-	n := len(s.buffers)
-	s.mu.RUnlock()
-	return n > 0
+	return s.svcCount.Load() > 0
 }
 
+// ── ServiceIDs ────────────────────────────────────────────────────────────────
+
 func (s *Store) ServiceIDs() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids := make([]string, 0, len(s.buffers))
-	for id := range s.buffers {
-		ids = append(ids, id)
+	ids := make([]string, 0, int(s.svcCount.Load()))
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.RLock()
+		for id := range sh.buffers {
+			ids = append(ids, id)
+		}
+		sh.mu.RUnlock()
 	}
 	return ids
 }
 
+// ── Window ────────────────────────────────────────────────────────────────────
+
 // Window computes a ServiceWindow over the most recent n points.
-// Returns nil if the service is unknown or has no data.
-// freshnessCutoff: if the newest point is older than this, returns nil (stale).
 func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *ServiceWindow {
-	s.mu.RLock()
-	buf, ok := s.buffers[serviceID]
-	s.mu.RUnlock()
+	sh := &s.shards[shardFor(serviceID)]
+
+	sh.mu.RLock()
+	buf, ok := sh.buffers[serviceID]
+	sh.mu.RUnlock()
+
 	if !ok {
 		return nil
 	}
-
 	last := buf.Last()
 	if last.Timestamp.IsZero() {
 		return nil
@@ -196,47 +234,72 @@ func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *
 	if freshnessCutoff > 0 && time.Since(last.Timestamp) > freshnessCutoff {
 		return nil
 	}
-
 	points := buf.Snapshot(n)
 	if len(points) == 0 {
 		return nil
 	}
-
 	return computeWindow(serviceID, points)
 }
 
-// AllWindows returns windows for every known service.
+// ── AllWindows ────────────────────────────────────────────────────────────────
+
+// AllWindows computes windows for every known service.
+//
+// Optimization over the original: shard locks are held only to snapshot
+// buffer pointers (nanoseconds), not during computeWindow (microseconds).
+// Ingest() is blocked per shard only for pointer-copy duration, not for the
+// entire window computation loop. At 64 shards and 2000 services this
+// reduces mean ingest blocking time from ~O(N×computeWindow) to ~O(N/64×pointer).
 func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*ServiceWindow {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	type entry struct {
+		id  string
+		buf *RingBuffer
+	}
 
-	out := make(map[string]*ServiceWindow, len(s.buffers))
-	for id, buf := range s.buffers {
-		last := buf.Last()
-		if last.Timestamp.IsZero() {
-			continue
-		}
-		if freshnessCutoff > 0 && time.Since(last.Timestamp) > freshnessCutoff {
-			continue
-		}
+	total := int(s.svcCount.Load())
+	if total == 0 {
+		return map[string]*ServiceWindow{}
+	}
 
-		points := buf.Snapshot(n)
-		if len(points) == 0 {
-			continue
-		}
+	entries := make([]entry, 0, total)
+	now := time.Now()
 
-		w := computeWindow(id, points)
-		if w != nil {
-			if s.appliedScales != nil {
-				if scale, ok := s.appliedScales[id]; ok {
-					w.AppliedScale = scale
+	// Phase 1: snapshot buffer pointers — one shard at a time, lock held briefly.
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.RLock()
+		for id, buf := range sh.buffers {
+			if freshnessCutoff > 0 {
+				t, seen := sh.lastSeen[id]
+				if !seen || now.Sub(t) > freshnessCutoff {
+					continue
 				}
 			}
-			out[id] = w
+			entries = append(entries, entry{id, buf})
 		}
+		sh.mu.RUnlock()
+	}
+
+	// Phase 2: compute windows — no lock held at all.
+	out := make(map[string]*ServiceWindow, len(entries))
+	for _, e := range entries {
+		pts := e.buf.Snapshot(n) // RingBuffer has its own lock
+		if len(pts) == 0 {
+			continue
+		}
+		w := computeWindow(e.id, pts)
+		if w == nil {
+			continue
+		}
+		if v, ok := s.appliedScales.Load(e.id); ok {
+			w.AppliedScale = v.(float64)
+		}
+		out[e.id] = w
 	}
 	return out
 }
+
+// ── computeWindow ─────────────────────────────────────────────────────────────
 
 func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 	n := float64(len(pts))
@@ -275,7 +338,6 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 
 	last := pts[len(pts)-1]
 
-	// Compute meanReq and stdReq first — used by both inference and window.
 	meanReq := sumReq / n
 	var sumSqDiff float64
 	for _, p := range pts {
@@ -287,37 +349,27 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		stdReq = math.Sqrt(sumSqDiff / (n - 1))
 	}
 
-	// P99 latency inference: use Last→P95→Mean progression if P99 is absent.
 	lastP99 := last.Latency.P99
 	if lastP99 <= 0 && last.Latency.P95 > 0 {
-		// P99 ≈ P95 × 1.20 (heuristic from exponential tail shape)
 		lastP99 = last.Latency.P95 * 1.20
 	}
 	if lastP99 <= 0 && last.Latency.Mean > 0 {
-		// P99 ≈ Mean × 2.5 (exponential distribution approximation)
 		lastP99 = last.Latency.Mean * 2.5
 	}
 
-	// Active connections inference: when zero but request rate is non-zero,
-	// estimate from Little's Law: L ≈ λ × E[S] where E[S] ≈ mean latency.
 	meanConns := sumConns / n
 	if meanConns < 1.0 && meanReq > 0 && sumLat > 0 {
-		// E[conns] = λ × E[latency_sec] (Little's Law steady-state)
 		inferredConns := meanReq * (sumLat / n / 1000.0)
 		if inferredConns >= 1.0 {
 			meanConns = inferredConns
 		} else {
-			meanConns = 1.0 // floor — at least one connection when there is traffic
+			meanConns = 1.0
 		}
 	}
 
-	// Queue depth inference: when missing but utilisation is estimable.
-	// If MeanLatencyMs is significantly above a baseline (2× P50), queue is likely non-zero.
 	lastQueueDepth := float64(last.QueueDepth)
 	meanQueueDepth := sumQueue / n
 	if lastQueueDepth == 0 && last.Latency.P50 > 0 && last.Latency.Mean > last.Latency.P50*1.5 {
-		// Latency is inflated above median → queue is likely building.
-		// Estimate: excess latency fraction × mean active connections.
 		excessFrac := (last.Latency.Mean - last.Latency.P50) / last.Latency.Mean
 		lastQueueDepth = excessFrac * meanConns
 		if meanQueueDepth == 0 {
@@ -325,18 +377,14 @@ func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 		}
 	}
 
-	// Signal confidence: product of three quality dimensions.
-	// 1) Sample adequacy: saturates at 1.0 for ≥30 samples.
 	sampleConf := 1.0 - math.Exp(-float64(len(pts))/15.0)
-	// 2) Arrival stability: high CoV → lower confidence.
 	cov := 0.0
 	if meanReq > 0 {
 		cov = stdReq / meanReq
 	}
 	stabilityConf := math.Exp(-cov * 0.5)
-	// 3) Freshness: age since last observation relative to 2s nominal tick.
 	ageSec := time.Since(last.Timestamp).Seconds()
-	freshnessConf := math.Exp(-ageSec / 6.0) // half-life = ~4s
+	freshnessConf := math.Exp(-ageSec / 6.0)
 	confidence := sampleConf * stabilityConf * freshnessConf
 
 	quality := "good"

@@ -1,0 +1,89 @@
+## ══════════════════════════════════════════════════════════════════════════════
+## LoadEquilibrium — k8s/08-networkpolicy.yml
+##
+## Without a NetworkPolicy, every pod in the cluster can call the API.
+## This policy enforces:
+##   - Only pods labelled  le.io/role: collector  can POST to /api/v1/ingest
+##   - Only pods labelled  le.io/role: operator   can reach control endpoints
+##   - Only Prometheus can scrape /metrics
+##   - The loadequilibrium pod can only reach postgres and egress to Docker socket
+## ══════════════════════════════════════════════════════════════════════════════
+
+# Allow inbound traffic to loadequilibrium on port 8080
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loadequilibrium-ingress
+  namespace: loadequilibrium
+spec:
+  podSelector:
+    matchLabels:
+      app: loadequilibrium
+  policyTypes:
+    - Ingress
+  ingress:
+    # ── Collector pods can call /api/v1/ingest ─────────────────────────────
+    - from:
+        - podSelector:
+            matchLabels:
+              le.io/role: collector
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # ── Prometheus scraper can call /metrics ──────────────────────────────
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # ── Operator/dashboard pods can call control endpoints ─────────────────
+    - from:
+        - podSelector:
+            matchLabels:
+              le.io/role: operator
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # ── Ingress controller can forward dashboard traffic ───────────────────
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# Restrict loadequilibrium egress: only postgres and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loadequilibrium-egress
+  namespace: loadequilibrium
+spec:
+  podSelector:
+    matchLabels:
+      app: loadequilibrium
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432

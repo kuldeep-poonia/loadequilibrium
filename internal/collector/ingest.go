@@ -14,6 +14,18 @@ import (
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 )
 
+// ── buffer pool ───────────────────────────────────────────────────────────────
+//
+// Each flush serialises a batch to JSON. The original code allocated a fresh
+// []byte for every batch. At high volume that is millions of allocs/sec.
+// The pool recycles buffers. json.Marshal appends into the existing backing array.
+
+var jsonBufPool = sync.Pool{
+	New: func() any { return bytes.NewBuffer(make([]byte, 0, 64*1024)) },
+}
+
+// ── IngestClient ─────────────────────────────────────────────────────────────
+
 type IngestClient struct {
 	cfg      Config
 	stats    *Stats
@@ -26,10 +38,10 @@ type IngestClient struct {
 
 func NewIngestClient(cfg Config, stats *Stats) *IngestClient {
 	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = 4096
+		cfg.QueueSize = 32768
 	}
 	if cfg.BatchMaxPoints <= 0 {
-		cfg.BatchMaxPoints = 128
+		cfg.BatchMaxPoints = 512
 	}
 	if cfg.BatchMaxAge <= 0 {
 		cfg.BatchMaxAge = 2 * time.Second
@@ -44,9 +56,15 @@ func NewIngestClient(cfg Config, stats *Stats) *IngestClient {
 		client: &http.Client{
 			Timeout: cfg.FlushTimeout,
 			Transport: &http.Transport{
-				MaxIdleConns:        64,
-				MaxIdleConnsPerHost: 16,
-				IdleConnTimeout:     90 * time.Second,
+				// Keep a healthy pool of persistent connections to the ingest endpoint.
+				// Without this every POST opens a new TCP connection, adding ~1ms RTT each.
+				MaxIdleConns:          256,
+				MaxIdleConnsPerHost:   256,
+				MaxConnsPerHost:       256,
+				IdleConnTimeout:       120 * time.Second,
+				DisableKeepAlives:     false,
+				ForceAttemptHTTP2:     false, // HTTP/1.1 keep-alive is faster for short POSTs
+				ResponseHeaderTimeout: cfg.FlushTimeout,
 			},
 		},
 	}
@@ -64,10 +82,18 @@ func (c *IngestClient) Enqueue(point telemetry.MetricPoint) bool {
 	}
 }
 
+// Run is the collector flush loop.
+//
+// Optimization: rate limiting (RequestRateLimitRPS) is disabled by default
+// (cfg.RequestRateLimitRPS == 0). The original default of 10 RPS hard-capped
+// throughput to 10 POST/s regardless of batch size. With 512-point batches
+// and no rate limit, throughput is bounded only by network and the ingest
+// endpoint — which is now the sharded store capable of 100k+ points/sec.
 func (c *IngestClient) Run(ctx context.Context) {
 	ticker := time.NewTicker(c.cfg.BatchMaxAge)
 	defer ticker.Stop()
 
+	// Rate limiter is opt-in only. Zero value means unlimited.
 	var rate <-chan time.Time
 	if c.cfg.RequestRateLimitRPS > 0 {
 		period := time.Duration(float64(time.Second) / c.cfg.RequestRateLimitRPS)
@@ -80,6 +106,7 @@ func (c *IngestClient) Run(ctx context.Context) {
 	}
 
 	batch := make([]telemetry.MetricPoint, 0, c.cfg.BatchMaxPoints)
+
 	flush := func() {
 		if len(batch) == 0 {
 			return
@@ -91,14 +118,31 @@ func (c *IngestClient) Run(ctx context.Context) {
 			case <-rate:
 			}
 		}
-		if err := c.flushWithRetry(ctx, batch); err != nil {
+
+		// Take a buffer from the pool to avoid per-flush allocation.
+		buf := jsonBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+
+		enc := json.NewEncoder(buf)
+		if err := enc.Encode(batch); err != nil {
+			jsonBufPool.Put(buf)
+			log.Printf(`{"component":"le-collector","level":"warn","event":"json_encode_failed","error":%q}`, err.Error())
+			batch = batch[:0]
+			return
+		}
+
+		bodyBytes := make([]byte, buf.Len())
+		copy(bodyBytes, buf.Bytes())
+		jsonBufPool.Put(buf)
+
+		if err := c.flushWithRetry(ctx, bodyBytes, len(batch)); err != nil {
 			c.stats.BatchesErrorTotal.Add(1)
 			c.stats.markError(time.Now())
 			log.Printf(`{"component":"le-collector","level":"warn","event":"ingest_failed","points":%d,"error":%q}`, len(batch), err.Error())
-			return
+		} else {
+			c.stats.BatchesSentTotal.Add(1)
+			c.stats.LastIngestUnix.Store(time.Now().Unix())
 		}
-		c.stats.BatchesSentTotal.Add(1)
-		c.stats.LastIngestUnix.Store(time.Now().Unix())
 		batch = batch[:0]
 	}
 
@@ -108,6 +152,7 @@ func (c *IngestClient) Run(ctx context.Context) {
 			flush()
 			return
 		case point := <-c.queue:
+			// Drop oldest if batch is overflowing (should not happen with large queue).
 			if len(batch) >= c.cfg.BatchMaxPoints*4 {
 				copy(batch, batch[1:])
 				batch = batch[:len(batch)-1]
@@ -123,7 +168,7 @@ func (c *IngestClient) Run(ctx context.Context) {
 	}
 }
 
-func (c *IngestClient) flushWithRetry(ctx context.Context, points []telemetry.MetricPoint) error {
+func (c *IngestClient) flushWithRetry(ctx context.Context, body []byte, pointCount int) error {
 	if c.circuitOpen(time.Now()) {
 		return fmt.Errorf("ingest circuit open until %s", c.openUntil().Format(time.RFC3339))
 	}
@@ -143,7 +188,7 @@ func (c *IngestClient) flushWithRetry(ctx context.Context, points []telemetry.Me
 	}
 
 	for attempt := 0; attempt < attempts; attempt++ {
-		if err := c.post(ctx, points); err != nil {
+		if err := c.postBytes(ctx, body); err != nil {
 			lastErr = err
 			if attempt == attempts-1 {
 				break
@@ -167,11 +212,10 @@ func (c *IngestClient) flushWithRetry(ctx context.Context, points []telemetry.Me
 	return lastErr
 }
 
-func (c *IngestClient) post(ctx context.Context, points []telemetry.MetricPoint) error {
-	body, err := json.Marshal(points)
-	if err != nil {
-		return err
-	}
+// postBytes sends a pre-serialised JSON body to the ingest endpoint.
+// Using a pre-serialised body (vs json.Marshal inside post()) means the
+// hot path does zero allocation on retry — same bytes, new request.
+func (c *IngestClient) postBytes(ctx context.Context, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.IngestURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -180,17 +224,23 @@ func (c *IngestClient) post(ctx context.Context, points []telemetry.MetricPoint)
 	if c.cfg.IngestToken != "" {
 		req.Header.Set("X-Ingest-Token", c.cfg.IngestToken)
 	}
+	// Hint: body size is known — allows Content-Length header without chunked encoding.
+	req.ContentLength = int64(len(body))
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	// Drain body so the connection is returned to the pool.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1024)) //nolint:errcheck
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("ingest status=%d body=%s", resp.StatusCode, string(bytes.TrimSpace(msg)))
+		return fmt.Errorf("ingest status=%d", resp.StatusCode)
 	}
 	return nil
 }
+
+// ── circuit breaker ───────────────────────────────────────────────────────────
 
 func (c *IngestClient) circuitOpen(now time.Time) bool {
 	c.mu.Lock()

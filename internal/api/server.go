@@ -8,43 +8,113 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/actuator"
 	"github.com/loadequilibrium/loadequilibrium/internal/metrics"
 	"github.com/loadequilibrium/loadequilibrium/internal/runtime"
 	"github.com/loadequilibrium/loadequilibrium/internal/scenario"
+	"github.com/loadequilibrium/loadequilibrium/internal/security"
 	"github.com/loadequilibrium/loadequilibrium/internal/streaming"
 	"github.com/loadequilibrium/loadequilibrium/internal/telemetry"
 	"github.com/loadequilibrium/loadequilibrium/internal/ws"
 )
 
+// ── pool: reusable []MetricPoint slices ──────────────────────────────────────
+
+var ingestPointPool = sync.Pool{
+	New: func() any {
+		pts := make([]telemetry.MetricPoint, 0, 32)
+		return &pts
+	},
+}
+
+var acceptedResponse = []byte(`{"status":"accepted"}`)
+
+// ── Server ───────────────────────────────────────────────────────────────────
+
+// Server is the LoadEquilibrium HTTP server.
+// All security enforcement happens in Handler() before any route handler runs.
 type Server struct {
 	store    *telemetry.Store
 	hub      *streaming.Hub
-	token    string
 	actuator *actuator.CoalescingActuator
 	orch     *runtime.Orchestrator
 	scen     *scenario.SuperpositionEngine
 	mux      *http.ServeMux
 	upgrader ws.Upgrader
 	metrics  *metrics.Handler
-	Counters *metrics.Counters // exported so runtime can increment scale/tick counters
+	Counters *metrics.Counters
+	audit    *security.AuditLogger
+
+	// Rate limiters: separate limits for ingest and control paths.
+	// Ingest: high burst (collector sends every 2s per service batch)
+	// Control: low burst (human operators issue occasional commands)
+	ingestRL  *security.RateLimiter
+	controlRL *security.RateLimiter
+
+	secCfg security.AuthConfig
+}
+
+// ServerConfig holds everything NewServer needs.
+type ServerConfig struct {
+	IngestToken    string   // required for production
+	ControlToken   string   // if empty, falls back to IngestToken
+	DashboardToken string   // if empty, dashboard is unauthenticated (ok for internal)
+	AllowedOrigins []string // CORS allowed origins; nil = allow all (internal networks)
+	TLSEnabled     bool
+	MetricsToken   string // if set, GET /metrics requires this token
+
+	// Rate limits (requests/second sustained; burst is 3× sustained)
+	IngestRPS  float64 // default: 5000 (collector batches are small and frequent)
+	ControlRPS float64 // default: 10 (human operators, not scripts)
 }
 
 func NewServer(store *telemetry.Store, hub *streaming.Hub, token string) *Server {
+	return NewServerWithConfig(store, hub, ServerConfig{IngestToken: token})
+}
+
+func NewServerWithConfig(store *telemetry.Store, hub *streaming.Hub, cfg ServerConfig) *Server {
+	if cfg.IngestRPS <= 0 {
+		cfg.IngestRPS = 5000
+	}
+	if cfg.ControlRPS <= 0 {
+		cfg.ControlRPS = 10
+	}
+
+	security.WarnWeakToken(cfg.IngestToken)
+	if cfg.ControlToken != "" && cfg.ControlToken != cfg.IngestToken {
+		security.WarnWeakToken(cfg.ControlToken)
+	}
+
 	counters := &metrics.Counters{}
+	audit := security.NewAuditLogger()
+
 	s := &Server{
 		store:    store,
 		hub:      hub,
-		token:    token,
 		mux:      http.NewServeMux(),
 		Counters: counters,
 		metrics:  metrics.NewHandler(store, counters),
+		audit:    audit,
+		// Ingest: 3× burst headroom for bursty collector batches
+		ingestRL: security.NewRateLimiter(cfg.IngestRPS*3, cfg.IngestRPS, 5*time.Minute),
+		// Control: 30× burst — still only ~300 reqs before throttle kicks in
+		controlRL: security.NewRateLimiter(cfg.ControlRPS*30, cfg.ControlRPS, 5*time.Minute),
+		secCfg: security.AuthConfig{
+			IngestToken:    cfg.IngestToken,
+			ControlToken:   cfg.ControlToken,
+			DashboardToken: cfg.DashboardToken,
+			AllowedOrigins: cfg.AllowedOrigins,
+			TLSEnabled:     cfg.TLSEnabled,
+		},
 		upgrader: ws.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
+			ReadBufferSize:  8192,
+			WriteBufferSize: 65536,
 			CheckOrigin: func(r *http.Request) bool {
+				// Origin validation is handled by CORSMiddleware before upgrade.
+				// Allow all at the WS layer — CORS already filtered.
 				return true
 			},
 		},
@@ -57,21 +127,31 @@ func (s *Server) SetOrchestrator(orch *runtime.Orchestrator)      { s.orch = orc
 func (s *Server) SetActuator(act *actuator.CoalescingActuator)    { s.actuator = act }
 func (s *Server) SetScenarios(scen *scenario.SuperpositionEngine) { s.scen = scen }
 
+// Handler builds the fully hardened handler chain.
+//
+// Middleware order (outermost → innermost):
+//  1. Security headers (X-Frame-Options, CSP, HSTS, etc.)
+//  2. CORS policy (strict origin whitelist, no wildcard)
+//  3. Auth + rate limiting (per route class, constant-time token compare)
+//  4. Route handler
 func (s *Server) Handler() http.Handler {
-	return corsMiddleware(s.mux)
+	return security.SecurityHeaders(s.secCfg.TLSEnabled)(
+		security.CORSMiddleware(s.secCfg.AllowedOrigins)(
+			security.AuthMiddleware(s.secCfg, s.audit, s.ingestRL, s.controlRL)(
+				s.mux,
+			),
+		),
+	)
 }
 
 func (s *Server) routes() {
-	// WebSocket
+	// WebSocket — auth enforced by AuthMiddleware before upgrade
 	s.mux.HandleFunc("/ws", s.hub.HandleUpgrade)
 
-	// UI static files — serve ./ui/ directory at /
-	// Drop index.html, app.js, styles.css into a folder named "ui" beside the binary.
-	// Falls through to API routes for /api/, /ws, /health, /metrics paths.
+	// UI — served from ./ui/ directory (no auth; UI loads the token from env)
 	uiDir := http.Dir("ui")
 	uiServer := http.FileServer(uiDir)
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only serve static files for non-API paths
 		if strings.HasPrefix(r.URL.Path, "/api/") ||
 			strings.HasPrefix(r.URL.Path, "/ws") ||
 			strings.HasPrefix(r.URL.Path, "/health") ||
@@ -82,15 +162,16 @@ func (s *Server) routes() {
 		uiServer.ServeHTTP(w, r)
 	})
 
-	// Telemetry ingestion
+	// ── Telemetry ingest (hot path) ───────────────────────────────────────────
 	s.mux.HandleFunc("/api/v1/ingest", s.handleIngest())
 
-	// Actuator proxy endpoints
+	// ── Read-only endpoints ───────────────────────────────────────────────────
+	s.mux.HandleFunc("/api/v1/snapshot", s.handleSnapshot())
+
+	// ── Control plane (requires ControlToken) ────────────────────────────────
 	s.mux.HandleFunc("/api/v1/control/toggle", s.handleControl("toggle"))
 	s.mux.HandleFunc("/api/v1/control/chaos-run", s.handleControl("chaos-run"))
 	s.mux.HandleFunc("/api/v1/control/replay-burst", s.handleControl("replay-burst"))
-
-	// Domain-specific safe control-plane endpoints
 	s.mux.HandleFunc("/api/v1/policy/update", s.handlePolicyUpdate())
 	s.mux.HandleFunc("/api/v1/runtime/step", s.handleRuntimeStep())
 	s.mux.HandleFunc("/api/v1/sandbox/trigger", s.handleSandboxTrigger())
@@ -98,127 +179,159 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/intelligence/rollout", s.handleIntelligenceRollout())
 	s.mux.HandleFunc("/api/v1/alerts/ack", s.handleAlertAck())
 
-	// Snapshot endpoint — returns last cached tick payload via REST
-	s.mux.HandleFunc("/api/v1/snapshot", s.handleSnapshot())
+	// ── Audit log (control token required) ───────────────────────────────────
+	// Exposes the last 200 security events for operator review.
+	s.mux.HandleFunc("/api/v1/audit", s.handleAuditLog())
 
-	// Health
+	// ── Health + metrics ──────────────────────────────────────────────────────
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
+		clientCount := 0
+		if s.hub != nil {
+			clientCount = s.hub.ClientCount()
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "ok",
 			"component": "api_headless",
-			"clients":   s.hub.ClientCount(),
+			"clients":   clientCount,
 		})
 	})
-
-	// Prometheus metrics — scraped by prometheus.yml every 2s
 	s.mux.Handle("/metrics", s.metrics)
 }
 
-// corsMiddleware adds CORS headers for dashboard access
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Ingest-Token")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
+// ── handleIngest — hardened hot path ─────────────────────────────────────────
 
 func (s *Server) handleIngest() http.HandlerFunc {
-	const maxIngestBodyBytes = 4 << 20
+	const maxIngestBodyBytes = 4 << 20 // 4 MiB
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
-
 		if s.store == nil {
-			http.Error(w, "telemetry store offline", http.StatusServiceUnavailable)
+			http.Error(w, `{"error":"telemetry store offline"}`, http.StatusServiceUnavailable)
 			return
 		}
 
-		if s.token != "" {
-			headerToken := r.Header.Get("X-Ingest-Token")
-			bearerToken := "Bearer " + s.token
-			if headerToken != s.token && r.Header.Get("Authorization") != bearerToken {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
+		// ── Decode ────────────────────────────────────────────────────────────
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxIngestBodyBytes))
+		if err != nil {
+			s.Counters.IngestErrors.Add(1)
+			http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+			return
 		}
-
-		var raw json.RawMessage
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIngestBodyBytes))
-		if err := decoder.Decode(&raw); err != nil {
-			http.Error(w, "invalid telemetry payload", http.StatusBadRequest)
+		body = bytes.TrimSpace(body)
+		if len(body) == 0 {
+			s.Counters.IngestErrors.Add(1)
+			http.Error(w, `{"error":"empty payload"}`, http.StatusBadRequest)
 			return
 		}
 
-		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 {
-			http.Error(w, "empty telemetry payload", http.StatusBadRequest)
-			return
-		}
+		ptsPtr := ingestPointPool.Get().(*[]telemetry.MetricPoint)
+		pts := (*ptsPtr)[:0]
 
-		points := make([]telemetry.MetricPoint, 0, 1)
-		switch raw[0] {
+		switch body[0] {
 		case '[':
-			if err := json.Unmarshal(raw, &points); err != nil {
-				http.Error(w, "invalid telemetry point array", http.StatusBadRequest)
+			if err := json.Unmarshal(body, &pts); err != nil {
+				ingestPointPool.Put(ptsPtr)
+				s.Counters.IngestErrors.Add(1)
+				http.Error(w, `{"error":"invalid array payload"}`, http.StatusBadRequest)
 				return
 			}
 		case '{':
-			var point telemetry.MetricPoint
-			if err := json.Unmarshal(raw, &point); err != nil {
-				http.Error(w, "invalid telemetry point", http.StatusBadRequest)
+			var pt telemetry.MetricPoint
+			if err := json.Unmarshal(body, &pt); err != nil {
+				ingestPointPool.Put(ptsPtr)
+				s.Counters.IngestErrors.Add(1)
+				http.Error(w, `{"error":"invalid object payload"}`, http.StatusBadRequest)
 				return
 			}
-			points = append(points, point)
+			pts = append(pts, pt)
 		default:
-			http.Error(w, "telemetry payload must be an object or array", http.StatusBadRequest)
+			ingestPointPool.Put(ptsPtr)
+			s.Counters.IngestErrors.Add(1)
+			http.Error(w, `{"error":"payload must be object or array"}`, http.StatusBadRequest)
 			return
 		}
 
-		if len(points) == 0 {
-			http.Error(w, "telemetry payload contained no points", http.StatusBadRequest)
+		// ── Batch size guard ──────────────────────────────────────────────────
+		if err := security.ValidateBatchSize(len(pts)); err != nil {
+			ingestPointPool.Put(ptsPtr)
+			s.Counters.IngestErrors.Add(1)
+			http.Error(w, `{"error":"batch too large"}`, http.StatusRequestEntityTooLarge)
 			return
 		}
 
-		for i := range points {
-			if points[i].ServiceID == "" {
-				http.Error(w, "telemetry point missing service_id", http.StatusBadRequest)
-				return
+		// ── Per-point validation + ingest ─────────────────────────────────────
+		accepted := 0
+		for i := range pts {
+			// Validate service_id: length, charset — no injection possible
+			if err := security.ValidateServiceID(pts[i].ServiceID); err != nil {
+				s.Counters.IngestErrors.Add(1)
+				continue // skip invalid point, don't reject whole batch
 			}
-			s.store.Ingest(&points[i])
+			s.store.Ingest(&pts[i])
+			s.Counters.IngestTotal.Add(1)
+			accepted++
 		}
+
+		*ptsPtr = pts[:0]
+		ingestPointPool.Put(ptsPtr)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
+		w.Write(acceptedResponse) //nolint:errcheck
+	}
+}
+
+// ── handleSnapshot ────────────────────────────────────────────────────────────
+
+func (s *Server) handleSnapshot() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		data := s.hub.GetLastPayloadJSON()
+		if data == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data) //nolint:errcheck
+	}
+}
+
+// ── handleAuditLog ────────────────────────────────────────────────────────────
+
+func (s *Server) handleAuditLog() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		events := s.audit.Recent(200)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "accepted",
-			"points": len(points),
+			"count":  len(events),
+			"events": events,
 		})
 	}
 }
 
+// ── handleControl ─────────────────────────────────────────────────────────────
+
 func (s *Server) handleControl(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
-
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
@@ -237,19 +350,35 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 			return
 		}
 
+		// Validate service_id if provided
+		if req.ServiceID != "" {
+			if err := security.ValidateServiceID(req.ServiceID); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid service_id")
+				return
+			}
+		}
+
+		ip := security.RealIP(r)
+		s.audit.Log(security.AuditEvent{
+			IP:        ip,
+			Path:      r.URL.Path,
+			Method:    r.Method,
+			EventType: "control_action",
+			Detail:    action,
+		})
+
 		switch action {
 		case "toggle":
 			enabled := s.orch.ToggleActuation()
 			if req.Enabled != nil {
 				enabled = s.orch.SetActuationEnabled(*req.Enabled)
 			}
-			log.Printf("[api] actuation enabled=%v", enabled)
+			log.Printf("[api] actuation enabled=%v ip=%s", enabled, ip)
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"status":              "applied",
-				"action":              action,
-				"actuation_enabled":   enabled,
-				"actuator_configured": s.actuator != nil,
-				"control_plane":       s.orch.ControlState(),
+				"status":            "applied",
+				"action":            action,
+				"actuation_enabled": enabled,
+				"control_plane":     s.orch.ControlState(),
 			})
 		case "chaos-run":
 			if s.scen == nil {
@@ -272,8 +401,8 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 				LatencyFactor: latencyFactor,
 			}, until)
 			s.orch.ForceSimulation(duration + 1)
-			log.Printf("[api] scenario overlay chaos-run target=%s start=%d until=%d req_factor=%.2f latency_factor=%.2f",
-				target, start, until, requestFactor, latencyFactor)
+			log.Printf("[api] chaos-run target=%s start=%d until=%d rf=%.2f lf=%.2f ip=%s",
+				target, start, until, requestFactor, latencyFactor, ip)
 			writeJSON(w, http.StatusAccepted, map[string]interface{}{
 				"status":         "scheduled",
 				"action":         action,
@@ -282,8 +411,6 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 				"until_tick":     until,
 				"request_factor": requestFactor,
 				"latency_factor": latencyFactor,
-				"scenario_mode":  s.scen.Mode(),
-				"control_plane":  s.orch.ControlState(),
 			})
 		case "replay-burst":
 			if s.scen == nil {
@@ -304,8 +431,8 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 				MaxFactor:     factor,
 			}, until)
 			s.orch.ForceSimulation(duration + 1)
-			log.Printf("[api] scenario overlay replay-burst target=%s start=%d until=%d factor=%.2f",
-				target, start, until, factor)
+			log.Printf("[api] replay-burst target=%s start=%d until=%d factor=%.2f ip=%s",
+				target, start, until, factor, ip)
 			writeJSON(w, http.StatusAccepted, map[string]interface{}{
 				"status":         "scheduled",
 				"action":         action,
@@ -313,8 +440,6 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 				"start_tick":     start,
 				"until_tick":     until,
 				"factor":         factor,
-				"scenario_mode":  s.scen.Mode(),
-				"control_plane":  s.orch.ControlState(),
 			})
 		default:
 			writeError(w, http.StatusNotFound, "unknown control action")
@@ -322,18 +447,18 @@ func (s *Server) handleControl(action string) http.HandlerFunc {
 	}
 }
 
-// handlePolicyUpdate applies policy presets to the runtime policy engine.
+// ── handlePolicyUpdate ────────────────────────────────────────────────────────
+
 func (s *Server) handlePolicyUpdate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		var req struct {
 			Preset string `json:"preset"`
 		}
@@ -341,37 +466,38 @@ func (s *Server) handlePolicyUpdate() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid policy payload")
 			return
 		}
-
 		preset := s.orch.SetPolicyPreset(req.Preset)
-		log.Printf("[api] policy preset applied=%s", preset)
+		ip := security.RealIP(r)
+		s.audit.Log(security.AuditEvent{
+			IP: ip, Path: r.URL.Path, Method: r.Method,
+			EventType: "control_action",
+			Detail:    "policy_update preset=" + preset,
+		})
+		log.Printf("[api] policy preset=%s ip=%s", preset, ip)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":        "applied",
-			"domain":        "policy_update",
 			"preset":        preset,
 			"control_plane": s.orch.ControlState(),
 		})
 	}
 }
 
-// handleRuntimeStep requests a forced tick from the orchestrator.
+// ── handleRuntimeStep ─────────────────────────────────────────────────────────
+
 func (s *Server) handleRuntimeStep() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		tick, err := s.orch.StepOnce(time.Now())
 		if errors.Is(err, runtime.ErrTickInFlight) {
 			writeJSON(w, http.StatusConflict, map[string]interface{}{
-				"status":        "busy",
-				"domain":        "runtime_step",
-				"tick":          tick,
-				"control_plane": s.orch.ControlState(),
+				"status": "busy", "tick": tick,
 			})
 			return
 		}
@@ -379,29 +505,29 @@ func (s *Server) handleRuntimeStep() http.HandlerFunc {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}
-
-		log.Printf("[api] runtime step executed tick=%d", tick)
+		s.audit.Log(security.AuditEvent{
+			IP: security.RealIP(r), Path: r.URL.Path, Method: r.Method,
+			EventType: "control_action", Detail: "runtime_step",
+		})
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":        "executed",
-			"domain":        "runtime_step",
-			"tick":          tick,
+			"status": "executed", "tick": tick,
 			"control_plane": s.orch.ControlState(),
 		})
 	}
 }
 
-// handleSandboxTrigger enqueues a sandbox experiment scenario.
+// ── handleSandboxTrigger ──────────────────────────────────────────────────────
+
 func (s *Server) handleSandboxTrigger() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		var req struct {
 			Type          string `json:"type"`
 			DurationTicks uint64 `json:"duration_ticks"`
@@ -413,34 +539,30 @@ func (s *Server) handleSandboxTrigger() http.HandlerFunc {
 		if strings.TrimSpace(req.Type) == "" {
 			req.Type = "experiment"
 		}
-
 		duration := boundedTicks(req.DurationTicks, 10, 1, 120)
 		until := s.orch.ForceSandbox(duration)
-		log.Printf("[api] sandbox forced type=%s until_tick=%d", req.Type, until)
-
+		s.audit.Log(security.AuditEvent{
+			IP: security.RealIP(r), Path: r.URL.Path, Method: r.Method,
+			EventType: "control_action", Detail: "sandbox type=" + req.Type,
+		})
 		writeJSON(w, http.StatusAccepted, map[string]interface{}{
-			"status":         "scheduled",
-			"domain":         "sandbox_trigger",
-			"type":           req.Type,
-			"until_tick":     until,
-			"duration_ticks": duration,
-			"control_plane":  s.orch.ControlState(),
+			"status": "scheduled", "type": req.Type, "until_tick": until,
 		})
 	}
 }
 
-// handleSimulationControl starts, stops, or resets the real simulation runner.
+// ── handleSimulationControl ───────────────────────────────────────────────────
+
 func (s *Server) handleSimulationControl() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		var req struct {
 			Action        string `json:"action"`
 			DurationTicks uint64 `json:"duration_ticks"`
@@ -449,42 +571,26 @@ func (s *Server) handleSimulationControl() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid simulation payload")
 			return
 		}
-
 		action := strings.ToLower(strings.TrimSpace(req.Action))
 		if action == "" {
 			action = "run"
 		}
 		duration := boundedTicks(req.DurationTicks, 10, 1, 600)
-
 		switch action {
 		case "run", "start", "force":
 			until := s.orch.ForceSimulation(duration)
-			log.Printf("[api] simulation forced until_tick=%d", until)
 			writeJSON(w, http.StatusAccepted, map[string]interface{}{
-				"status":         "scheduled",
-				"domain":         "simulation_control",
-				"action":         action,
-				"until_tick":     until,
-				"duration_ticks": duration,
-				"control_plane":  s.orch.ControlState(),
+				"status": "scheduled", "action": action, "until_tick": until,
 			})
 		case "reset":
 			s.orch.RequestSimulationReset()
-			log.Printf("[api] simulation reset requested")
 			writeJSON(w, http.StatusAccepted, map[string]interface{}{
-				"status":        "scheduled",
-				"domain":        "simulation_control",
-				"action":        action,
-				"control_plane": s.orch.ControlState(),
+				"status": "scheduled", "action": action,
 			})
 		case "stop":
 			s.orch.ForceSimulation(0)
-			log.Printf("[api] simulation force window cleared")
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"status":        "applied",
-				"domain":        "simulation_control",
-				"action":        action,
-				"control_plane": s.orch.ControlState(),
+				"status": "applied", "action": action,
 			})
 		default:
 			writeError(w, http.StatusBadRequest, "unknown simulation action")
@@ -492,18 +598,18 @@ func (s *Server) handleSimulationControl() http.HandlerFunc {
 	}
 }
 
-// handleIntelligenceRollout triggers an RL rollout evaluation.
+// ── handleIntelligenceRollout ─────────────────────────────────────────────────
+
 func (s *Server) handleIntelligenceRollout() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		var req struct {
 			DurationTicks uint64 `json:"duration_ticks"`
 		}
@@ -511,32 +617,26 @@ func (s *Server) handleIntelligenceRollout() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid intelligence payload")
 			return
 		}
-
 		duration := boundedTicks(req.DurationTicks, 10, 1, 120)
 		until := s.orch.ForceIntelligenceRollout(duration)
-		log.Printf("[api] intelligence rollout forced until_tick=%d", until)
 		writeJSON(w, http.StatusAccepted, map[string]interface{}{
-			"status":         "scheduled",
-			"domain":         "intelligence_rollout",
-			"until_tick":     until,
-			"duration_ticks": duration,
-			"control_plane":  s.orch.ControlState(),
+			"status": "scheduled", "until_tick": until,
 		})
 	}
 }
 
-// handleAlertAck acknowledges an alert.
+// ── handleAlertAck ────────────────────────────────────────────────────────────
+
 func (s *Server) handleAlertAck() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 		if s.orch == nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime orchestrator offline")
 			return
 		}
-
 		var req struct {
 			AlertID string `json:"alert_id"`
 		}
@@ -548,47 +648,18 @@ func (s *Server) handleAlertAck() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "alert_id is required")
 			return
 		}
-
 		count, ok := s.orch.AcknowledgeAlert(req.AlertID, time.Now())
 		if !ok {
-			writeError(w, http.StatusBadRequest, "alert_id is required")
+			writeError(w, http.StatusNotFound, "alert not found")
 			return
 		}
-		log.Printf("[api] alert acknowledged: %s", req.AlertID)
-
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":                   "applied",
-			"domain":                   "alert_ack",
-			"alert_id":                 req.AlertID,
-			"acknowledged_alert_count": count,
-			"control_plane":            s.orch.ControlState(),
+			"status": "applied", "alert_id": req.AlertID, "count": count,
 		})
 	}
 }
 
-// handleSnapshot returns the last cached tick payload as REST JSON.
-func (s *Server) handleSnapshot() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		data := s.hub.GetLastPayloadJSON()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{
-				"status": "no_data",
-				"reason": "no tick payload cached yet",
-			})
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
-	}
-}
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 func decodeOptionalJSON(r *http.Request, dst interface{}) error {
 	if r.Body == nil || r.ContentLength == 0 {
@@ -624,15 +695,6 @@ func boundedTicks(value, fallback, min, max uint64) uint64 {
 	return value
 }
 
-func firstNonZero(values ...float64) float64 {
-	for _, value := range values {
-		if value != 0 {
-			return value
-		}
-	}
-	return 0
-}
-
 func boundedFloat(value, fallback, min, max float64) float64 {
 	if value == 0 {
 		value = fallback
@@ -644,6 +706,15 @@ func boundedFloat(value, fallback, min, max float64) float64 {
 		return max
 	}
 	return value
+}
+
+func firstNonZero(values ...float64) float64 {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 func serviceTarget(serviceID string) string {

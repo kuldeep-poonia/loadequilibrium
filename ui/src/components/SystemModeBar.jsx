@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/useStore'
+import { setActuation, setPolicy } from '../lib/api'
 
 const MODE = {
   normal:    { label: 'AUTONOMOUS', sub: 'Autopilot active — system self-managing', color: 'text-green',  border: 'border-green/30',  bg: 'bg-green/5'   },
@@ -65,14 +66,39 @@ export default function SystemModeBar() {
   const addToast      = useStore(s => s.addToast)
   const logHumanAction= useStore(s => s.logHumanAction)
   const [confirm, setConfirm] = useState(null)
+  const [loading, setLoading] = useState(false)
 
   const mode = MODE[systemMode] ?? MODE.offline
   const openCrit = incidents.filter(i => i.severity === 'critical' && !['resolved','failed','overridden'].includes(i.stage))
 
-  const handleAction = (action) => {
-    addToast(action.toastType, action.label, action.toastMsg, 6000)
-    logHumanAction(`Operator: ${action.label}`, null, 'human')
+  const handleAction = async (action) => {
+    setLoading(true)
     setConfirm(null)
+    try {
+      if (action.id === 'freeze') {
+        // FREEZE AUTOPILOT: disables actuation — engine keeps reasoning but issues no commands
+        await setActuation(false)
+        addToast(action.toastType, action.label, action.toastMsg, 8000)
+        logHumanAction('Operator: FREEZE AUTOPILOT — actuation disabled via API', null, 'human')
+      } else if (action.id === 'safemode') {
+        // SAFE MODE: switch to conservative policy — caps scaling, reduces risk tolerance
+        await setPolicy('conservative')
+        addToast(action.toastType, action.label, action.toastMsg, 8000)
+        logHumanAction('Operator: SAFE MODE — policy set to conservative via API', null, 'human')
+      } else if (action.id === 'rollback') {
+        // ROLLBACK ALL: disable actuation + reset to balanced policy
+        // The engine will hold current capacity on next tick and stop all scaling
+        await setActuation(false)
+        await setPolicy('balanced')
+        addToast(action.toastType, action.label, action.toastMsg, 8000)
+        logHumanAction('Operator: ROLLBACK ALL — actuation disabled, policy reset to balanced via API', null, 'human')
+      }
+    } catch (err) {
+      addToast('crit', `${action.label} FAILED`, `API error: ${err.message || 'check connection'}`, 8000)
+      logHumanAction(`Operator: ${action.label} — FAILED: ${err.message}`, null, 'crit')
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (systemMode === 'offline' || systemMode === 'normal') return null

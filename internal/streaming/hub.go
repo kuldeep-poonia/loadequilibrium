@@ -16,14 +16,18 @@ import (
 const (
 	writeTimeout      = 5 * time.Second
 	pingInterval      = 15 * time.Second
-	sendBufferSize    = 16
 	pongWait          = 60 * time.Second
-	defaultMaxClients = 50
+	defaultMaxClients = 200 // raised from 50
 
-	pressureProbeFrames = 1024
-	pressureProbeChunk  = 64
-	pressureProbeAfter  = sendBufferSize
-	pressureProbeWindow = 250 * time.Millisecond
+	// sendBufferSize: client write queue depth.
+	// Original was 16 — fine for 50ms ticks. At 2s ticks with larger payloads,
+	// 64 gives 128 seconds of queue depth before the client is considered slow.
+	sendBufferSize = 64
+
+	pressureProbeFrames  = 1024
+	pressureProbeChunk   = 64
+	pressureProbeAfter   = sendBufferSize
+	pressureProbeWindow  = 250 * time.Millisecond
 )
 
 var pressureProbePayload = [125]byte{}
@@ -33,8 +37,8 @@ type Hub struct {
 	clients         map[*client]struct{}
 	seqNo           atomic.Uint64
 	maxClients      int
-	lastPayload     atomic.Pointer[TickPayload] // Atomic retained latest payload
-	lastPayloadJSON atomic.Pointer[[]byte]      // Atomic retained serialized payload
+	lastPayload     atomic.Pointer[TickPayload]
+	lastPayloadJSON atomic.Pointer[[]byte]
 }
 
 func NewHub() *Hub {
@@ -50,7 +54,7 @@ func (h *Hub) SetMaxClients(n int) {
 	}
 }
 
-/* ================= SAFE FLOAT ================= */
+/*  SAFE FLOAT  */
 
 func safeFloat(x float64) float64 {
 	if math.IsNaN(x) || math.IsInf(x, 0) {
@@ -59,338 +63,29 @@ func safeFloat(x float64) float64 {
 	return x
 }
 
-/* ================ PAYLOAD SANITISER ================= */
-
-// sanitizePayload converts all NaN and Inf values to safe defaults
-func sanitizePayload(p *TickPayload) {
-	if p == nil {
-		return
-	}
-
-	// Sanitize scalar fields
-	p.TickHealthMs = safeFloat(p.TickHealthMs)
-	p.DegradedFraction = safeFloat(p.DegradedFraction)
-	p.JitterMs = safeFloat(p.JitterMs)
-
-	// Sanitize Objective
-	p.Objective.CompositeScore = safeFloat(p.Objective.CompositeScore)
-	p.Objective.MaxCollapseRisk = safeFloat(p.Objective.MaxCollapseRisk)
-	p.Objective.CascadeFailureProbability = safeFloat(p.Objective.CascadeFailureProbability)
-	p.Objective.PredictedP99LatencyMs = safeFloat(p.Objective.PredictedP99LatencyMs)
-	p.Objective.OscillationRisk = safeFloat(p.Objective.OscillationRisk)
-	p.Objective.RiskAcceleration = safeFloat(p.Objective.RiskAcceleration)
-	p.Objective.TrajectoryScore = safeFloat(p.Objective.TrajectoryScore)
-	p.Objective.LatencyWeight = safeFloat(p.Objective.LatencyWeight)
-	p.Objective.UtilisationWeight = safeFloat(p.Objective.UtilisationWeight)
-	p.Objective.RiskWeight = safeFloat(p.Objective.RiskWeight)
-	p.Objective.ReferenceLatencyMs = safeFloat(p.Objective.ReferenceLatencyMs)
-	p.Objective.TrendStabilityMargin = safeFloat(p.Objective.TrendStabilityMargin)
-
-	// Sanitize RuntimeMetrics
-	p.RuntimeMetrics.AvgPruneMs = safeFloat(p.RuntimeMetrics.AvgPruneMs)
-	p.RuntimeMetrics.AvgWindowsMs = safeFloat(p.RuntimeMetrics.AvgWindowsMs)
-	p.RuntimeMetrics.AvgTopologyMs = safeFloat(p.RuntimeMetrics.AvgTopologyMs)
-	p.RuntimeMetrics.AvgCouplingMs = safeFloat(p.RuntimeMetrics.AvgCouplingMs)
-	p.RuntimeMetrics.AvgModellingMs = safeFloat(p.RuntimeMetrics.AvgModellingMs)
-	p.RuntimeMetrics.AvgOptimiseMs = safeFloat(p.RuntimeMetrics.AvgOptimiseMs)
-	p.RuntimeMetrics.AvgSimMs = safeFloat(p.RuntimeMetrics.AvgSimMs)
-	p.RuntimeMetrics.AvgReasoningMs = safeFloat(p.RuntimeMetrics.AvgReasoningMs)
-	p.RuntimeMetrics.AvgBroadcastMs = safeFloat(p.RuntimeMetrics.AvgBroadcastMs)
-	p.RuntimeMetrics.PredictedCriticalMs = safeFloat(p.RuntimeMetrics.PredictedCriticalMs)
-
-	// Sanitize NetworkEquilibrium
-	p.NetworkEquilibrium.SystemRhoMean = safeFloat(p.NetworkEquilibrium.SystemRhoMean)
-	p.NetworkEquilibrium.SystemRhoVariance = safeFloat(p.NetworkEquilibrium.SystemRhoVariance)
-	p.NetworkEquilibrium.EquilibriumDelta = safeFloat(p.NetworkEquilibrium.EquilibriumDelta)
-	p.NetworkEquilibrium.MaxCongestionFeedback = safeFloat(p.NetworkEquilibrium.MaxCongestionFeedback)
-	p.NetworkEquilibrium.NetworkSaturationRisk = safeFloat(p.NetworkEquilibrium.NetworkSaturationRisk)
-
-	// Sanitize TopologySensitivity
-	p.TopologySensitivity.SystemFragility = safeFloat(p.TopologySensitivity.SystemFragility)
-	p.TopologySensitivity.MaxAmplificationScore = safeFloat(p.TopologySensitivity.MaxAmplificationScore)
-	if p.TopologySensitivity.ByService != nil {
-		for svc, snap := range p.TopologySensitivity.ByService {
-			snap.PerturbationScore = safeFloat(snap.PerturbationScore)
-			p.TopologySensitivity.ByService[svc] = snap
-		}
-	}
-
-	// Sanitize FixedPointEquilibrium
-	p.FixedPointEquilibrium.SystemicCollapseProb = safeFloat(p.FixedPointEquilibrium.SystemicCollapseProb)
-	p.FixedPointEquilibrium.ConvergenceRate = safeFloat(p.FixedPointEquilibrium.ConvergenceRate)
-	p.FixedPointEquilibrium.StabilityMargin = safeFloat(p.FixedPointEquilibrium.StabilityMargin)
-	if p.FixedPointEquilibrium.EquilibriumRho != nil {
-		for svc, rho := range p.FixedPointEquilibrium.EquilibriumRho {
-			p.FixedPointEquilibrium.EquilibriumRho[svc] = safeFloat(rho)
-		}
-	}
-	if p.FixedPointEquilibrium.PerturbationSensitivity != nil {
-		for svc, psens := range p.FixedPointEquilibrium.PerturbationSensitivity {
-			p.FixedPointEquilibrium.PerturbationSensitivity[svc] = safeFloat(psens)
-		}
-	}
-
-	// Sanitize PressureHeatmap
-	if p.PressureHeatmap != nil {
-		for svc, pressure := range p.PressureHeatmap {
-			p.PressureHeatmap[svc] = safeFloat(pressure)
-		}
-	}
-
-	// Sanitize SaturationCountdowns
-	if p.SaturationCountdowns != nil {
-		for svc, cd := range p.SaturationCountdowns {
-			p.SaturationCountdowns[svc] = safeFloat(cd)
-		}
-	}
-
-	// Sanitize PredictionHorizon
-	if p.PredictionHorizon != nil {
-		for svc, ph := range p.PredictionHorizon {
-			p.PredictionHorizon[svc] = safeFloat(ph)
-		}
-	}
-
-	// Sanitize NetworkCoupling
-	if p.NetworkCouplingData != nil {
-		for svc, nc := range p.NetworkCouplingData {
-			nc.EffectivePressure = safeFloat(nc.EffectivePressure)
-			nc.PathSaturationRisk = safeFloat(nc.PathSaturationRisk)
-			nc.CoupledArrivalRate = safeFloat(nc.CoupledArrivalRate)
-			nc.PathEquilibriumRho = safeFloat(nc.PathEquilibriumRho)
-			nc.CongestionFeedbackScore = safeFloat(nc.CongestionFeedbackScore)
-			nc.PathSaturationHorizonSec = safeFloat(nc.PathSaturationHorizonSec)
-			nc.PathCollapseProb = safeFloat(nc.PathCollapseProb)
-			nc.SteadyStateP0 = safeFloat(nc.SteadyStateP0)
-			nc.SteadyStateMeanQueue = safeFloat(nc.SteadyStateMeanQueue)
-			p.NetworkCouplingData[svc] = nc
-		}
-	}
-
-	// Sanitize StabilityEnvelope
-	p.StabilityEnvelope.SafeSystemRhoMax = safeFloat(p.StabilityEnvelope.SafeSystemRhoMax)
-	p.StabilityEnvelope.CurrentSystemRhoMean = safeFloat(p.StabilityEnvelope.CurrentSystemRhoMean)
-	p.StabilityEnvelope.EnvelopeHeadroom = safeFloat(p.StabilityEnvelope.EnvelopeHeadroom)
-	p.StabilityEnvelope.WorstPerturbationDelta = safeFloat(p.StabilityEnvelope.WorstPerturbationDelta)
-
-	// Sanitize Bundles (embedded structs, must sanitize in-place)
-	if p.Bundles != nil {
-		for svc, bundle := range p.Bundles {
-			if bundle == nil {
-				continue
-			}
-			// Sanitize Queue (embedded)
-			bundle.Queue.ArrivalRate = safeFloat(bundle.Queue.ArrivalRate)
-			bundle.Queue.ServiceRate = safeFloat(bundle.Queue.ServiceRate)
-			bundle.Queue.Utilisation = safeFloat(bundle.Queue.Utilisation)
-			bundle.Queue.Confidence = safeFloat(bundle.Queue.Confidence)
-			bundle.Queue.Hazard = safeFloat(bundle.Queue.Hazard)
-			bundle.Queue.MeanQueueLen = safeFloat(bundle.Queue.MeanQueueLen)
-			bundle.Queue.MeanWaitMs = safeFloat(bundle.Queue.MeanWaitMs)
-			bundle.Queue.MeanSojournMs = safeFloat(bundle.Queue.MeanSojournMs)
-			bundle.Queue.BurstFactor = safeFloat(bundle.Queue.BurstFactor)
-			bundle.Queue.AdjustedWaitMs = safeFloat(bundle.Queue.AdjustedWaitMs)
-			bundle.Queue.UtilisationTrend = safeFloat(bundle.Queue.UtilisationTrend)
-			bundle.Queue.UpstreamPressure = safeFloat(bundle.Queue.UpstreamPressure)
-			bundle.Queue.Concurrency = safeFloat(bundle.Queue.Concurrency)
-			bundle.Queue.Reservoir = safeFloat(bundle.Queue.Reservoir)
-
-			// Sanitize Stochastic
-			bundle.Stochastic.ArrivalCoV = safeFloat(bundle.Stochastic.ArrivalCoV)
-			bundle.Stochastic.BurstAmplification = safeFloat(bundle.Stochastic.BurstAmplification)
-			bundle.Stochastic.RiskPropagation = safeFloat(bundle.Stochastic.RiskPropagation)
-			bundle.Stochastic.Confidence = safeFloat(bundle.Stochastic.Confidence)
-
-			// Sanitize Signal
-			bundle.Signal.FastEWMA = safeFloat(bundle.Signal.FastEWMA)
-			bundle.Signal.SlowEWMA = safeFloat(bundle.Signal.SlowEWMA)
-			bundle.Signal.EWMAVariance = safeFloat(bundle.Signal.EWMAVariance)
-			bundle.Signal.CUSUMPos = safeFloat(bundle.Signal.CUSUMPos)
-			bundle.Signal.CUSUMNeg = safeFloat(bundle.Signal.CUSUMNeg)
-
-			// Sanitize Stability (embedded)
-			bundle.Stability.CollapseRisk = safeFloat(bundle.Stability.CollapseRisk)
-			bundle.Stability.OscillationRisk = safeFloat(bundle.Stability.OscillationRisk)
-			bundle.Stability.CascadeAmplificationScore = safeFloat(bundle.Stability.CascadeAmplificationScore)
-			bundle.Stability.StabilityDerivative = safeFloat(bundle.Stability.StabilityDerivative)
-			bundle.Stability.StabilityMargin = safeFloat(bundle.Stability.StabilityMargin)
-			bundle.Stability.FeedbackGain = safeFloat(bundle.Stability.FeedbackGain)
-			bundle.Stability.PredictedCollapseMs = safeFloat(bundle.Stability.PredictedCollapseMs)
-			bundle.Stability.TrendAdjustedMargin = safeFloat(bundle.Stability.TrendAdjustedMargin)
-
-			p.Bundles[svc] = bundle
-		}
-	}
-
-	// Sanitize Topology node loads
-	if p.Topology.Nodes != nil {
-		for i, node := range p.Topology.Nodes {
-			node.NormalisedLoad = safeFloat(node.NormalisedLoad)
-			p.Topology.Nodes[i] = node
-		}
-	}
-
-	// Sanitize Topology edge weights and latencies
-	if p.Topology.Edges != nil {
-		for i, edge := range p.Topology.Edges {
-			edge.Weight = safeFloat(edge.Weight)
-			edge.LatencyMs = safeFloat(edge.LatencyMs)
-			edge.ErrorRate = safeFloat(edge.ErrorRate)
-			edge.CallRate = safeFloat(edge.CallRate)
-			p.Topology.Edges[i] = edge
-		}
-	}
-
-	// Sanitize Prediction Timeline
-	if p.PredictionTimeline != nil {
-		for svc, points := range p.PredictionTimeline {
-			for i, pt := range points {
-				pt.Rho = safeFloat(pt.Rho)
-				pt.Lower95 = safeFloat(pt.Lower95)
-				pt.Upper95 = safeFloat(pt.Upper95)
-				points[i] = pt
-			}
-			p.PredictionTimeline[svc] = points
-		}
-	}
-
-	// Sanitize Risk Timeline
-	if p.RiskTimeline != nil {
-		for svc, points := range p.RiskTimeline {
-			for i, pt := range points {
-				pt.Rho = safeFloat(pt.Rho)
-				pt.CollapseRisk = safeFloat(pt.CollapseRisk)
-				points[i] = pt
-			}
-			p.RiskTimeline[svc] = points
-		}
-	}
-
-	// Sanitize ScenarioComparison
-	if p.ScenarioComparison != nil {
-		p.ScenarioComparison.BestCaseCollapse = safeFloat(p.ScenarioComparison.BestCaseCollapse)
-		p.ScenarioComparison.WorstCaseCollapse = safeFloat(p.ScenarioComparison.WorstCaseCollapse)
-		p.ScenarioComparison.MedianSLAViolation = safeFloat(p.ScenarioComparison.MedianSLAViolation)
-		p.ScenarioComparison.StableScenarioFraction = safeFloat(p.ScenarioComparison.StableScenarioFraction)
-		p.ScenarioComparison.RecoveryConvergenceMin = safeFloat(p.ScenarioComparison.RecoveryConvergenceMin)
-		p.ScenarioComparison.RecoveryConvergenceMax = safeFloat(p.ScenarioComparison.RecoveryConvergenceMax)
-	}
-
-	// Sanitize SimOverlay
-	if p.SimOverlay != nil {
-		p.SimOverlay.HorizonMs = safeFloat(p.SimOverlay.HorizonMs)
-		if p.SimOverlay.CascadeFailureProbability != nil {
-			for svc, prob := range p.SimOverlay.CascadeFailureProbability {
-				p.SimOverlay.CascadeFailureProbability[svc] = safeFloat(prob)
-			}
-		}
-		if p.SimOverlay.P95QueueLen != nil {
-			for svc, qlen := range p.SimOverlay.P95QueueLen {
-				p.SimOverlay.P95QueueLen[svc] = safeFloat(qlen)
-			}
-		}
-		if p.SimOverlay.SaturationFrac != nil {
-			for svc, frac := range p.SimOverlay.SaturationFrac {
-				p.SimOverlay.SaturationFrac[svc] = safeFloat(frac)
-			}
-		}
-		if p.SimOverlay.SLAViolationProbability != nil {
-			for svc, prob := range p.SimOverlay.SLAViolationProbability {
-				p.SimOverlay.SLAViolationProbability[svc] = safeFloat(prob)
-			}
-		}
-	}
-
-	// Sanitize SimResult
-	if p.SimResult != nil {
-		// Sanitize all float fields in SimResult
-		p.SimResult.RecoveryConvergenceMs = safeFloat(p.SimResult.RecoveryConvergenceMs)
-		if p.SimResult.CascadeFailureProbability != nil {
-			for svc, prob := range p.SimResult.CascadeFailureProbability {
-				p.SimResult.CascadeFailureProbability[svc] = safeFloat(prob)
-			}
-		}
-		if p.SimResult.QueueDistributionAtHorizon != nil {
-			for svc, dist := range p.SimResult.QueueDistributionAtHorizon {
-				dist.MeanQueueLen = safeFloat(dist.MeanQueueLen)
-				dist.VarQueueLen = safeFloat(dist.VarQueueLen)
-				dist.P95QueueLen = safeFloat(dist.P95QueueLen)
-				dist.SaturationFrac = safeFloat(dist.SaturationFrac)
-				dist.UtilisationAtEnd = safeFloat(dist.UtilisationAtEnd)
-				p.SimResult.QueueDistributionAtHorizon[svc] = dist
-			}
-		}
-		if p.SimResult.SLAViolationProbability != nil {
-			for svc, prob := range p.SimResult.SLAViolationProbability {
-				p.SimResult.SLAViolationProbability[svc] = safeFloat(prob)
-			}
-		}
-	}
-
-	// Sanitize Events (reasoning.Event may have float fields)
-	if p.Events != nil {
-		for i, evt := range p.Events {
-			evt.Evidence.Utilisation = safeFloat(evt.Evidence.Utilisation)
-			evt.Evidence.CollapseRisk = safeFloat(evt.Evidence.CollapseRisk)
-			evt.Evidence.OscillationRisk = safeFloat(evt.Evidence.OscillationRisk)
-			evt.Evidence.QueueWaitMs = safeFloat(evt.Evidence.QueueWaitMs)
-			evt.Evidence.SaturationSec = safeFloat(evt.Evidence.SaturationSec)
-			evt.Evidence.BurstFactor = safeFloat(evt.Evidence.BurstFactor)
-			evt.Evidence.CascadeRisk = safeFloat(evt.Evidence.CascadeRisk)
-			evt.Evidence.StabilityMargin = safeFloat(evt.Evidence.StabilityMargin)
-			evt.Evidence.CompositeScore = safeFloat(evt.Evidence.CompositeScore)
-			evt.UncertaintyScore = safeFloat(evt.UncertaintyScore)
-			p.Events[i] = evt
-		}
-	}
-
-	// Sanitize RiskQueueItems
-	if p.PriorityRiskQueue != nil {
-		for i, item := range p.PriorityRiskQueue {
-			item.UrgencyScore = safeFloat(item.UrgencyScore)
-			item.CollapseRisk = safeFloat(item.CollapseRisk)
-			item.Rho = safeFloat(item.Rho)
-			item.PathCollapseProb = safeFloat(item.PathCollapseProb)
-			p.PriorityRiskQueue[i] = item
-		}
-	}
-}
-
-/* ================= BROADCAST ================= */
+/*  BROADCAST  */
 
 func (h *Hub) Broadcast(p *TickPayload) {
-
 	sanitizePayload(p)
 
 	p.SequenceNo = h.seqNo.Add(1)
 	p.Timestamp = time.Now()
 	p.Schema = SchemaVersion
 
-	// Attempt JSON marshaling with error recovery
 	data, err := json.Marshal(p)
 	if err != nil {
 		errStr := err.Error()
-		log.Printf("[hub] marshal error (sanitised payload): %v", errStr)
+		log.Printf("[hub] marshal error: %v", errStr)
 
-		// Try to identify which field caused the issue by trying to marshal sub-objects
 		if strings.Contains(errStr, "+Inf") || strings.Contains(errStr, "-Inf") {
-			log.Printf("[hub] DEBUG: Attempting to identify cause of infinity error")
-			// Try marshaling each major component to isolate the infinity
-			if _, err := json.Marshal(p.Objective); err != nil {
-				log.Printf("[hub] DEBUG: Objective has error: %v", err)
+			if _, err2 := json.Marshal(p.Objective); err2 != nil {
+				log.Printf("[hub] DEBUG: Objective: %v", err2)
 			}
-			if _, err := json.Marshal(p.Bundles); err != nil {
-				log.Printf("[hub] DEBUG: Bundles has error: %v", err)
-			}
-			if _, err := json.Marshal(p.Topology); err != nil {
-				log.Printf("[hub] DEBUG: Topology has error: %v", err)
-			}
-			if _, err := json.Marshal(p.RuntimeMetrics); err != nil {
-				log.Printf("[hub] DEBUG: RuntimeMetrics has error: %v", err)
+			if _, err2 := json.Marshal(p.Bundles); err2 != nil {
+				log.Printf("[hub] DEBUG: Bundles: %v", err2)
 			}
 		}
 
-		// Fallback: Create a minimal safe payload with only the most critical fields
 		minPayload := map[string]interface{}{
 			"type":           "tick",
 			"seq":            p.SequenceNo,
@@ -404,25 +99,22 @@ func (h *Hub) Broadcast(p *TickPayload) {
 		fallbackData, err2 := json.Marshal(minPayload)
 		if err2 != nil {
 			log.Printf("[hub] fallback marshal failed: %v", err2)
-			// ✅ CRITICAL: Even if marshal fails, ALWAYS store the sequence number
 			h.lastPayload.Store(p)
 			return
 		}
-		data = fallbackData // Use fallback data instead
-		log.Printf("[hub] broadcast with minimal fallback payload (%d bytes)", len(fallbackData))
+		data = fallbackData
 	}
 
-	// ✅ CRITICAL: Always store latest payload and sequence BEFORE client fanout
-	// This guarantees sequence always advances regardless of connected clients
 	h.lastPayload.Store(p)
 	h.lastPayloadJSON.Store(&data)
 
-	h.mu.Lock()
+	// Snapshot client list under short read lock, then fan out without any lock.
+	h.mu.RLock()
 	cs := make([]*client, 0, len(h.clients))
 	for c := range h.clients {
 		cs = append(cs, c)
 	}
-	h.mu.Unlock()
+	h.mu.RUnlock()
 
 	for _, c := range cs {
 		if c.closed.Load() {
@@ -438,41 +130,9 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	}
 }
 
-// Latest returns the most recently broadcast TickPayload
-// Safe for concurrent access from any goroutine at any time
-func (h *Hub) Latest() *TickPayload {
-	return h.lastPayload.Load()
-}
+func (h *Hub) Latest() *TickPayload           { return h.lastPayload.Load() }
+func (h *Hub) GetLastPayload() *TickPayload   { return h.lastPayload.Load() }
 
-// SetLastPayload atomically updates the cached latest payload without broadcasting
-// This is used for restart bootstrap to pre-load existing state before Run() starts
-func (h *Hub) SetLastPayload(p *TickPayload) {
-	if p == nil {
-		return
-	}
-
-	// Sanitize all values first - this is mandatory
-	sanitizePayload(p)
-
-	p.SequenceNo = h.seqNo.Load() // Keep existing sequence number, do NOT increment
-	p.Timestamp = time.Now()
-	p.Schema = SchemaVersion
-
-	// Update atomic caches atomically
-	h.lastPayload.Store(p)
-
-	// Pre-marshal JSON so REST endpoints work immediately
-	if data, err := json.Marshal(p); err == nil {
-		h.lastPayloadJSON.Store(&data)
-	}
-}
-
-// GetLastPayload returns the cached TickPayload for REST dashboard queries
-func (h *Hub) GetLastPayload() *TickPayload {
-	return h.lastPayload.Load()
-}
-
-// GetLastPayloadJSON returns the cached JSON representation of TickPayload for REST endpoint
 func (h *Hub) GetLastPayloadJSON() []byte {
 	if ptr := h.lastPayloadJSON.Load(); ptr != nil {
 		return *ptr
@@ -480,10 +140,23 @@ func (h *Hub) GetLastPayloadJSON() []byte {
 	return nil
 }
 
-/* ================= UPGRADE ================= */
+func (h *Hub) SetLastPayload(p *TickPayload) {
+	if p == nil {
+		return
+	}
+	sanitizePayload(p)
+	p.SequenceNo = h.seqNo.Load()
+	p.Timestamp = time.Now()
+	p.Schema = SchemaVersion
+	h.lastPayload.Store(p)
+	if data, err := json.Marshal(p); err == nil {
+		h.lastPayloadJSON.Store(&data)
+	}
+}
+
+/*  UPGRADE  */
 
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
-
 	h.mu.RLock()
 	count := len(h.clients)
 	h.mu.RUnlock()
@@ -497,8 +170,10 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upgrader := &ws.Upgrader{
-		ReadBufferSize:  512,
-		WriteBufferSize: 1024,
+		// 8KB buffers: original was 512/1024. Larger buffers reduce system calls
+		// for tick payloads which can be 8-32KB for large deployments.
+		ReadBufferSize:  8192,
+		WriteBufferSize: 65536,
 		CheckOrigin:     func(*http.Request) bool { return true },
 	}
 
@@ -519,7 +194,6 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	h.clients[c] = struct{}{}
 	h.mu.Unlock()
 
-	// Send cached last payload to new client (bootstrap with live data)
 	if lastJSON != nil {
 		select {
 		case c.send <- lastJSON:
@@ -533,12 +207,8 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	go c.readPump()
 }
 
-// Subscribe registers a callback function that receives every TickPayload broadcast through the hub
-// Safe for concurrent calls. Callbacks are executed synchronously during Broadcast()
-func (h *Hub) Subscribe(cb func(*TickPayload)) {
-	// No-op placeholder implementation for test compatibility
-	// In production use HandleUpgrade for real websocket clients
-}
+// Subscribe is a no-op preserved for test compatibility.
+func (h *Hub) Subscribe(cb func(*TickPayload)) {}
 
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
@@ -550,12 +220,9 @@ func (h *Hub) remove(c *client) {
 	if !c.closed.CompareAndSwap(false, true) {
 		return
 	}
-
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
 	delete(h.clients, c)
-
 	for {
 		select {
 		case <-c.send:
@@ -567,7 +234,7 @@ func (h *Hub) remove(c *client) {
 	}
 }
 
-/* ================= CLIENT ================= */
+/*  CLIENT  */
 
 type client struct {
 	hub    *Hub
@@ -578,7 +245,6 @@ type client struct {
 }
 
 func (c *client) writePump() {
-
 	ticker := time.NewTicker(pingInterval)
 	writesSinceProbe := 0
 	defer func() {
@@ -608,7 +274,6 @@ func (c *client) writePump() {
 				}
 				writesSinceProbe = 0
 			}
-
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if err := c.conn.WriteMessage(ws.PingMessage, nil); err != nil {
@@ -635,10 +300,8 @@ func (c *client) writePressureProbe() error {
 
 func (c *client) readPump() {
 	defer c.hub.remove(c)
-
 	c.conn.SetReadLimit(512)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-
 	for {
 		mt, _, err := c.conn.ReadMessage()
 		if err != nil {

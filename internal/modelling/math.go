@@ -5,6 +5,37 @@ import "math"
 // sigmoid maps x → (0,1) with standard logistic curve.
 func sigmoid(x float64) float64 { return 1.0 / (1.0 + math.Exp(-x)) }
 
+// clamp01 constrains v to [0, 1]. Shorthand used throughout the modelling pipeline.
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// pos returns max(v, 0). Prevents negative values from reaching physics calculations.
+func pos(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// safeDiv divides a by b, returning fallback when b ≤ 0 or result is non-finite.
+func safeDiv(a, b, fallback float64) float64 {
+	if b <= 0 {
+		return fallback
+	}
+	r := a / b
+	if math.IsNaN(r) || math.IsInf(r, 0) {
+		return fallback
+	}
+	return r
+}
+
 // medianBiasedRate returns a burst-resistant arrival rate estimate.
 // It Winsorises the last sample towards the mean when the last sample
 // deviates more than 1.5 standard deviations, reducing burst-clustering bias.
@@ -16,7 +47,6 @@ func medianBiasedRate(last, mean, std float64) float64 {
 	deviation := last - mean
 	threshold := 1.5 * std
 	if math.Abs(deviation) > threshold {
-		// Winsorise: clamp the deviation to ±threshold, preserving direction
 		clampedLast := mean + math.Copysign(threshold, deviation)
 		return 0.5*clampedLast + 0.5*mean
 	}

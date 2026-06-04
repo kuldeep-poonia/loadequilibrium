@@ -40,8 +40,8 @@ func LoadConfig() Config {
 		ScrapeTimeout:        envDuration("LE_SCRAPE_TIMEOUT", 1500*time.Millisecond),
 		IngestURL:            envStr("LE_INGEST_URL", "http://loadequilibrium:8080/api/v1/ingest"),
 		IngestToken:          envStr("INGEST_TOKEN", ""),
-		QueueSize:            envInt("LE_COLLECTOR_QUEUE_SIZE", 4096),
-		BatchMaxPoints:       envInt("LE_BATCH_MAX_POINTS", 128),
+		QueueSize:            envInt("LE_COLLECTOR_QUEUE_SIZE", 32768), // was 4096 — 8× larger
+		BatchMaxPoints:       envInt("LE_BATCH_MAX_POINTS", 512),       // was 128 — 4× larger batches
 		BatchMaxAge:          envDuration("LE_BATCH_MAX_AGE", 2*time.Second),
 		FlushTimeout:         envDuration("LE_FLUSH_TIMEOUT", 5*time.Second),
 		MaxRetries:           envInt("LE_INGEST_MAX_RETRIES", 4),
@@ -49,9 +49,9 @@ func LoadConfig() Config {
 		RetryMaxDelay:        envDuration("LE_INGEST_RETRY_MAX", 5*time.Second),
 		CircuitOpenAfter:     envInt("LE_CIRCUIT_OPEN_AFTER", 5),
 		CircuitCooldown:      envDuration("LE_CIRCUIT_COOLDOWN", 15*time.Second),
-		MaxScrapeConcurrency: envInt("LE_MAX_SCRAPE_CONCURRENCY", 16),
-		MaxScrapeBodyBytes:   int64(envInt("LE_MAX_SCRAPE_BODY_BYTES", 4<<20)),
-		RequestRateLimitRPS:  envFloat("LE_INGEST_REQUEST_RPS", 10),
+		MaxScrapeConcurrency: envInt("LE_MAX_SCRAPE_CONCURRENCY", 64),  // was 16 — 4× higher concurrency
+		MaxScrapeBodyBytes:   int64(envInt("LE_MAX_SCRAPE_BODY_BYTES", 8<<20)), // was 4MB — 8MB
+		RequestRateLimitRPS:  envFloat("LE_INGEST_REQUEST_RPS", 0),     // was 10 — 0 disables throttle
 		DiscoveryLabel:       envStr("LE_DISCOVERY_LABEL", "le.enable"),
 		DefaultMetricsPath:   cleanPath(envStr("LE_DEFAULT_METRICS_PATH", "/metrics")),
 	}

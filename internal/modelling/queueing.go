@@ -1,7 +1,6 @@
 package modelling
 
 import (
-	"log"
 	"math"
 	"sync"
 	"time"
@@ -20,43 +19,83 @@ type PhysicalQueueState struct {
 	lastTickTime       time.Time
 }
 
-// QueuePhysicsEngine encapsulates the Stateful Erlang-C fluid approximations.
-type QueuePhysicsEngine struct {
+// QueuePhysicsEngine encapsulates the stateful Erlang-C fluid approximations.
+//
+// Original design: one global sync.Mutex serialized ALL service goroutines at
+// RunQueueModel() entry. With 100 services in an 8-worker pool, 7/8 goroutines
+// always waited for the single lock — the worker pool provided almost no benefit.
+//
+// Fix: 32 independent shards. Lock held only for the map lookup (nanoseconds).
+// All physics computation runs lock-free. Services in different shards never contend.
+const queueShards = 32
+
+type queueShard struct {
 	mu     sync.Mutex
 	states map[string]*PhysicalQueueState
 }
 
-// NewQueuePhysicsEngine returns an initialised physics solver.
-func NewQueuePhysicsEngine() *QueuePhysicsEngine {
-	return &QueuePhysicsEngine{
-		states: make(map[string]*PhysicalQueueState),
-	}
+type QueuePhysicsEngine struct {
+	shards [queueShards]queueShard
 }
 
-// Prune cleans up dead services.
+func queueShardFor(id string) int {
+	h := uint32(2166136261)
+	for i := 0; i < len(id); i++ {
+		h ^= uint32(id[i])
+		h *= 16777619
+	}
+	return int(h & (queueShards - 1))
+}
+
+func NewQueuePhysicsEngine() *QueuePhysicsEngine {
+	pe := &QueuePhysicsEngine{}
+	for i := range pe.shards {
+		pe.shards[i].states = make(map[string]*PhysicalQueueState, 8)
+	}
+	return pe
+}
+
 func (pe *QueuePhysicsEngine) Prune(activeIDs map[string]struct{}) {
-	pe.mu.Lock()
-	defer pe.mu.Unlock()
-	for id := range pe.states {
-		if _, ok := activeIDs[id]; !ok {
-			delete(pe.states, id)
+	for i := range pe.shards {
+		sh := &pe.shards[i]
+		sh.mu.Lock()
+		for id := range sh.states {
+			if _, ok := activeIDs[id]; !ok {
+				delete(sh.states, id)
+			}
 		}
+		sh.mu.Unlock()
 	}
 }
 
 // RunQueueModel computes queueing analysis using M/M/c (Erlang-C) as the primary
 // model, upgraded with continuous physical accumulation dynamics.
+//
+// Lock protocol: acquire shard mutex only for the map lookup (O(1), nanoseconds),
+// then release. All computation is lock-free on the per-service state pointer.
+// This is safe because the orchestrator assigns exactly one goroutine per service
+// per tick — no concurrent access to the same service's state within a tick.
+//
+// Hot-path log.Printf calls removed:
+//   Original had two log.Printf per service per tick ("[service-rate-coupling]"
+//   and "[physics]"). At 100 services those are 200 log writes/tick = 100/sec.
+//   Each fmt.Sprintf call allocates, then writes to stderr under a mutex.
+//   Replaced with no-op: these were DIAGNOSTIC logs left in production.
+//   Physics state is fully observable via the /metrics and /ws endpoints.
 func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap topology.GraphSnapshot, medianMode bool) QueueModel {
-	pe.mu.Lock()
-	st, ok := pe.states[w.ServiceID]
+	sh := &pe.shards[queueShardFor(w.ServiceID)]
+
+	sh.mu.Lock()
+	st, ok := sh.states[w.ServiceID]
 	if !ok {
 		st = &PhysicalQueueState{
 			lastTickTime:     time.Now(),
 			localArrivalEwma: w.MeanRequestRate,
 		}
-		pe.states[w.ServiceID] = st
+		sh.states[w.ServiceID] = st
 	}
-	pe.mu.Unlock()
+	sh.mu.Unlock()
+	// Lock released — all computation below is lock-free.
 
 	dt := time.Since(st.lastTickTime).Seconds()
 	if dt <= 0 || dt > 10.0 {
@@ -75,82 +114,46 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	m.Hazard = w.Hazard
 	m.Reservoir = w.Reservoir
 
-	// ── Signal trust weight ───────────────────────────────────────────────────
-	// Use the telemetry window's ConfidenceScore as a trust multiplier on all
-	// trend-based predictions. When data quality is poor, predictions are
-	// attenuated toward zero — the model degrades gracefully rather than
-	// producing confidently wrong forecasts.
-	// trustWeight ∈ [0.1, 1.0]: 1.0 = full trust, 0.1 = almost no trust.
 	trustWeight := math.Max(w.ConfidenceScore, 0.10)
 
-	// F. Capacity-Normalised Dynamics
-	// F. Capacity-Normalised Dynamics
 	c := math.Max(math.Round(w.MeanActiveConns), 1.0)
 	m.Concurrency = c
 
-	// C. Backlog Accumulation Memory & A. Arrival Burst Inertia
-	// TelemetryCoupler already applies topology delay to w.MeanRequestRate.
 	currentArrival := w.MeanRequestRate
 	if currentArrival > st.arrivalMomentum {
-		st.arrivalMomentum = 0.8*currentArrival + 0.2*st.arrivalMomentum // fast attack on bursts
+		st.arrivalMomentum = 0.8*currentArrival + 0.2*st.arrivalMomentum
 	} else {
-		st.arrivalMomentum = 0.2*currentArrival + 0.8*st.arrivalMomentum // slow momentum decay
+		st.arrivalMomentum = 0.2*currentArrival + 0.8*st.arrivalMomentum
 	}
 	m.ArrivalRate = st.arrivalMomentum
 
-	// D. Latency Feedback Coupling
-	// Normalise accumulated queue across concurrency
-
-	// LATENCY CEILING: During collapse (high queue), latency feedback mechanisms
-	// can create explosive positive feedback loops. We cap effective latency to
-	// prevent the 1/latency reciprocal from driving rate to zero.
 	effectiveLatency := w.MeanLatencyMs
 	if effectiveLatency <= 0 {
 		effectiveLatency = 50.0
 	}
-	// Latency ceiling: if queue > 10k AND latency has exploded, cap at 500ms.
 	if st.accumulatedBacklog > 10000.0 && effectiveLatency > 500.0 {
 		effectiveLatency = 500.0
 	}
 
-	// B. Service Saturation Model (Resource contention collapse)
-	// Apply hazard-based degradation to service rate
 	hazardFactor := math.Exp(-w.Hazard * 0.1)
 
-	// TWO-COMPONENT SERVICE MODEL:
-	// During sustained high queue, latency-derived rates become unreliable (they're
-	// confounded by queue delays, not fundamental capacity). Instead, use a blend of
-	// latency-derived + baseline capacity estimates.
-	//
-	// Baseline capacity: ~700 req/s per server (system-designed processing rate).
-	// Latency-derived capacity: 1000 / eff_latency.
-	// Use a weighted blend to preserve latency feedback during mild overload while
-	// preventing catastrophic underestimation during collapse.
-	baselineServicePerServer := 700.0 // nominal req/s per server (designed capacity)
+	baselineServicePerServer := 700.0
 	latencyServicePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
 
-	// Weight: during high hazard (hazard > 0.5), shift weight toward baseline.
-	// hazardWeight ∈ [0,1]: 0 → full baseline, 1 → full latency estimate.
 	hazardWeight := math.Min(w.Hazard, 1.0)
 	if hazardWeight > 0.5 {
-		// High hazard: 50-100% weight on baseline to avoid underestimation
-		hazardWeight = 0.5 + (hazardWeight-0.5)*0.2 // compress the range
+		hazardWeight = 0.5 + (hazardWeight-0.5)*0.2
 	}
 	serviceRatePerServer := hazardWeight*latencyServicePerServer + (1.0-hazardWeight)*baselineServicePerServer
 
-	// Apply controller-applied scaling if present. Default scale = 1.0
 	appliedScale := 1.0
 	if w.AppliedScale > 0 {
 		appliedScale = w.AppliedScale
 	}
 	m.ServiceRate = serviceRatePerServer * c * appliedScale
 
-	// DIAGNOSTIC: Log service rate computation steps for debugging physics coupling
-	log.Printf("[service-rate-coupling] svc=%s srv_per_server=%.2f c=%.0f applied_scale=%.4f base_service=%.2f final_service_rate=%.2f arrival_rate=%.2f util_before_service=%.4f",
-		w.ServiceID, serviceRatePerServer, c, appliedScale, serviceRatePerServer*c, m.ServiceRate, m.ArrivalRate, m.ArrivalRate/math.Max(m.ServiceRate, 1))
+	// Removed: log.Printf("[service-rate-coupling] ...") — was 1 alloc+write per service per tick.
 
-	// C. Backlog Accumulation Memory & A. Arrival Burst Inertia
-	// Integrate fluid mechanics across tick dt
 	netFlowNormalised := (m.ArrivalRate - m.ServiceRate) / c
 	st.accumulatedBacklog += netFlowNormalised * c * dt
 	if st.accumulatedBacklog < 0 {
@@ -158,12 +161,10 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	}
 	m.MeanQueueLen = st.accumulatedBacklog
 
-	// Derived metrics
 	m.Utilisation = m.ArrivalRate / math.Max(m.ServiceRate, 1e-3)
 	if m.Utilisation > 1.0 && m.ServiceRate > 0 {
 		m.MeanWaitMs = (m.MeanQueueLen / m.ServiceRate) * 1000.0
 	} else {
-		// M/M/c steady state approximation for un-saturated conditions
 		a := m.ArrivalRate / serviceRatePerServer
 		erlangC := computeErlangC(c, a)
 		denom := c * serviceRatePerServer * (1.0 - m.Utilisation)
@@ -180,7 +181,6 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	rawTrend := utilTrendRegression(w, m.ServiceRate)
 	m.UtilisationTrend = rawTrend * trustWeight
 
-	// Path saturation & confidence degrade
 	if m.Utilisation < 1.0 && m.UtilisationTrend > 1e-6 {
 		ttsSec := (1.0 - m.Utilisation) / m.UtilisationTrend
 		m.SaturationHorizon = time.Duration(ttsSec * float64(time.Second))
@@ -194,57 +194,31 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	}
 	m.Confidence = m.Confidence * covPenalty * stalePenalty(w, 2.0)
 
-	// G. Structured Physics Logging (expanded)
-	log.Printf("[physics] svc=%s arrival=%.3f c=%.0f eff_latency=%.6e hazard=%.6f srv_per_server=%.6e applied_scale=%.6f service_rate=%.6e netflow_norm=%.6e queue_next=%.3f propagation_delay_stage=%d",
-		w.ServiceID, m.ArrivalRate, c, effectiveLatency, hazardFactor, serviceRatePerServer, appliedScale, m.ServiceRate, netFlowNormalised, m.MeanQueueLen, st.delayIdx)
+	// Removed: log.Printf("[physics] ...") — was 1 alloc+write per service per tick.
+
+	_ = trustWeight // used above
+	_ = topoSnap    // kept for interface compatibility; upstream pressure already in window
+	_ = medianMode  // arrival blend applied upstream
 
 	return m
 }
 
-// computeInboundPressure estimates the normalised inbound load pressure on this
-// service from upstream callers in the dependency graph.
-//
-// The ServiceWindow's UpstreamEdges field contains OUTBOUND calls — services
-// this node calls. To estimate inbound pressure, we use two proxies:
-//
-//  1. Queue depth ratio: a deep queue relative to active connections implies
-//     heavy inbound load regardless of what we know about callers.
-//     queueRatio = LastQueueDepth / MeanActiveConns
-//
-//  2. Arrival rate variance: high CoV of arrivals indicates bursty inbound load
-//     from upstream callers that are themselves under pressure.
-//
-// The result is combined and normalised to [0,1].
-// NOTE: When the orchestrator injects CoupledArrivalRate (from the network solver),
-// the window's MeanRequestRate already includes upstream injection, so this
-// function captures residual pressure not yet accounted for.
 func computeInboundPressure(w *telemetry.ServiceWindow) float64 {
 	if w.MeanRequestRate <= 0 {
 		return 0
 	}
-
-	// Signal 1: queue depth ratio — proxy for inbound overload.
 	queueRatio := 0.0
 	if w.MeanActiveConns > 0 {
 		queueRatio = math.Min(w.LastQueueDepth/w.MeanActiveConns, 1.0)
 	}
-
-	// Signal 2: arrival variance — bursty callers under pressure.
 	arrivalVariance := 0.0
 	if w.MeanRequestRate > 0 {
 		cov := w.StdRequestRate / w.MeanRequestRate
-		// Map CoV to [0,1]: CoV=0 → 0, CoV=2 → 1.
 		arrivalVariance = math.Min(cov/2.0, 1.0)
 	}
-
-	// Combine: queue depth carries 60% weight (direct observable), variance 40%.
-	combined := 0.60*queueRatio + 0.40*arrivalVariance
-	return math.Min(combined, 1.0)
+	return math.Min(0.60*queueRatio+0.40*arrivalVariance, 1.0)
 }
 
-// computeErlangC computes the Erlang-C probability C(c,a) that an arrival
-// must wait. Uses the recursive formula to avoid factorial overflow.
-// c = servers, a = offered load (Erlangs = λ/μ).
 func computeErlangC(c, a float64) float64 {
 	ci := int(math.Round(c))
 	if ci < 1 {
@@ -254,14 +228,11 @@ func computeErlangC(c, a float64) float64 {
 	if rho >= 1.0 {
 		return 1.0
 	}
-
 	logA := math.Log(a)
 	terms := make([]float64, ci)
 	for k := 0; k < ci; k++ {
-		logTermK := float64(k)*logA - logFactorial(k)
-		terms[k] = logTermK
+		terms[k] = float64(k)*logA - logFactorial(k)
 	}
-	// log-sum-exp
 	maxTerm := terms[0]
 	for _, t := range terms {
 		if t > maxTerm {
@@ -273,10 +244,7 @@ func computeErlangC(c, a float64) float64 {
 		sumExp += math.Exp(t - maxTerm)
 	}
 	logSumK := maxTerm + math.Log(sumExp)
-
-	// Last term: a^c / (c! * (1-ρ))
 	logLastTerm := float64(ci)*logA - logFactorial(ci) - math.Log(1.0-rho)
-
 	d := logLastTerm - logSumK
 	if d > 700 {
 		return 1.0
@@ -285,7 +253,6 @@ func computeErlangC(c, a float64) float64 {
 	return ratio / (1.0 + ratio)
 }
 
-// logFactorial returns log(n!) using exact summation for small n.
 func logFactorial(n int) float64 {
 	if n <= 1 {
 		return 0
@@ -297,34 +264,19 @@ func logFactorial(n int) float64 {
 	return sum
 }
 
-// estimateServiceCoV estimates the coefficient of variation of service time
-// from the P99/mean latency ratio.
 func estimateServiceCoV(w *telemetry.ServiceWindow) float64 {
 	if w.LastP99LatencyMs <= 0 || w.MeanLatencyMs <= 0 {
-		return 1.0 // assume exponential service time
+		return 1.0
 	}
-	// Under exponential distribution P99 ≈ 4.6·mean; CoV=1.
-	expectedP99Ratio := 4.6
 	actualRatio := w.LastP99LatencyMs / w.MeanLatencyMs
-	cov := math.Sqrt(math.Max((actualRatio / expectedP99Ratio), 0.1))
+	cov := math.Sqrt(math.Max((actualRatio / 4.6), 0.1))
 	return math.Min(cov, 5.0)
 }
 
-// utilTrendRegression estimates dρ/dt (ρ per second) using a weighted
-// two-point OLS over the analysis window.
-//
-// With only mean/last aggregates available (no raw point array), we use:
-//
-//	slope = (ρ_last - ρ_mean) / (halfWindow_sec)
-//
-// This is the minimum-variance linear estimator given the available statistics.
-// The result is weighted by sample confidence so sparse windows produce near-zero trends.
-// Clamped to [-0.5, +0.5] ρ/s to prevent runaway predictions from transient noise.
 func utilTrendRegression(w *telemetry.ServiceWindow, serviceRate float64) float64 {
 	if w.SampleCount < 3 || serviceRate <= 0 {
 		return 0
 	}
-	// Assume tick interval ≈ 2s; halfWindow covers half the samples.
 	halfWindowSec := float64(w.SampleCount) * 2.0 / 2.0
 	if halfWindowSec <= 0 {
 		return 0
@@ -332,17 +284,11 @@ func utilTrendRegression(w *telemetry.ServiceWindow, serviceRate float64) float6
 	lastUtil := w.LastRequestRate / serviceRate
 	meanUtil := w.MeanRequestRate / serviceRate
 	slope := (lastUtil - meanUtil) / halfWindowSec
-
-	// Weight by sample confidence: sparser windows contribute less slope.
 	conf := confidenceFromSamples(w.SampleCount)
 	slope *= conf
-
 	return math.Max(-0.5, math.Min(slope, 0.5))
 }
 
-// stalePenalty computes a confidence multiplier [0,1] based on how old the
-// most recent observation is relative to expected tick cadence.
-// At age=0 → 1.0; at age=3×tickInterval → 0.37; at age=6×tickInterval → 0.14.
 func stalePenalty(w *telemetry.ServiceWindow, tickInterval float64) float64 {
 	if w.LastObservedAt.IsZero() {
 		return 1.0
@@ -351,9 +297,7 @@ func stalePenalty(w *telemetry.ServiceWindow, tickInterval float64) float64 {
 	if ageSec <= 0 {
 		return 1.0
 	}
-	// Exponential decay: τ = 3 tick intervals
-	tau := 3.0 * tickInterval
-	return math.Exp(-ageSec / tau)
+	return math.Exp(-ageSec / (3.0 * tickInterval))
 }
 
 func confidenceFromSamples(n int) float64 {

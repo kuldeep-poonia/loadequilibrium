@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/useStore'
 import { serviceName, serviceDesc, isTestService } from '../lib/names'
 import { safe, n, pct, rho as fmtRho, ms } from '../lib/fmt'
+import OperationsLog from '../components/OperationsLog'
 import {
   setActuation, setPolicy, stepOnce,
   runStressTest, replayBurst, triggerSandbox,
@@ -180,11 +181,13 @@ function ServiceSelect({ value, onChange, includeAll }) {
 
 // ── Current autopilot status ──────────────────────────────────────
 function AutopilotStatus() {
-  const payload    = useStore(s => s.payload)
-  const systemMode = useStore(s => s.systemMode)
-  const [autopilotOn, setAutopilotOn] = useState(true)
-  const addToast   = useStore(s => s.addToast)
-  const logHuman   = useStore(s => s.logHumanAction)
+  const payload          = useStore(s => s.payload)
+  const systemMode       = useStore(s => s.systemMode)
+  // Read from store which syncs from backend control_plane.actuation_enabled every tick.
+  // This means the button always reflects the real backend state, even after a restart.
+  const autopilotOn      = useStore(s => s.actuationEnabled)
+  const addToast         = useStore(s => s.addToast)
+  const logHuman         = useStore(s => s.logHumanAction)
 
   const safetyMode = payload?.safety_mode
   const dirs       = payload?.directives || {}
@@ -194,7 +197,7 @@ function AutopilotStatus() {
     const next = !autopilotOn
     try {
       await setActuation(next)
-      setAutopilotOn(next)
+      // Do NOT setAutopilotOn locally — next tick from backend will update actuationEnabled in store.
       const msg = next ? 'Autopilot enabled — resuming autonomous control' : 'Autopilot frozen — no scaling decisions will execute'
       addToast(next ? 'success' : 'warn', next ? '▶ Autopilot Enabled' : '⏸ Autopilot Frozen', msg)
       logHuman(next ? 'Operator enabled autopilot' : 'Operator froze autopilot', null, 'human')
@@ -500,7 +503,7 @@ export default function ControlPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-7xl mx-auto px-4 py-4">
-        <div className="grid grid-cols-[1fr_260px] gap-6">
+        <div className="grid grid-cols-[1fr_280px] gap-6">
           <div className="space-y-4">
             {systemMode === 'offline' && (
               <div className="border border-border rounded-lg p-4 bg-surface2 text-center">
@@ -514,7 +517,8 @@ export default function ControlPage() {
             <EngineTools />
           </div>
           <div>
-            <OpsLogSidebar />
+            {/* OperationsLog: full chronological timeline of all system + operator events */}
+            <OperationsLog />
           </div>
         </div>
       </div>

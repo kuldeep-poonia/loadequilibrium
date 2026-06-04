@@ -315,9 +315,49 @@ func (r *RuntimeOrchestrator) Tick(
 		Trend:          trend.Instability,
 	})
 
-	// 7. Supervisor (final clamp)
-	sup := Supervisor{Dt: r.Dt}
+	// 7. Supervisor (final clamp + urgency detection)
+	sup := Supervisor{
+		Dt:                  r.Dt,
+		MaxHorizon:          6,
+		Alpha:               1.0,
+		Beta:                0.5,
+		EnergyAbsLimit:      500.0,
+		SafeBacklogLimit:    s.Plant.Backlog*2 + 10.0,
+		TerminalSafeBacklog: s.Plant.Backlog*1.2 + 5.0,
+		DisturbanceBound:    s.Plant.Disturbance * 1.1,
+		CostWeight:          0.1,
+		AdaptGain:           0.05,
+	}
 	decision.ScaleDelta = sup.ClampDecision(decision.ScaleDelta, oscScore, confidenceScore)
+
+	// ShouldRecompute returns true when the optimal control horizon collapses to ≤2 ticks
+	// (i.e. the system is at or near instability and needs an urgent rescale).
+	// When urgent: boost ScaleDelta toward the maximum safe value the clamp allows,
+	// ensuring the controller acts decisively instead of incrementally.
+	urgentReplan := sup.ShouldRecompute(PlantState{
+		Backlog:           s.Plant.Backlog,
+		ArrivalMean:       s.Plant.ArrivalMean,
+		ArrivalP95:        s.Plant.ArrivalMean * (1.0 + s.Plant.ArrivalVar),
+		ServiceRate:       s.Plant.ServiceRate,
+		CapacityActive:    s.Plant.CapacityActive,
+		CapacityTarget:    s.Plant.CapacityTarget,
+		CapacityTau:       s.Plant.CapacityTauUp,
+		RetryFactor:       s.Plant.RetryFactor,
+		LatencyPressure:   clamp01(s.Plant.Latency / 500.0),
+		Disturbance:       s.Plant.Disturbance,
+		DisturbanceEnergy: s.Plant.DisturbanceEnergy,
+		ModelConfidence:   confidenceScore,
+		PredictionError:   0.0,
+	})
+	if urgentReplan && decision.Action != "hold" {
+		// Supervisor says the horizon is too short — amplify the response.
+		// Use a 1.35× boost capped at 1.0 so we don't exceed normalised output range.
+		boosted := decision.ScaleDelta * 1.35
+		if boosted > 1.0 {
+			boosted = 1.0
+		}
+		decision.ScaleDelta = boosted
+	}
 
 	// 8. Memory WRITE (after decision)
 	next.Engine.memory.Add(MemoryEntry{

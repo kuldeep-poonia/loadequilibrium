@@ -1,6 +1,11 @@
 # LoadEquilibrium
 
-An autonomous control system that watches your services, predicts problems before they happen, and scales capacity automatically — without you having to do anything.
+![Go](https://img.shields.io/badge/Go-1.20+-blue?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Ready-brightgreen?style=flat-square)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-Compatible-326ce5?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
+> Predictive auto-scaling for Docker & Kubernetes. Watches your services, predicts failures 60 seconds ahead, and scales automatically using control theory (MPC + RL).
 
 ---
 
@@ -227,7 +232,7 @@ kubectl rollout status deployment/loadequilibrium -n loadequilibrium
 kubectl port-forward svc/loadequilibrium-svc 8080:80 -n loadequilibrium
 ```
 
-**Important**: Run exactly 1 replica. The engine keeps in-memory state that is not distributed across pods. If you need high availability, run active-passive with a shared PostgreSQL backend (both pods write to the same DB, only one pod processes ticks at a time using a DB-level advisory lock).
+**Important**: Run exactly 1 replica. The engine keeps in-memory state that is not distributed across pods. If you need high availability, run active-passive with a shared PostgreSQL backend (bot[...]
 
 ---
 
@@ -293,7 +298,7 @@ Every 2 seconds, this sequence runs:
 9. **Actuate** — Send scaling directive to your orchestrator (Kubernetes, Nomad, etc.)
 10. **Broadcast** — Push full tick state to all WebSocket clients (your dashboard)
 
-The sandbox runs every 10 ticks: it takes the current service state, generates a synthetic load spike from real statistics, runs two competing control strategies against it, and uses the result to adjust the next autopilot decision. This is how the system gets better over time without restarting.
+The sandbox runs every 10 ticks: it takes the current service state, generates a synthetic load spike from real statistics, runs two competing control strategies against it, and uses the result t[...]
 
 ---
 

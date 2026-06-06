@@ -11,19 +11,19 @@ type RingBuffer struct {
 	buf  []MetricPoint
 	head int // index of the next write slot
 	size int // number of valid entries currently stored
-	cap  int
+	capacity  int
 }
 
 // NewRingBuffer allocates a RingBuffer of the given capacity.
 func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
 		buf: make([]MetricPoint, capacity),
-		cap: capacity,
+		capacity: capacity,
 	}
 }
 
-// Push appends a MetricPoint, evicting the oldest if the buffer is full.
-func (r *RingBuffer) Push(p *MetricPoint) {
+// Append appends a MetricPoint, evicting the oldest if the buffer is full.
+func (r *RingBuffer) Append(p *MetricPoint) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -49,8 +49,8 @@ func (r *RingBuffer) Push(p *MetricPoint) {
 		copy(dst.UpstreamCalls, p.UpstreamCalls)
 	}
 
-	r.head = (r.head + 1) % r.cap
-	if r.size < r.cap {
+	r.head = (r.head + 1) % r.capacity
+	if r.size < r.capacity {
 		r.size++
 	}
 }
@@ -69,9 +69,21 @@ func (r *RingBuffer) Snapshot(n ...int) []MetricPoint {
 	}
 
 	out := make([]MetricPoint, count)
-	start := (r.head - count + r.cap) % r.cap
+	start := (r.head - count + r.capacity) % r.capacity
 	for i := 0; i < count; i++ {
-		out[i] = r.buf[(start+i)%r.cap]
+		src := r.buf[(start+i)%r.capacity]
+
+out[i] = src
+
+if len(src.UpstreamCalls) > 0 {
+	out[i].UpstreamCalls =
+		make([]UpstreamCall, len(src.UpstreamCalls))
+
+	copy(
+		out[i].UpstreamCalls,
+		src.UpstreamCalls,
+	)
+}
 	}
 	return out
 }
@@ -83,7 +95,7 @@ func (r *RingBuffer) Last() MetricPoint {
 	if r.size == 0 {
 		return MetricPoint{}
 	}
-	idx := (r.head - 1 + r.cap) % r.cap
+	idx := (r.head - 1 + r.capacity) % r.capacity
 	return r.buf[idx]
 }
 
@@ -115,12 +127,12 @@ func (r *RingBuffer) SummaryStats() RingSummary {
 	}
 
 	var sumReq, sumReqSq, sumLat, maxLat, sumErr float64
-	start := (r.head - r.size + r.cap) % r.cap
+	start := (r.head - r.size + r.capacity) % r.capacity
 	oldest := r.buf[start]
-	newest := r.buf[(r.head-1+r.cap)%r.cap]
+	newest := r.buf[(r.head-1+r.capacity)%r.capacity]
 
 	for i := 0; i < r.size; i++ {
-		p := r.buf[(start+i)%r.cap]
+		p := r.buf[(start+i)%r.capacity]
 		sumReq += p.RequestRate
 		sumReqSq += p.RequestRate * p.RequestRate
 		sumLat += p.Latency.Mean

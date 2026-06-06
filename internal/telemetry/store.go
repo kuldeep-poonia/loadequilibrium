@@ -57,7 +57,7 @@ func NewStore(bufferCapacity, maxServices int, staleAge time.Duration) *Store {
 
 func (s *Store) StaleAge() time.Duration { return s.staleAge }
 
-// ── sanitize ─────────────────────────────────────────────────────────────────
+//  sanitize 
 
 func finiteOrZero(v float64) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -129,7 +129,7 @@ func sanitizePoint(p *MetricPoint) bool {
 	return true
 }
 
-// ── Ingest ────────────────────────────────────────────────────────────────────
+//  Ingest 
 
 // Ingest appends a MetricPoint. New services are admitted up to maxSvc.
 // Lock scope: one shard only. Concurrent writes to different services
@@ -147,23 +147,34 @@ func (s *Store) Ingest(p *MetricPoint) {
 	sh.mu.Lock()
 	buf, ok := sh.buffers[p.ServiceID]
 	if !ok {
-		// Admission check: count across all shards via atomic — no cross-shard lock.
-		if s.svcCount.Load() >= int64(s.maxSvc) {
+
+	for {
+		current := s.svcCount.Load()
+
+		if current >= int64(s.maxSvc) {
 			sh.mu.Unlock()
 			return
 		}
-		buf = NewRingBuffer(s.bufCap)
-		sh.buffers[p.ServiceID] = buf
-		s.svcCount.Add(1)
+
+		if s.svcCount.CompareAndSwap(
+			current,
+			current+1,
+		) {
+			break
+		}
 	}
+
+	buf = NewRingBuffer(s.bufCap)
+	sh.buffers[p.ServiceID] = buf
+}
 	sh.lastSeen[p.ServiceID] = p.Timestamp
 	sh.mu.Unlock()
 
 	// RingBuffer.Push has its own per-buffer lock. No shard lock held here.
-	buf.Push(p)
+	buf.Append(p)
 }
 
-// ── SetAppliedScale ───────────────────────────────────────────────────────────
+//  SetAppliedScale 
 
 // SetAppliedScale records the last scale directive for a service.
 // Uses sync.Map — zero mutex overhead on the hot read path.
@@ -171,7 +182,7 @@ func (s *Store) SetAppliedScale(serviceID string, scale float64) {
 	s.appliedScales.Store(serviceID, scale)
 }
 
-// ── Prune ─────────────────────────────────────────────────────────────────────
+//  Prune 
 
 // Prune removes stale services shard by shard. Holds one shard lock at a time.
 func (s *Store) Prune(now time.Time) []string {
@@ -192,14 +203,14 @@ func (s *Store) Prune(now time.Time) []string {
 	return pruned
 }
 
-// ── HasServices ───────────────────────────────────────────────────────────────
+//  HasServices 
 
 // HasServices is O(1), zero-allocation. Safe in hot paths.
 func (s *Store) HasServices() bool {
 	return s.svcCount.Load() > 0
 }
 
-// ── ServiceIDs ────────────────────────────────────────────────────────────────
+//  ServiceIDs 
 
 func (s *Store) ServiceIDs() []string {
 	ids := make([]string, 0, int(s.svcCount.Load()))
@@ -214,7 +225,7 @@ func (s *Store) ServiceIDs() []string {
 	return ids
 }
 
-// ── Window ────────────────────────────────────────────────────────────────────
+//  Window 
 
 // Window computes a ServiceWindow over the most recent n points.
 func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *ServiceWindow {
@@ -241,7 +252,7 @@ func (s *Store) Window(serviceID string, n int, freshnessCutoff time.Duration) *
 	return computeWindow(serviceID, points)
 }
 
-// ── AllWindows ────────────────────────────────────────────────────────────────
+//  AllWindows 
 
 // AllWindows computes windows for every known service.
 //
@@ -299,7 +310,7 @@ func (s *Store) AllWindows(n int, freshnessCutoff time.Duration) map[string]*Ser
 	return out
 }
 
-// ── computeWindow ─────────────────────────────────────────────────────────────
+//  computeWindow 
 
 func computeWindow(serviceID string, pts []MetricPoint) *ServiceWindow {
 	n := float64(len(pts))

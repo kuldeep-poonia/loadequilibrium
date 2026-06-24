@@ -52,6 +52,12 @@ type PolicyGradientOptimizer struct {
 
 	expBuf *ExperienceBuffer
 	batch  int
+	gae    *GAETrajectoryEngine
+
+	NaNCount           int
+	InfCount           int
+	GradExplosions     int
+	ClampedUpdates     int
 
 	pendingFeat []float64
 	pendingAct  []float64
@@ -105,6 +111,7 @@ func NewPolicyGradientOptimizer(stateDim int) *PolicyGradientOptimizer {
 
 		expBuf: NewExperienceBuffer(2048, 5),
 		batch:  48,
+		gae:    NewGAETrajectoryEngine(4, 128),
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -123,6 +130,9 @@ func (p *PolicyGradientOptimizer) Act(state []float64) PolicyAction {
 
 	act := sampleMVN(mean, cov, p.rng) // yha coupled explore
 
+	for i := range act {
+		act[i] = p.checkNumericAnomaly(act[i])
+	}
 	safe := projectSafe(act) // yha safety shield
 
 	p.storeLast(feat, mean, safe)
@@ -161,6 +171,49 @@ func (p *PolicyGradientOptimizer) Observe(nextState []float64, reward float64, r
 
 	p.expBuf.Add(e)
 	p.hasPending = false
+
+	// GAE Integration
+	vCur := p.value(p.pendingFeat)
+	vNext := 0.0
+	if !done && len(nextState) > 0 {
+		vNext = p.value(p.encode(nextState))
+	}
+	step := TrajectoryStep{
+		Feature:   p.pendingFeat,
+		Action:    p.pendingAct,
+		Mean:      p.pendingMean,
+		Chol:      p.pendingChol,
+		Reward:    normalizedReward,
+		Risk:      risk,
+		Value:     vCur,
+		RiskValue: safetyCost(risk),
+		Done:      done,
+		NextValue: vNext,
+		NextRiskValue: safetyCost(risk),
+		ISWeight:  1.0,
+		RegimeID:  0,
+	}
+	p.gae.AddStep(step)
+	
+	if done || p.gae.head >= p.gae.maxEps {
+		// Train on on-policy GAE episode
+		advs, _ := p.gae.FinishEpisode()
+		if len(advs) > 0 {
+			ep := p.gae.buf[p.gae.head]
+			for i := range ep {
+				exp := Experience{
+					State:  ep[i].Feature,
+					Action: ep[i].Action,
+					Mean:   ep[i].Mean,
+					Chol:   ep[i].Chol,
+				}
+				p.updateCritic(exp, advs[i])
+				p.updateActor(exp, advs[i])
+			}
+		}
+		p.gae.StartEpisode()
+	}
+
 
 	if p.expBuf.size >= p.batch {
 		p.learn()
@@ -208,11 +261,11 @@ func (p *PolicyGradientOptimizer) computeAdvantage(batch []Experience) []float64
 		adv[t] = delta
 	}
 
-	m := mean(adv)
-	s := std(adv) + 1e-6
+	m := p.checkNumericAnomaly(mean(adv))
+	s := p.checkNumericAnomaly(std(adv)) + 1e-6
 
 	for i := range adv {
-		adv[i] = (adv[i] - m) / s
+		adv[i] = p.checkNumericAnomaly((adv[i] - m) / s)
 	}
 
 	return adv
@@ -231,7 +284,8 @@ func (p *PolicyGradientOptimizer) updateActor(t Experience, adv float64) {
 	step := 1.0
 
 	if kl > p.klTarget {
-		step = p.klTarget / (kl + 1e-6) // yha adaptive step
+		step = p.klTarget / (kl + 1e-6)
+		step = p.checkNumericAnomaly(step)
 	}
 
 	// NEW: Gradient clipping - accumulate gradients and clip by norm
@@ -282,6 +336,8 @@ func (p *PolicyGradientOptimizer) updateActor(t Experience, adv float64) {
 	// Clip gradients if norm exceeds threshold
 	clipFactor := 1.0
 	if gradNorm > p.clipRange {
+		p.GradExplosions++
+		p.GradExplosions++
 		clipFactor = p.clipRange / gradNorm
 	}
 
@@ -390,6 +446,8 @@ func (p *PolicyGradientOptimizer) updateCritic(t Experience, adv float64) {
 	// Clip gradients
 	clipFactor := 1.0
 	if gradNorm > p.clipRange {
+		p.GradExplosions++
+		p.GradExplosions++
 		clipFactor = p.clipRange / gradNorm
 	}
 
@@ -610,6 +668,23 @@ func klFull(m0 []float64, L0 [][]float64, m1 []float64, L1 [][]float64) float64 
 
 /* ===== small utils ===== */
 
+func (p *PolicyGradientOptimizer) checkNumericAnomaly(val float64) float64 {
+	if math.IsNaN(val) {
+		p.NaNCount++
+		return 0
+	}
+	if math.IsInf(val, 0) {
+		p.InfCount++
+		if val > 0 {
+			return 4.0
+		}
+		return -4.0
+	}
+	return val
+}
+
+
+
 func std(x []float64) float64 {
 	m := mean(x)
 	s := 0.0
@@ -719,13 +794,15 @@ func (p *PolicyGradientOptimizer) normalizeReward(r float64) float64 {
 	alpha := 0.01 // Smoothing factor
 	delta := r - p.rewardMean
 	p.rewardMean += alpha * delta
+	p.rewardMean = p.checkNumericAnomaly(p.rewardMean)
 	p.rewardStd = math.Sqrt((1-alpha)*(p.rewardStd*p.rewardStd) + alpha*(delta*delta))
+	p.rewardStd = p.checkNumericAnomaly(p.rewardStd)
 
 	// Normalize reward
 	if p.rewardStd > 1e-6 {
-		return (r - p.rewardMean) / p.rewardStd
+		return p.checkNumericAnomaly((r - p.rewardMean) / p.rewardStd)
 	}
-	return r
+	return p.checkNumericAnomaly(r)
 }
 
 // NEW: Compute total L2 norm of all network weights for stability monitoring

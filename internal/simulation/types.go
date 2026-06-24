@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 )
 
@@ -69,6 +70,7 @@ type ServiceSimState struct {
 	// =============================
 
 	Plant *physics.FluidPlant
+	SignalLearner *intelligence.AdaptiveSignalLearner
 
 	// Physics States for Mapping
 	QueueMass float64

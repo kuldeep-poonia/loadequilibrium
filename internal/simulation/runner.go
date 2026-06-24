@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
@@ -528,6 +529,27 @@ func (r *Runner) handleTick(e Event, st *ServiceSimState, sched interface{ Sched
 				expEdge.ServiceRate = math.Max(0.05, math.Min(st.Plant.S/capacity, 0.5))
 			}
 		}
+
+		// Mathematical Wiring: AdaptiveSignalLearner (RLS) dynamically updates Hazard physics
+		if st.SignalLearner != nil {
+			v := intelligence.SignalVector{
+				Timestamp:          time.Unix(0, int64(e.Time*1000000)),
+				BacklogError:       st.Plant.Q - float64(st.MaxQueueLen)*0.5,
+				LatencyError:       0.0, // simplified for fluid ticks
+				ErrorRateError:     0.0,
+				CPUError:           st.Utilisation - 0.7,
+				QueueDrift:         st.Plant.A - st.Plant.S,
+				RetryAmplification: 0.0,
+			}
+			instability := st.SignalLearner.Update(v)
+			
+			// Replace static HazardPower=2.0 with dynamic regime-based power (RLS derived)
+			// Base power is 1.0, scales up to 3.5 under severe instability modes.
+			st.Plant.P.HazardPower = 1.0 + instability.Score*2.5
+			if st.Plant.P.HazardPower > 3.5 {
+				st.Plant.P.HazardPower = 3.5
+			}
+		}
 	}
 
 	// 5. Schedule next tick (1ms resolution)
@@ -618,6 +640,7 @@ func (r *Runner) run(
 			Utilisation:     s.utilisation,
 			SLAThresholdMs:  s.slaThresholdMs,
 			Plant:           plant,
+			SignalLearner:   intelligence.NewAdaptiveSignalLearner(6),
 			LastPhysicsTime: 0,
 		}
 		// Schedule base arrival and first physics tick

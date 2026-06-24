@@ -41,6 +41,8 @@ type ExperienceBuffer struct {
 	base int
 	tree []float64
 
+	LastPriority float64
+
 	alpha float64
 	beta  float64
 
@@ -102,6 +104,8 @@ func (b *ExperienceBuffer) Add(e Experience) {
 	}
 
 	b.data[idx] = e
+	e.Priority = b.computePriority(e)
+	b.LastPriority = e.Priority
 
 	if b.episodeSlots[e.EpisodeID] == nil {
 		b.episodeSlots[e.EpisodeID] = make(map[int]struct{})

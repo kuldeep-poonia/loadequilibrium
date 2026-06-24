@@ -9,6 +9,7 @@ import (
 
 	ap "github.com/loadequilibrium/loadequilibrium/internal/autopilot"
 	ctrl "github.com/loadequilibrium/loadequilibrium/internal/control"
+	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 )
 
 // ─────────────────────────────────────────────────────────
@@ -491,6 +492,15 @@ func runScenario(
 	for tick := 1; tick <= ticks; tick++ {
 		arrival := arrivalFn(tick)
 
+		// Mathematical Upgrade: Dynamic MPC Cost Scheduling (Interior-Point Barrier)
+		// Replaces static heuristic BacklogCost=2.2 with a mathematically justified
+		// barrier function that scales asymptotically as queue nears SLA limit.
+		margin := slaBacklog - state.Plant.Backlog
+		if margin < 1.0 {
+			margin = 1.0
+		}
+		orch.MPC.BacklogCost = 1.0 + (slaBacklog / margin)
+
 		nextState, tel := orch.Tick(state, arrival, infraLoad)
 
 		fmt.Printf("[SIM] tick=%d backlog=%.2f latency=%.2f capacity=%.2f arrival=%.2f\n",
@@ -514,13 +524,30 @@ func runScenario(
 
 		// ----- MPC output interpretation -----
 
-		requiredCap := arrival / (serviceRate + 1e-6)
+		// Mathematical Upgrade: Erlang-C based capacity sizing
+		// Replaces static linear requiredCap = arrival/serviceRate with an adaptive search
+		// that uses pure M/M/c queueing theory to find the exact capacity needed to maintain SLA.
+		baseReq := arrival / (serviceRate + 1e-6)
+		requiredCap := math.Ceil(baseReq)
+		if requiredCap < 1.0 {
+			requiredCap = 1.0
+		}
+		// Search upward to find the capacity that ensures expected wait time < slaLatency
+		for requiredCap < maxCap {
+			erlangC := modelling.ComputeErlangC(requiredCap, baseReq)
+			util := baseReq / requiredCap
+			waitMs := (erlangC / (requiredCap * serviceRate * (1 - util))) * 1000.0
+			if waitMs < slaLatency || math.IsNaN(waitMs) || waitMs < 0 {
+				break
+			}
+			requiredCap++
+		}
 		mpcScale := requiredCap / math.Max(1.0, tel.Capacity)
 
 		if mpcScale > 2.5 {
 			mpcScale = 2.5
 		}
-		mpcOvershoot := mpcScale > 1.5 && tel.PhysicalBacklog < required*0.5
+		mpcOvershoot := mpcScale > 1.5 && tel.PhysicalBacklog < arrival*0.5
 
 		//requiredCap := arrival / (serviceRate + 1e-6)
 
@@ -562,7 +589,7 @@ func runScenario(
 				ServiceRate:      serviceRate,
 				Latency:          latency,
 				PredictedArrival: arrival,
-				Utilisation:      requiredCap / math.Max(1.0, tel.Capacity),
+				Utilisation:      baseReq / math.Max(1.0, tel.Capacity),
 			},
 			Config: ctrl.AuthorityConfig{
 				TargetUtilisation: 0.7,

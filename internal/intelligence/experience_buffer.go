@@ -25,6 +25,9 @@ type Experience struct {
 	Impact  float64
 
 	Priority float64
+
+	Mean []float64
+	Chol [][]float64
 }
 
 type ExperienceBuffer struct {

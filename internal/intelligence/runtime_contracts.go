@@ -115,6 +115,15 @@ func (p *PGRuntimePolicy) TryStep(
 	go p.opt.Observe(state, reward, hazard, false)
 }
 
+func (p *PGRuntimePolicy) GetNumericAudit() (nanCount, infCount, gradExplosions int) {
+	if p == nil || p.opt == nil {
+		return 0, 0, 0
+	}
+	p.opt.mu.Lock()
+	defer p.opt.mu.Unlock()
+	return p.opt.NaNCount, p.opt.InfCount, p.opt.GradExplosions
+}
+
 func (f *AutonomyDecisionFusion) CombineStrategic(
 	uPolicy []float64,
 	uPrev []float64,

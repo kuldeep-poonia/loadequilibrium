@@ -111,7 +111,8 @@ func (p *PGRuntimePolicy) TryStep(
 	}
 
 	reward := perf - hazard - 0.05*elapsed.Seconds() - 0.01*vecNorm(action)
-	p.opt.Observe(state, reward, hazard, false)
+	// Run learning asynchronously so we don't violate the strict 10ms tick SLA
+	go p.opt.Observe(state, reward, hazard, false)
 }
 
 func (f *AutonomyDecisionFusion) CombineStrategic(

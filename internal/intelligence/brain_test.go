@@ -957,11 +957,11 @@ func TestPGO_ReplayPriority_HigherForHighRiskTransitions(t *testing.T) {
 
 	p.Act(state)
 	p.Observe(next, 0.5, 0.05, false)
-	lowRiskPriority := p.replay[len(p.replay)-1].priority
+	lowRiskPriority := p.expBuf.LastPriority
 
 	p.Act(state)
 	p.Observe(next, 0.5, 0.95, false)
-	highRiskPriority := p.replay[len(p.replay)-1].priority
+	highRiskPriority := p.expBuf.LastPriority
 
 	t.Logf("  Priority @ risk=0.05 = %.6f", lowRiskPriority)
 	t.Logf("  Priority @ risk=0.95 = %.6f  (want higher)", highRiskPriority)

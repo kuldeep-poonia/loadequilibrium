@@ -145,8 +145,29 @@ func (e *IdentificationEngine) updateBurst(
 	b :=
 		math.Max(0, excess)
 
+	// Mathematical upgrade: Adaptive Decay based on fast-to-slow variance ratio.
+	// If ArrivalFast > ArrivalSlow, we are in an active burst; decay slowly to retain memory.
+	// If ArrivalFast <= ArrivalSlow, burst is over; decay rapidly.
+	ratio := 1.0
+	if s.ArrivalSlow > 0 {
+		ratio = s.ArrivalFast / s.ArrivalSlow
+	}
+	
+	// Base decay is e.BurstDecay. We modulate it via the EWMA ratio.
+	adaptiveDecay := e.BurstDecay
+	if ratio > 1.05 {
+		// Active burst: reduce decay (half-life extends) mathematically by square of intensity
+		adaptiveDecay = e.BurstDecay / (ratio * ratio)
+	} else {
+		// Recovery: accelerate decay to clear phantom energy
+		adaptiveDecay = e.BurstDecay * 2.0
+	}
+	
+	if adaptiveDecay > 1.0 { adaptiveDecay = 1.0 }
+	if adaptiveDecay < 0.01 { adaptiveDecay = 0.01 }
+
 	s.BurstEnergy =
-		(1-e.BurstDecay)*s.BurstEnergy +
+		(1-adaptiveDecay)*s.BurstEnergy +
 			e.BurstGain*b
 
 	if s.BurstEnergy > e.BurstCap {

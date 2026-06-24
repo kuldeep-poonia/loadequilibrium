@@ -103,7 +103,7 @@ func TestL3_TEL_001_RingBufferConcurrentPushSnapshot(t *testing.T) {
 						P99:  100.0,
 					},
 				}
-				rb.Push(p)
+				rb.Append(p)
 				atomic.AddInt64(&pushesDone, 1)
 			}
 		}(w)

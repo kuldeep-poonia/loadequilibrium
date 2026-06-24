@@ -53,7 +53,7 @@ func TestL3_TEL_002_RingBufferMemoryStability(t *testing.T) {
 	// Warm up: fill the buffer once so GC pressure from the initial allocation
 	// is already paid before we take the baseline measurement.
 	for i := 0; i < capacity; i++ {
-		rb.Push(&telemetry.MetricPoint{
+		rb.Append(&telemetry.MetricPoint{
 			ServiceID:   "warmup",
 			Timestamp:   time.Now(),
 			RequestRate: float64(i),
@@ -75,7 +75,7 @@ func TestL3_TEL_002_RingBufferMemoryStability(t *testing.T) {
 	samples := make([]memorySample, 0, entries/gcEvery)
 
 	for i := 0; i < entries; i++ {
-		rb.Push(&telemetry.MetricPoint{
+		rb.Append(&telemetry.MetricPoint{
 			ServiceID:   "svc-stability",
 			Timestamp:   time.Now(),
 			RequestRate: float64(i % 10000),

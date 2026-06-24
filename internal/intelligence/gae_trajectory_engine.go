@@ -7,6 +7,9 @@ import (
 
 type TrajectoryStep struct {
 	Feature   []float64
+	Action    []float64
+	Mean      []float64
+	Chol      [][]float64
 	Reward    float64
 	Risk      float64
 	Value     float64

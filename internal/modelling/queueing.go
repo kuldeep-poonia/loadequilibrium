@@ -166,7 +166,7 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 		m.MeanWaitMs = (m.MeanQueueLen / m.ServiceRate) * 1000.0
 	} else {
 		a := m.ArrivalRate / serviceRatePerServer
-		erlangC := computeErlangC(c, a)
+		erlangC := ComputeErlangC(c, a)
 		denom := c * serviceRatePerServer * (1.0 - m.Utilisation)
 		if denom > 0 {
 			m.MeanWaitMs = (erlangC / denom) * 1000.0
@@ -219,7 +219,7 @@ func computeInboundPressure(w *telemetry.ServiceWindow) float64 {
 	return math.Min(0.60*queueRatio+0.40*arrivalVariance, 1.0)
 }
 
-func computeErlangC(c, a float64) float64 {
+func ComputeErlangC(c, a float64) float64 {
 	ci := int(math.Round(c))
 	if ci < 1 {
 		ci = 1

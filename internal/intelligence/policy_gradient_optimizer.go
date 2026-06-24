@@ -3,7 +3,6 @@ package intelligence
 import (
 	"math"
 	"math/rand"
-	"sort"
 	"sync"
 	"time"
 )
@@ -15,18 +14,6 @@ type PolicyAction struct {
 	CacheBoost   float64
 }
 
-type pgTransition struct {
-	feat     []float64
-	act      []float64
-	mean     []float64
-	chol     [][]float64
-	reward   float64
-	risk     float64
-	done     bool
-	nextFeat []float64
-	priority float64
-}
-
 type PolicyGradientOptimizer struct {
 	mu sync.Mutex
 
@@ -35,20 +22,16 @@ type PolicyGradientOptimizer struct {
 	aDim int
 	hDim int
 
-	// encoder
 	encW [][]float64
 	encB []float64
 
-	// actor mean net
 	w1 [][]float64
 	b1 []float64
 	w2 [][]float64
 	b2 []float64
 
-	// actor covariance param (full)
 	L [][]float64
 
-	// critic
 	vw1 [][]float64
 	vb1 []float64
 	vw2 []float64
@@ -61,16 +44,20 @@ type PolicyGradientOptimizer struct {
 
 	klTarget float64
 
-	// NEW: Gradient clipping and reward normalization
-	clipRange         float64 // Max gradient norm per param
-	rewardMean        float64 // Running mean of rewards
-	rewardStd         float64 // Running std of rewards
-	rewardN           float64 // Counter for normalization
-	weightRegularizer float64 // L2 regularization strength
+	clipRange         float64
+	rewardMean        float64
+	rewardStd         float64
+	rewardN           float64
+	weightRegularizer float64
 
-	replay    []pgTransition
-	replayMax int
-	batch     int
+	expBuf *ExperienceBuffer
+	batch  int
+
+	pendingFeat []float64
+	pendingAct  []float64
+	pendingMean []float64
+	pendingChol [][]float64
+	hasPending  bool
 
 	rng *rand.Rand
 }
@@ -114,10 +101,10 @@ func NewPolicyGradientOptimizer(stateDim int) *PolicyGradientOptimizer {
 		rewardMean:        0.0,
 		rewardStd:         1.0,
 		rewardN:           1.0,
-		weightRegularizer: 0.01, // Increased from 0.001 to 0.01
+		weightRegularizer: 0.01,
 
-		replayMax: 1024,
-		batch:     48,
+		expBuf: NewExperienceBuffer(2048, 5),
+		batch:  48,
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -149,94 +136,78 @@ func (p *PolicyGradientOptimizer) Act(state []float64) PolicyAction {
 }
 
 func (p *PolicyGradientOptimizer) Observe(nextState []float64, reward float64, risk float64, done bool) {
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.replay) == 0 {
+	if !p.hasPending {
 		return
 	}
 
-	last := &p.replay[len(p.replay)-1]
-
-	// NEW: Normalize reward using running mean/std
 	normalizedReward := p.normalizeReward(reward)
+	impact := math.Abs(normalizedReward) + 2*risk
 
-	last.reward = normalizedReward
-	last.risk = risk
-	last.done = done
-	last.nextFeat = p.encode(nextState)
+	e := Experience{
+		State:     p.pendingFeat,
+		Action:    p.pendingAct,
+		Mean:      p.pendingMean,
+		Chol:      p.pendingChol,
+		Reward:    normalizedReward,
+		Risk:      risk,
+		NextState: p.encode(nextState),
+		Done:      done,
+		Impact:    impact,
+		Priority:  impact,
+	}
 
-	last.priority = math.Abs(normalizedReward) + 2*risk // yha catastrophic weight
+	p.expBuf.Add(e)
+	p.hasPending = false
 
-	if len(p.replay) >= p.batch {
+	if p.expBuf.size >= p.batch {
 		p.learn()
 	}
 }
 
 func (p *PolicyGradientOptimizer) storeLast(feat, mean, act []float64) {
-
-	ch := cholCopy(p.L)
-
-	p.replay = append(p.replay, pgTransition{
-		feat:     feat,
-		act:      act,
-		mean:     mean,
-		chol:     ch,
-		priority: 1,
-	})
-
-	if len(p.replay) > p.replayMax {
-		p.replay = p.replay[1:]
-	}
+	p.pendingFeat = feat
+	p.pendingAct = act
+	p.pendingMean = mean
+	p.pendingChol = cholCopy(p.L)
+	p.hasPending = true
 }
 
 func (p *PolicyGradientOptimizer) learn() {
+	n := min(p.batch, p.expBuf.size)
 
-	sort.Slice(p.replay, func(i, j int) bool {
-		return p.replay[i].priority > p.replay[j].priority
-	})
+	batch, weights, _ := p.expBuf.Sample(n)
 
-	n := min(p.batch, len(p.replay))
+	advs := p.computeAdvantage(batch)
 
-	traj := p.replay[:n]
-
-	advs := p.computeGAE(traj)
-
-	for i := range traj {
-
-		p.updateCritic(traj[i], advs[i])
-		p.updateActor(traj[i], advs[i])
+	for i := range batch {
+		weightedAdv := advs[i] * weights[i]
+		p.updateCritic(batch[i], weightedAdv)
+		p.updateActor(batch[i], weightedAdv)
 	}
 }
 
-func (p *PolicyGradientOptimizer) computeGAE(tr []pgTransition) []float64 {
-
-	T := len(tr)
+func (p *PolicyGradientOptimizer) computeAdvantage(batch []Experience) []float64 {
+	T := len(batch)
 	adv := make([]float64, T)
 
-	nextAdv := 0.0
-
-	for t := T - 1; t >= 0; t-- {
-
-		v := p.value(tr[t].feat)
+	for t := 0; t < T; t++ {
+		v := p.value(batch[t].State)
 		vNext := 0.0
 
-		if !tr[t].done && len(tr[t].nextFeat) > 0 {
-			vNext = p.value(tr[t].nextFeat)
+		if !batch[t].Done && len(batch[t].NextState) > 0 {
+			vNext = p.value(batch[t].NextState)
 		}
 
-		// NEW: Improved delayed credit assignment
-		// TD error accounts for delayed reward impact
-		delta := tr[t].reward - safetyCost(tr[t].risk) +
+		// 1-step TD error since buffer is randomly sampled
+		delta := batch[t].Reward - safetyCost(batch[t].Risk) +
 			p.gamma*vNext - v
 
-		// GAE with improved handling of credit assignment
-		adv[t] = delta + p.gamma*p.lambda*nextAdv
-		nextAdv = adv[t]
+		adv[t] = delta
 	}
 
-	// yha normalize
 	m := mean(adv)
 	s := std(adv) + 1e-6
 
@@ -247,15 +218,15 @@ func (p *PolicyGradientOptimizer) computeGAE(tr []pgTransition) []float64 {
 	return adv
 }
 
-func (p *PolicyGradientOptimizer) updateActor(t pgTransition, adv float64) {
+func (p *PolicyGradientOptimizer) updateActor(t Experience, adv float64) {
 
-	mean, h := p.actorMean(t.feat)
+	mean, h := p.actorMean(t.State)
 
 	cov := p.covMatrix()
 
-	logpGradMean := mvnGradMean(t.act, mean, cov)
+	logpGradMean := mvnGradMean(t.Action, mean, cov)
 
-	kl := klFull(t.mean, t.chol, mean, p.L)
+	kl := klFull(t.Mean, t.Chol, mean, p.L)
 
 	step := 1.0
 
@@ -285,7 +256,7 @@ func (p *PolicyGradientOptimizer) updateActor(t pgTransition, adv float64) {
 		dh := adv * sum * (1 - h[i]*h[i]) * step
 		w1Grads[i] = make([]float64, p.fDim)
 		for j := 0; j < p.fDim; j++ {
-			w1Grads[i][j] = dh * t.feat[j]
+			w1Grads[i][j] = dh * t.State[j]
 		}
 		b1Grads[i] = dh
 	}
@@ -366,16 +337,16 @@ func (p *PolicyGradientOptimizer) updateActor(t pgTransition, adv float64) {
 	}
 }
 
-func (p *PolicyGradientOptimizer) updateCritic(t pgTransition, adv float64) {
+func (p *PolicyGradientOptimizer) updateCritic(t Experience, adv float64) {
 
-	target := adv + p.value(t.feat)
+	target := adv + p.value(t.State)
 
 	h := make([]float64, p.hDim)
 
 	for i := 0; i < p.hDim; i++ {
 		sum := p.vb1[i]
 		for j := 0; j < p.fDim; j++ {
-			sum += p.vw1[i][j] * t.feat[j]
+			sum += p.vw1[i][j] * t.State[j]
 		}
 		h[i] = math.Tanh(sum)
 	}
@@ -399,7 +370,7 @@ func (p *PolicyGradientOptimizer) updateCritic(t pgTransition, adv float64) {
 		vw1Grads[i] = make([]float64, p.fDim)
 		dh := err * p.vw2[i] * (1 - h[i]*h[i])
 		for j := 0; j < p.fDim; j++ {
-			vw1Grads[i][j] = dh * t.feat[j]
+			vw1Grads[i][j] = dh * t.State[j]
 		}
 		vb1Grads[i] = dh
 	}

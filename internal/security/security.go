@@ -285,7 +285,7 @@ type AuditEvent struct {
 	IP        string    `json:"ip,omitempty"`
 	Path      string    `json:"path"`
 	Method    string    `json:"method"`
-	EventType string    `json:"event"`      // auth_ok|auth_fail|rate_limit|control_action|validation_fail
+	EventType string    `json:"event"` // auth_ok|auth_fail|rate_limit|control_action|validation_fail
 	Detail    string    `json:"detail,omitempty"`
 	TokenHash string    `json:"token_hash,omitempty"` // first 8 chars of token (not full token)
 	Status    int       `json:"status,omitempty"`
@@ -486,7 +486,7 @@ type AuthConfig struct {
 // Route classes:
 //   - "ingest":   POST /api/v1/ingest — checked against IngestToken
 //   - "control":  POST /api/v1/control/*, policy/*, runtime/*, sandbox/*, simulation/*, intelligence/*, alerts/*
-//                 checked against ControlToken (falls back to IngestToken)
+//     checked against ControlToken (falls back to IngestToken)
 //   - "dashboard": GET /ws, GET /api/v1/snapshot — checked against DashboardToken if set
 //
 // Why separate tokens:
@@ -507,7 +507,7 @@ func AuthMiddleware(cfg AuthConfig, audit *AuditLogger, ingestRL, controlRL *Rat
 			ip := RealIP(r)
 			candidate := ExtractToken(r)
 
-			// ── Determine which route class this is 
+			// ── Determine which route class this is
 			var requiredToken, routeClass string
 			switch {
 			case path == "/api/v1/ingest":
@@ -549,7 +549,7 @@ func AuthMiddleware(cfg AuthConfig, audit *AuditLogger, ingestRL, controlRL *Rat
 				return
 			}
 
-			// ── Token authentication 
+			// ── Token authentication
 			if requiredToken != "" {
 				if !ValidateToken(requiredToken, candidate) {
 					audit.Log(AuditEvent{
@@ -566,7 +566,7 @@ func AuthMiddleware(cfg AuthConfig, audit *AuditLogger, ingestRL, controlRL *Rat
 				}
 			}
 
-			// ── Auth success 
+			// ── Auth success
 			if requiredToken != "" {
 				audit.Log(AuditEvent{
 					IP: ip, Path: path, Method: r.Method,
@@ -582,7 +582,7 @@ func AuthMiddleware(cfg AuthConfig, audit *AuditLogger, ingestRL, controlRL *Rat
 	}
 }
 
-// ── Helpers 
+// ── Helpers
 
 func min(a, b int) int {
 	if a < b {

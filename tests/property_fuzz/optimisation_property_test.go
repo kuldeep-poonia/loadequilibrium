@@ -131,7 +131,6 @@ func TestL1_OPT_001_MPCTrajectoryCostBounds(t *testing.T) {
 	t.Logf("L1-OPT-001 PASS: %d iterations, 0 cost bound violations", iterations)
 }
 
-
 // ---------------------------------------------------------------
 // L1-OPT-003 — MPC adjusted scale factor within [0.5, 3.0]
 // AIM: MPC must never produce an AdjustedScaleFactor outside [0.5, 3.0].

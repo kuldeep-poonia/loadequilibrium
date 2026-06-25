@@ -172,7 +172,7 @@ func TestQueueBurstCollapseRecovery(t *testing.T) {
 
 		// Run stability assessment
 		signalState := signalProcessor.Update(telemetryWindow)
-		stabilityAssessment := modelling.RunStabilityAssessment(queueModel, signalState, topoSnap, cfg.CollapseThreshold)
+		stabilityAssessment := modelling.RunStabilityAssessment(queueModel, signalState, topoSnap, nil, cfg.CollapseThreshold)
 
 		// Detect collapse zone transition
 		if stabilityAssessment.CollapseZone == "collapse" && collapseDetectedAt == -1 {

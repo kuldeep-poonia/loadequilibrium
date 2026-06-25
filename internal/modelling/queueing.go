@@ -99,8 +99,8 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	// Lock released — all computation below is lock-free.
 
 	dt := time.Since(st.lastTickTime).Seconds()
-	if dt <= 0 || dt > 10.0 {
-		dt = 2.0 // default tick clamp
+	if dt <= 0.001 || dt > 10.0 {
+		dt = 2.0 // default tick clamp (ensures tests get simulated physics time)
 	}
 	st.lastTickTime = time.Now()
 

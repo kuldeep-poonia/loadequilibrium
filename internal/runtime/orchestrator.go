@@ -56,6 +56,7 @@ const (
 //   - Signal state pruning
 type Orchestrator struct {
 	cfg            *config.Config
+	nf             *modelling.NetworkField
 	store          *telemetry.Store
 	graph          *topology.Graph
 	signal         *modelling.SignalProcessor
@@ -166,7 +167,7 @@ func New(
 		for id, w := range windows {
 			q := qp.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
 			sig := sp.Update(w)
-			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, cfg.CollapseThreshold)
+			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, nil, cfg.CollapseThreshold)
 			bundles[id] = &modelling.ServiceModelBundle{
 				Queue:      q,
 				Signal:     sig,
@@ -479,13 +480,25 @@ func (o *Orchestrator) tick(now time.Time) {
 	// IF WE HAVE WINDOWS, WE MUST HAVE BUNDLES. NO EXCEPTIONS.
 	// THIS RUNS BEFORE DEADLINE CHECKS, BEFORE PRESSURE CHECKS, BEFORE WARMUP GUARDS.
 	if o.tickCount == 1 && len(windows) > 0 {
-		medianMode := o.cfg.ArrivalEstimatorMode == "median"
+			medianMode := o.cfg.ArrivalEstimatorMode == "median"
+
+		if o.nf != nil {
+			modelling.PopulateNetworkField(o.nf, topology.GraphSnapshot{})
+			for id, w := range windows {
+				q := o.queuePhysics.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
+				if edge, ok := o.nf.Edges[id]; ok {
+					edge.ServiceRate = math.Max(q.ServiceRate, 0.1)
+					edge.InFlux = q.ArrivalRate
+				}
+			}
+			o.nf.Step()
+		}
 		bundles := make(map[string]*modelling.ServiceModelBundle, len(windows))
 
 		for id, w := range windows {
 			q := o.queuePhysics.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
 			sig := o.signal.Update(w)
-			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.cfg.CollapseThreshold)
+			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.nf, o.cfg.CollapseThreshold)
 			bundles[id] = &modelling.ServiceModelBundle{
 				Queue:      q,
 				Signal:     sig,
@@ -723,7 +736,19 @@ func (o *Orchestrator) tick(now time.Time) {
 	// Stochastic model is bypassed when staleness gate fires — queue + stability
 	// still run because they drive the control decisions.
 	s4 := time.Now()
-	medianMode := o.cfg.ArrivalEstimatorMode == "median"
+		medianMode := o.cfg.ArrivalEstimatorMode == "median"
+
+	if o.nf != nil {
+		modelling.PopulateNetworkField(o.nf, topoSnap)
+		for id, w := range windows {
+			q := o.queuePhysics.RunQueueModel(w, topoSnap, medianMode)
+			if edge, ok := o.nf.Edges[id]; ok {
+				edge.ServiceRate = math.Max(q.ServiceRate, 0.1)
+				edge.InFlux = q.ArrivalRate
+			}
+		}
+		o.nf.Step()
+	}
 	bundles := make(map[string]*modelling.ServiceModelBundle, len(observedWindows))
 	activeIDs := make(map[string]struct{}, len(observedWindows))
 
@@ -755,7 +780,7 @@ func (o *Orchestrator) tick(now time.Time) {
 				sm = modelling.RunStochasticModel(w)
 			}
 			sig := o.signal.Update(w)
-			stab := modelling.RunStabilityAssessment(q, sig, topoSnap, o.cfg.CollapseThreshold)
+			stab := modelling.RunStabilityAssessment(q, sig, topoSnap, o.nf, o.cfg.CollapseThreshold)
 			b := &modelling.ServiceModelBundle{Queue: q, Stochastic: sm, Signal: sig, Stability: stab}
 			mu.Lock()
 			bundles[id] = b
@@ -783,7 +808,7 @@ func (o *Orchestrator) tick(now time.Time) {
 		for id, w := range observedWindows {
 			q := o.queuePhysics.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
 			sig := o.signal.Update(w)
-			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.cfg.CollapseThreshold)
+			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.nf, o.cfg.CollapseThreshold)
 			bundles[id] = &modelling.ServiceModelBundle{
 				Queue:      q,
 				Signal:     sig,
@@ -814,7 +839,7 @@ func (o *Orchestrator) tick(now time.Time) {
 			if _, exists := bundles[id]; !exists {
 				q := o.queuePhysics.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
 				sig := o.signal.Update(w)
-				stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.cfg.CollapseThreshold)
+				stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.nf, o.cfg.CollapseThreshold)
 				bundles[id] = &modelling.ServiceModelBundle{
 					Queue:      q,
 					Signal:     sig,
@@ -830,7 +855,7 @@ func (o *Orchestrator) tick(now time.Time) {
 		for id, w := range observedWindows {
 			q := o.queuePhysics.RunQueueModel(w, topology.GraphSnapshot{}, medianMode)
 			sig := o.signal.Update(w)
-			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.cfg.CollapseThreshold)
+			stab := modelling.RunStabilityAssessment(q, sig, topology.GraphSnapshot{}, o.nf, o.cfg.CollapseThreshold)
 			bundles[id] = &modelling.ServiceModelBundle{
 				Queue:      q,
 				Signal:     sig,

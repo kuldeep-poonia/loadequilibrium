@@ -561,7 +561,6 @@ func TestPruneRemovesService(t *testing.T) {
 	}
 }
 
-
 func TestStoreConcurrentAdmissionLimit(t *testing.T) {
 	const (
 		maxSvc    = 10
@@ -608,7 +607,6 @@ func TestStoreConcurrentAdmissionLimit(t *testing.T) {
 		)
 	}
 }
-
 
 func TestStoreConcurrentAdmissionLimitStress(t *testing.T) {
 	const (
@@ -661,7 +659,6 @@ func TestStoreConcurrentAdmissionLimitStress(t *testing.T) {
 		}
 	}
 }
-
 
 func TestStoreConcurrentPruneAndIngest(t *testing.T) {
 	store := NewStore(

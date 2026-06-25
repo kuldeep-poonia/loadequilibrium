@@ -204,7 +204,7 @@ func TestControl_StabilityDerivativeDirection(t *testing.T) {
 		ServiceRate:      133,
 	}
 	sigRising := modelling.SignalState{FastEWMA: 100, SlowEWMA: 95}
-	stabRising := modelling.RunStabilityAssessment(qRising, sigRising, snap, 0.90)
+	stabRising := modelling.RunStabilityAssessment(qRising, sigRising, snap, nil, 0.90)
 
 	// Service with falling utilisation trend
 	qFalling := modelling.QueueModel{
@@ -215,7 +215,7 @@ func TestControl_StabilityDerivativeDirection(t *testing.T) {
 		ServiceRate:      133,
 	}
 	sigFalling := modelling.SignalState{FastEWMA: 100, SlowEWMA: 105}
-	stabFalling := modelling.RunStabilityAssessment(qFalling, sigFalling, snap, 0.90)
+	stabFalling := modelling.RunStabilityAssessment(qFalling, sigFalling, snap, nil, 0.90)
 
 	if stabRising.StabilityDerivative <= 0 {
 		t.Errorf("Rising load should produce positive StabilityDerivative, got %.6f", stabRising.StabilityDerivative)
@@ -247,7 +247,7 @@ func TestControl_CollapseZoneClassificationAtBoundaries(t *testing.T) {
 		w := makeWindow("svc-zone", tc.rps, tc.lat, 50)
 		q := qp.RunQueueModel(w, snap, false)
 		sig := sp.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, snap, threshold)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, threshold)
 
 		// We can't know exact zone without knowing effective rho, but zone must be valid
 		validZones := map[string]bool{"safe": true, "warning": true, "collapse": true}
@@ -265,12 +265,12 @@ func TestControl_OscillationRiskIncreasesWithEWMADivergence(t *testing.T) {
 	// Low divergence
 	qLow := modelling.QueueModel{Utilisation: 0.7, ArrivalRate: 100, ServiceRate: 143}
 	sigLow := modelling.SignalState{FastEWMA: 100, SlowEWMA: 100, EWMAVariance: 0.1} // identical
-	stabLow := modelling.RunStabilityAssessment(qLow, sigLow, snap, 0.90)
+	stabLow := modelling.RunStabilityAssessment(qLow, sigLow, snap, nil, 0.90)
 
 	// High divergence
 	qHigh := modelling.QueueModel{Utilisation: 0.7, ArrivalRate: 100, ServiceRate: 143}
 	sigHigh := modelling.SignalState{FastEWMA: 200, SlowEWMA: 50, EWMAVariance: 500} // large divergence
-	stabHigh := modelling.RunStabilityAssessment(qHigh, sigHigh, snap, 0.90)
+	stabHigh := modelling.RunStabilityAssessment(qHigh, sigHigh, snap, nil, 0.90)
 
 	if stabHigh.OscillationRisk <= stabLow.OscillationRisk {
 		t.Errorf("High EWMA divergence OscRisk=%.4f should exceed low divergence OscRisk=%.4f",
@@ -291,7 +291,7 @@ func TestControl_CollapseRiskMonotoneInUtilisation(t *testing.T) {
 	var prev float64
 	for i, u := range utils {
 		q := modelling.QueueModel{Utilisation: u, ArrivalRate: u * 100, ServiceRate: 100}
-		stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 		if i > 0 && stab.CollapseRisk < prev-0.05 {
 			t.Errorf("CollapseRisk not monotonically non-decreasing: at ρ=%.2f got %.4f, prev=%.4f",
 				u, stab.CollapseRisk, prev)
@@ -313,7 +313,7 @@ func TestControl_TrendAdjustedMarginNegativeOnRisingTrend(t *testing.T) {
 		ArrivalRate:      100,
 		ServiceRate:      125,
 	}
-	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+	stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 	if stab.TrendAdjustedMargin >= 0 {
 		t.Errorf("Expected TrendAdjustedMargin<0 with rising trend at ρ=0.80, got %.4f", stab.TrendAdjustedMargin)
 	}

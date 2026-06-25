@@ -1,0 +1,13 @@
+{
+  "max_amplification_score": 0,
+  "service.backup.downstream_reach": 2,
+  "service.backup.is_keystone": 1,
+  "service.backup.perturbation": 0.6,
+  "service.primary.downstream_reach": 2,
+  "service.primary.is_keystone": 1,
+  "service.primary.perturbation": 0.6,
+  "service.secondary.downstream_reach": 2,
+  "service.secondary.is_keystone": 1,
+  "service.secondary.perturbation": 0.6,
+  "system_fragility": 0.6
+}

@@ -181,7 +181,7 @@ func TestIntegration_QueueToStability(t *testing.T) {
 	w := makeWindow("svc-y", 950.0, 10.0, 50) // very high arrival
 	q := qp.RunQueueModel(w, snap, false)
 	sig := sp.Update(w)
-	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+	stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 
 	if stab.ServiceID != "svc-y" {
 		t.Fatalf("StabilityAssessment ServiceID mismatch")
@@ -243,7 +243,7 @@ func TestIntegration_BundlesToOptimizerCandidates(t *testing.T) {
 	for id, w := range windows {
 		q := qp.RunQueueModel(w, snap, false)
 		sig := sp.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 		bundles[id] = &modelling.ServiceModelBundle{
 			Queue:      q,
 			Signal:     sig,
@@ -297,7 +297,7 @@ func TestIntegration_BundlesToObjective(t *testing.T) {
 		w := makeWindow(id, cfg.rate, cfg.lat, 40)
 		q := qp.RunQueueModel(w, snap, false)
 		sig := sp.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 		bundles[id] = &modelling.ServiceModelBundle{Queue: q, Signal: sig, Stability: stab,
 			Stochastic: modelling.StochasticModel{ServiceID: id, Confidence: 0.9}}
 	}
@@ -327,7 +327,7 @@ func TestIntegration_BundlesToPolicy(t *testing.T) {
 	w := makeWindow("svc-p", 150.0, 20.0, 40)
 	q := qp.RunQueueModel(w, snap, false)
 	sig := sp.Update(w)
-	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+	stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 	bundle := &modelling.ServiceModelBundle{
 		Queue: q,
 
@@ -428,7 +428,7 @@ func TestIntegration_BundlesToReasoningEvents(t *testing.T) {
 	w := makeWindow("svc-r", 900.0, 50.0, 50)
 	q := qp.RunQueueModel(w, snap, false)
 	sig := sp.Update(w)
-	stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+	stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 	bundles := map[string]*modelling.ServiceModelBundle{
 		"svc-r": {
 			Queue:      q,

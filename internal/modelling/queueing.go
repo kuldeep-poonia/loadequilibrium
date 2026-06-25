@@ -77,11 +77,12 @@ func (pe *QueuePhysicsEngine) Prune(activeIDs map[string]struct{}) {
 // per tick — no concurrent access to the same service's state within a tick.
 //
 // Hot-path log.Printf calls removed:
-//   Original had two log.Printf per service per tick ("[service-rate-coupling]"
-//   and "[physics]"). At 100 services those are 200 log writes/tick = 100/sec.
-//   Each fmt.Sprintf call allocates, then writes to stderr under a mutex.
-//   Replaced with no-op: these were DIAGNOSTIC logs left in production.
-//   Physics state is fully observable via the /metrics and /ws endpoints.
+//
+//	Original had two log.Printf per service per tick ("[service-rate-coupling]"
+//	and "[physics]"). At 100 services those are 200 log writes/tick = 100/sec.
+//	Each fmt.Sprintf call allocates, then writes to stderr under a mutex.
+//	Replaced with no-op: these were DIAGNOSTIC logs left in production.
+//	Physics state is fully observable via the /metrics and /ws endpoints.
 func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap topology.GraphSnapshot, medianMode bool) QueueModel {
 	sh := &pe.shards[queueShardFor(w.ServiceID)]
 

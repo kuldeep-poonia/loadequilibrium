@@ -7,17 +7,17 @@ import (
 )
 
 type RingBuffer struct {
-	mu   sync.RWMutex
-	buf  []MetricPoint
-	head int // index of the next write slot
-	size int // number of valid entries currently stored
-	capacity  int
+	mu       sync.RWMutex
+	buf      []MetricPoint
+	head     int // index of the next write slot
+	size     int // number of valid entries currently stored
+	capacity int
 }
 
 // NewRingBuffer allocates a RingBuffer of the given capacity.
 func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
-		buf: make([]MetricPoint, capacity),
+		buf:      make([]MetricPoint, capacity),
 		capacity: capacity,
 	}
 }
@@ -73,17 +73,17 @@ func (r *RingBuffer) Snapshot(n ...int) []MetricPoint {
 	for i := 0; i < count; i++ {
 		src := r.buf[(start+i)%r.capacity]
 
-out[i] = src
+		out[i] = src
 
-if len(src.UpstreamCalls) > 0 {
-	out[i].UpstreamCalls =
-		make([]UpstreamCall, len(src.UpstreamCalls))
+		if len(src.UpstreamCalls) > 0 {
+			out[i].UpstreamCalls =
+				make([]UpstreamCall, len(src.UpstreamCalls))
 
-	copy(
-		out[i].UpstreamCalls,
-		src.UpstreamCalls,
-	)
-}
+			copy(
+				out[i].UpstreamCalls,
+				src.UpstreamCalls,
+			)
+		}
 	}
 	return out
 }

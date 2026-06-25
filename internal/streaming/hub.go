@@ -39,6 +39,7 @@ type Hub struct {
 	maxClients      int
 	lastPayload     atomic.Pointer[TickPayload]
 	lastPayloadJSON atomic.Pointer[[]byte]
+	testCallbacks   []func(*TickPayload)
 }
 
 func NewHub() *Hub {
@@ -75,7 +76,7 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	data, err := json.Marshal(p)
 	if err != nil {
 		errStr := err.Error()
-		log.Printf("[hub] marshal error: %v", errStr)
+		log.Printf("[hub] marshal error: %v\n%+v", errStr, p)
 
 		if strings.Contains(errStr, "+Inf") || strings.Contains(errStr, "-Inf") {
 			if _, err2 := json.Marshal(p.Objective); err2 != nil {
@@ -114,7 +115,13 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	for c := range h.clients {
 		cs = append(cs, c)
 	}
+	callbacks := make([]func(*TickPayload), len(h.testCallbacks))
+	copy(callbacks, h.testCallbacks)
 	h.mu.RUnlock()
+
+	for _, cb := range callbacks {
+		cb(p)
+	}
 
 	for _, c := range cs {
 		if c.closed.Load() {
@@ -208,7 +215,11 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 }
 
 // Subscribe is a no-op preserved for test compatibility.
-func (h *Hub) Subscribe(cb func(*TickPayload)) {}
+func (h *Hub) Subscribe(cb func(*TickPayload)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.testCallbacks = append(h.testCallbacks, cb)
+}
 
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()

@@ -313,7 +313,7 @@ func (r *signalRunner) step(pt telemetry.MetricPoint, tick int) signalRecord {
 	r.coupler.ApplyCoupling(map[string]*telemetry.ServiceWindow{signalServiceID: w}, topo)
 	q := r.queue.RunQueueModel(w, topo, false)
 	s := r.signal.Update(w)
-	stability := modelling.RunStabilityAssessment(q, s, topo, r.cfg.CollapseThreshold)
+	stability := modelling.RunStabilityAssessment(q, s, topo, nil, r.cfg.CollapseThreshold)
 	bundles := map[string]*modelling.ServiceModelBundle{
 		signalServiceID: {
 			Queue:      q,

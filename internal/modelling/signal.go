@@ -78,9 +78,9 @@ func NewSignalProcessor(fastAlpha, slowAlpha, spikeK float64) *SignalProcessor {
 // Update ingests a new window observation and returns the updated SignalState.
 //
 // Lock protocol:
-//   1. Acquire shard mutex — map lookup/insert only (nanoseconds)
-//   2. Release immediately after getting the state pointer
-//   3. All computation (EWMA, variance, CUSUM) is lock-free
+//  1. Acquire shard mutex — map lookup/insert only (nanoseconds)
+//  2. Release immediately after getting the state pointer
+//  3. All computation (EWMA, variance, CUSUM) is lock-free
 //
 // Safe because the orchestrator's worker pool assigns one goroutine per service
 // per tick. No two goroutines ever call Update() for the same service ID within

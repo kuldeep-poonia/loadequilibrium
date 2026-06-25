@@ -54,10 +54,10 @@ type PolicyGradientOptimizer struct {
 	batch  int
 	gae    *GAETrajectoryEngine
 
-	NaNCount           int
-	InfCount           int
-	GradExplosions     int
-	ClampedUpdates     int
+	NaNCount       int
+	InfCount       int
+	GradExplosions int
+	ClampedUpdates int
 
 	pendingFeat []float64
 	pendingAct  []float64
@@ -179,22 +179,22 @@ func (p *PolicyGradientOptimizer) Observe(nextState []float64, reward float64, r
 		vNext = p.value(p.encode(nextState))
 	}
 	step := TrajectoryStep{
-		Feature:   p.pendingFeat,
-		Action:    p.pendingAct,
-		Mean:      p.pendingMean,
-		Chol:      p.pendingChol,
-		Reward:    normalizedReward,
-		Risk:      risk,
-		Value:     vCur,
-		RiskValue: safetyCost(risk),
-		Done:      done,
-		NextValue: vNext,
+		Feature:       p.pendingFeat,
+		Action:        p.pendingAct,
+		Mean:          p.pendingMean,
+		Chol:          p.pendingChol,
+		Reward:        normalizedReward,
+		Risk:          risk,
+		Value:         vCur,
+		RiskValue:     safetyCost(risk),
+		Done:          done,
+		NextValue:     vNext,
 		NextRiskValue: safetyCost(risk),
-		ISWeight:  1.0,
-		RegimeID:  0,
+		ISWeight:      1.0,
+		RegimeID:      0,
 	}
 	p.gae.AddStep(step)
-	
+
 	if done || p.gae.head >= p.gae.maxEps {
 		// Train on on-policy GAE episode
 		advs, _ := p.gae.FinishEpisode()
@@ -213,7 +213,6 @@ func (p *PolicyGradientOptimizer) Observe(nextState []float64, reward float64, r
 		}
 		p.gae.StartEpisode()
 	}
-
 
 	if p.expBuf.size >= p.batch {
 		p.learn()
@@ -682,8 +681,6 @@ func (p *PolicyGradientOptimizer) checkNumericAnomaly(val float64) float64 {
 	}
 	return val
 }
-
-
 
 func std(x []float64) float64 {
 	m := mean(x)

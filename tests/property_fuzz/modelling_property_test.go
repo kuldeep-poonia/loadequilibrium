@@ -64,7 +64,7 @@ func TestL1_MOD_001_StabilityZoneClassification(t *testing.T) {
 				Nodes: []topology.Node{{ServiceID: "test-svc", NormalisedLoad: 1.0}},
 			}
 
-			sa := modelling.RunStabilityAssessment(q, sig, topo, collapseThreshold)
+			sa := modelling.RunStabilityAssessment(q, sig, topo, nil, collapseThreshold)
 
 			// Compute effectiveRho as the function does internally.
 			effectiveRho := rho + hazard*0.2 + reservoir*0.1
@@ -179,7 +179,7 @@ func TestL1_MOD_002_StabilityMarginFormula(t *testing.T) {
 				Nodes: []topology.Node{{ServiceID: "test-svc", NormalisedLoad: 1.0}},
 			}
 
-			sa := modelling.RunStabilityAssessment(q, sig, topo, 0.90)
+			sa := modelling.RunStabilityAssessment(q, sig, topo, nil, 0.90)
 
 			// Expected: 1 - (rho + hazard*0.2 + reservoir*0.1)
 			effectiveRho := rho + hazard*0.2 + reservoir*0.1
@@ -284,13 +284,13 @@ func TestL1_MOD_003_CollapseRiskMonotonicity(t *testing.T) {
 			qLow := modelling.QueueModel{
 				ServiceID: "test-svc", Utilisation: rhoLow,
 			}
-			saLow := modelling.RunStabilityAssessment(qLow, sigBase, topo, 0.90)
+			saLow := modelling.RunStabilityAssessment(qLow, sigBase, topo, nil, 0.90)
 
 			// High ρ assessment.
 			qHigh := modelling.QueueModel{
 				ServiceID: "test-svc", Utilisation: rhoHigh,
 			}
-			saHigh := modelling.RunStabilityAssessment(qHigh, sigBase, topo, 0.90)
+			saHigh := modelling.RunStabilityAssessment(qHigh, sigBase, topo, nil, 0.90)
 
 			regression := saLow.CollapseRisk - saHigh.CollapseRisk
 			if regression > worstReg {

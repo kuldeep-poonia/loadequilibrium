@@ -49,9 +49,9 @@ func LoadConfig() Config {
 		RetryMaxDelay:        envDuration("LE_INGEST_RETRY_MAX", 5*time.Second),
 		CircuitOpenAfter:     envInt("LE_CIRCUIT_OPEN_AFTER", 5),
 		CircuitCooldown:      envDuration("LE_CIRCUIT_COOLDOWN", 15*time.Second),
-		MaxScrapeConcurrency: envInt("LE_MAX_SCRAPE_CONCURRENCY", 64),  // was 16 — 4× higher concurrency
+		MaxScrapeConcurrency: envInt("LE_MAX_SCRAPE_CONCURRENCY", 64),          // was 16 — 4× higher concurrency
 		MaxScrapeBodyBytes:   int64(envInt("LE_MAX_SCRAPE_BODY_BYTES", 8<<20)), // was 4MB — 8MB
-		RequestRateLimitRPS:  envFloat("LE_INGEST_REQUEST_RPS", 0),     // was 10 — 0 disables throttle
+		RequestRateLimitRPS:  envFloat("LE_INGEST_REQUEST_RPS", 0),             // was 10 — 0 disables throttle
 		DiscoveryLabel:       envStr("LE_DISCOVERY_LABEL", "le.enable"),
 		DefaultMetricsPath:   cleanPath(envStr("LE_DEFAULT_METRICS_PATH", "/metrics")),
 	}

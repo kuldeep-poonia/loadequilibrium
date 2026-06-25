@@ -212,7 +212,7 @@ func TestSoak_QueuePhysicsEngineStability(t *testing.T) {
 		w := makeWindow("svc-soak", load, 10.0, 30)
 		q := qp.RunQueueModel(w, snap, false)
 		sig := sp.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 
 		if math.IsNaN(q.Utilisation) || math.IsInf(q.Utilisation, 0) {
 			t.Fatalf("Tick %d: Utilisation is NaN/Inf", i)
@@ -248,7 +248,7 @@ func TestSoak_ReasoningEngineCooldownNoLeak(t *testing.T) {
 		w := makeWindow(serviceID, 900, 50, 40)
 		q := qp.RunQueueModel(w, snap, false)
 		sig := sp.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, snap, 0.90)
+		stab := modelling.RunStabilityAssessment(q, sig, snap, nil, 0.90)
 		bundles := map[string]*modelling.ServiceModelBundle{
 			serviceID: {Queue: q, Signal: sig, Stability: stab,
 				Stochastic: modelling.StochasticModel{ServiceID: serviceID, Confidence: 0.9}},

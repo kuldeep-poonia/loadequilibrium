@@ -8,7 +8,7 @@ import (
 
 func TestNumericStabilityAudit(t *testing.T) {
 	opt := NewPolicyGradientOptimizer(10)
-	
+
 	for ep := 0; ep < 10; ep++ {
 		state := make([]float64, 10)
 		for i := 0; i < 128; i++ {
@@ -18,7 +18,7 @@ func TestNumericStabilityAudit(t *testing.T) {
 			// Force extreme rewards to test numeric stability limits
 			extremeReward := math.Pow(10, float64(i%5)) * rand.NormFloat64()
 			extremeRisk := math.Abs(rand.NormFloat64() * 10)
-			
+
 			opt.Act(state)
 			done := (i == 127)
 			opt.Observe(state, extremeReward, extremeRisk, done)

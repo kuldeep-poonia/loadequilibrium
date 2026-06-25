@@ -152,7 +152,7 @@ func (e *IdentificationEngine) updateBurst(
 	if s.ArrivalSlow > 0 {
 		ratio = s.ArrivalFast / s.ArrivalSlow
 	}
-	
+
 	// Base decay is e.BurstDecay. We modulate it via the EWMA ratio.
 	adaptiveDecay := e.BurstDecay
 	if ratio > 1.05 {
@@ -162,9 +162,13 @@ func (e *IdentificationEngine) updateBurst(
 		// Recovery: accelerate decay to clear phantom energy
 		adaptiveDecay = e.BurstDecay * 2.0
 	}
-	
-	if adaptiveDecay > 1.0 { adaptiveDecay = 1.0 }
-	if adaptiveDecay < 0.01 { adaptiveDecay = 0.01 }
+
+	if adaptiveDecay > 1.0 {
+		adaptiveDecay = 1.0
+	}
+	if adaptiveDecay < 0.01 {
+		adaptiveDecay = 0.01
+	}
 
 	s.BurstEnergy =
 		(1-adaptiveDecay)*s.BurstEnergy +
@@ -447,7 +451,6 @@ func (e *IdentificationEngine) Step(
 	dynEngine.FastGain = math.Min(e.FastGain*shockwaveMultiplier, 1.0)
 	dynEngine.SlowGain = math.Min(e.SlowGain*shockwaveMultiplier, 1.0)
 	dynEngine.VarGain = math.Min(e.VarGain*shockwaveMultiplier, 1.0)
-
 
 	next := s
 

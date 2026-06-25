@@ -324,7 +324,6 @@ func TestNodeLastSeenUpdate(t *testing.T) {
 	}
 }
 
-
 func TestEdgeDecay(t *testing.T) {
 	g := New()
 

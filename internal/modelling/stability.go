@@ -13,7 +13,8 @@ func RunStabilityAssessment(
 	q QueueModel,
 	sig SignalState,
 	topoSnap topology.GraphSnapshot,
-	collapseThreshold float64,
+	nf *NetworkField,
+	fallbackThreshold float64,
 ) StabilityAssessment {
 	sa := StabilityAssessment{
 		ServiceID:  q.ServiceID,
@@ -26,23 +27,39 @@ func RunStabilityAssessment(
 	// Reservoir (R) represents hidden metabolic debt
 	effectiveRho := rho + q.Hazard*0.2 + q.Reservoir*0.1
 
-	// Stability margin: distance to saturation boundary.
-	sa.StabilityMargin = 1.0 - effectiveRho
+	if nf != nil && nf.Edges[q.ServiceID] != nil {
+		edge := nf.Edges[q.ServiceID]
+		maxRho := 0.0
+		for _, cell := range edge.Cells {
+			if cell.Rho > maxRho {
+				maxRho = cell.Rho
+			}
+		}
 
-	// CollapseZone classification derived from collapseThreshold config.
-	// Warning zone starts at 83% of threshold; collapse zone at threshold.
-	warningBoundary := collapseThreshold * 0.83
-	switch {
-	case effectiveRho >= collapseThreshold:
-		sa.CollapseZone = "collapse"
-	case effectiveRho >= warningBoundary:
-		sa.CollapseZone = "warning"
-	default:
-		sa.CollapseZone = "safe"
+		switch {
+		case maxRho >= RhoCritical:
+			sa.CollapseZone = "collapse"
+		case maxRho >= RhoCritical*0.8:
+			sa.CollapseZone = "warning"
+		default:
+			sa.CollapseZone = "safe"
+		}
+
+		sa.CollapseRisk = sigmoid((maxRho - RhoCritical*0.95) / 0.02)
+		sa.StabilityMargin = 1.0 - math.Min(maxRho/RhoCritical, 1.0)
+	} else {
+		sa.StabilityMargin = 1.0 - effectiveRho
+		warningBoundary := fallbackThreshold * 0.83
+		switch {
+		case effectiveRho >= fallbackThreshold:
+			sa.CollapseZone = "collapse"
+		case effectiveRho >= warningBoundary:
+			sa.CollapseZone = "warning"
+		default:
+			sa.CollapseZone = "safe"
+		}
+		sa.CollapseRisk = sigmoid((effectiveRho - fallbackThreshold*0.95) / 0.04)
 	}
-
-	// Collapse risk: steep sigmoid centred on collapseThreshold.
-	sa.CollapseRisk = sigmoid((effectiveRho - collapseThreshold*0.95) / 0.04)
 
 	// Trend-adjusted stability margin: pessimistic estimate over the MPC horizon.
 	// Uses a 10-tick prediction horizon at 2s per tick = 20 seconds.
@@ -90,7 +107,7 @@ func RunStabilityAssessment(
 
 	// Cascade amplification: high feedback gain at high utilisation magnifies risk.
 	// Apply amplification factor to collapse risk.
-	if sa.FeedbackGain > 0.5 && rho > collapseThreshold*0.75 {
+	if sa.FeedbackGain > 0.5 && rho > fallbackThreshold*0.75 {
 		amplification := 1.0 + sa.FeedbackGain*0.4
 		sa.CollapseRisk = math.Min(sa.CollapseRisk*amplification, 1.0)
 	}

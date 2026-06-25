@@ -24,10 +24,10 @@ const (
 	// 64 gives 128 seconds of queue depth before the client is considered slow.
 	sendBufferSize = 64
 
-	pressureProbeFrames  = 1024
-	pressureProbeChunk   = 64
-	pressureProbeAfter   = sendBufferSize
-	pressureProbeWindow  = 250 * time.Millisecond
+	pressureProbeFrames = 1024
+	pressureProbeChunk  = 64
+	pressureProbeAfter  = sendBufferSize
+	pressureProbeWindow = 250 * time.Millisecond
 )
 
 var pressureProbePayload = [125]byte{}
@@ -137,8 +137,8 @@ func (h *Hub) Broadcast(p *TickPayload) {
 	}
 }
 
-func (h *Hub) Latest() *TickPayload           { return h.lastPayload.Load() }
-func (h *Hub) GetLastPayload() *TickPayload   { return h.lastPayload.Load() }
+func (h *Hub) Latest() *TickPayload         { return h.lastPayload.Load() }
+func (h *Hub) GetLastPayload() *TickPayload { return h.lastPayload.Load() }
 
 func (h *Hub) GetLastPayloadJSON() []byte {
 	if ptr := h.lastPayloadJSON.Load(); ptr != nil {

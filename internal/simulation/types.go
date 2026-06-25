@@ -70,7 +70,7 @@ type ServiceSimState struct {
 	// Physics Engine (Fluid Plant)
 	// =============================
 
-	Plant *physics.FluidPlant
+	Plant         *physics.FluidPlant
 	SignalLearner *intelligence.AdaptiveSignalLearner
 
 	// Physics States for Mapping

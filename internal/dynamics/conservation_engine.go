@@ -7,20 +7,20 @@ import (
 
 /**************** PARAMETERS ****************/
 
-type params struct {
-	rhoMax float64
-	vFree  float64
-	tau    float64
-	c      float64
+type Params struct {
+	RhoMax float64
+	VFree  float64
+	Tau    float64
+	C      float64
 }
 
 /**************** FIELD ****************/
 
-type field struct {
-	dt float64
-	dx float64
+type Field struct {
+	Dt float64
+	Dx float64
 
-	p params
+	p Params
 
 	rho []float64
 	w   []float64 // ARZ invariant: w = v + P(ρ)
@@ -33,21 +33,21 @@ type field struct {
 
 /**************** PRESSURE ****************/
 
-func pressure(rho float64, p params) float64 {
-	return p.c * p.c * math.Log(1+rho/p.rhoMax)
+func pressure(rho float64, p Params) float64 {
+	return p.C * p.C * math.Log(1+rho/p.RhoMax)
 }
 
-func veq(rho float64, p params) float64 {
-	return p.vFree * (1 - rho/p.rhoMax)
+func veq(rho float64, p Params) float64 {
+	return p.VFree * (1 - rho/p.RhoMax)
 }
 
 /**************** CONSTRUCTION ****************/
 
-func newField(cells int, dt float64, p params) *field {
+func NewField(cells int, dt float64, p Params) *Field {
 
-	return &field{
-		dt:   dt,
-		dx:   1 / float64(cells),
+	return &Field{
+		Dt:   dt,
+		Dx:   1 / float64(cells),
 		p:    p,
 		rho:  make([]float64, cells),
 		w:    make([]float64, cells),
@@ -59,7 +59,7 @@ func newField(cells int, dt float64, p params) *field {
 
 /**************** CFL ****************/
 
-func (f *field) enforceCFL() {
+func (f *Field) enforceCFL() {
 
 	maxλ := 0.0
 
@@ -69,7 +69,7 @@ func (f *field) enforceCFL() {
 		v := f.w[i] - pressure(r, f.p)
 
 		l1 := math.Abs(v)
-		l2 := math.Abs(v - f.p.c)
+		l2 := math.Abs(v - f.p.C)
 
 		if l1 > maxλ {
 			maxλ = l1
@@ -81,17 +81,17 @@ func (f *field) enforceCFL() {
 
 	if maxλ > 0 {
 
-		dtMax := f.dx / maxλ
+		dtMax := f.Dx / maxλ
 
-		if f.dt > dtMax {
-			f.dt = 0.8 * dtMax
+		if f.Dt > dtMax {
+			f.Dt = 0.8 * dtMax
 		}
 	}
 }
 
 /**************** GHOST CELLS ****************/
 
-func (f *field) state(i int) (float64, float64) {
+func (f *Field) state(i int) (float64, float64) {
 
 	if i < 0 {
 		return f.rho[0], f.w[0]
@@ -106,7 +106,7 @@ func (f *field) state(i int) (float64, float64) {
 
 /**************** HLLC ****************/
 
-func (f *field) riemann(i int) {
+func (f *Field) riemann(i int) {
 
 	rl, wl := f.state(i - 1)
 	rr, wr := f.state(i)
@@ -120,7 +120,7 @@ func (f *field) riemann(i int) {
 	ql := rl * vl
 	qr := rr * vr
 
-	sl := math.Min(vl-f.p.c, vr-f.p.c)
+	sl := math.Min(vl-f.p.C, vr-f.p.C)
 	sr := math.Max(vl, vr)
 
 	if sl >= 0 {
@@ -163,7 +163,7 @@ func stochasticMomentum(v float64, dt float64) float64 {
 
 /**************** STEP ****************/
 
-func (f *field) step(in float64) float64 {
+func (f *Field) Step(in float64) float64 {
 
 	f.enforceCFL()
 
@@ -173,24 +173,24 @@ func (f *field) step(in float64) float64 {
 
 	for i := 0; i < f.n; i++ {
 
-		f.rho[i] += -(f.dt / f.dx) * (f.frho[i+1] - f.frho[i])
+		f.rho[i] += -(f.Dt / f.Dx) * (f.frho[i+1] - f.frho[i])
 
 		mom := f.rho[i] * (f.w[i] - pressure(f.rho[i], f.p))
-		mom += -(f.dt / f.dx) * (f.fw[i+1] - f.fw[i])
+		mom += -(f.Dt / f.Dx) * (f.fw[i+1] - f.fw[i])
 
 		if f.rho[i] > 1e-6 {
 
 			v := mom / f.rho[i]
 
-			v = stochasticMomentum(v, f.dt)
-			v += f.dt * (veq(f.rho[i], f.p) - v) / f.p.tau
+			v = stochasticMomentum(v, f.Dt)
+			v += f.Dt * (veq(f.rho[i], f.p) - v) / f.p.Tau
 
 			// invariant bound
-			if v > f.p.vFree {
-				v = f.p.vFree
+			if v > f.p.VFree {
+				v = f.p.VFree
 			}
-			if v < -f.p.vFree {
-				v = -f.p.vFree
+			if v < -f.p.VFree {
+				v = -f.p.VFree
 			}
 
 			f.w[i] = v + pressure(f.rho[i], f.p)
@@ -199,8 +199,8 @@ func (f *field) step(in float64) float64 {
 		if f.rho[i] < 0 {
 			f.rho[i] = 0
 		}
-		if f.rho[i] > f.p.rhoMax {
-			f.rho[i] = f.p.rhoMax
+		if f.rho[i] > f.p.RhoMax {
+			f.rho[i] = f.p.RhoMax
 		}
 	}
 
@@ -209,14 +209,14 @@ func (f *field) step(in float64) float64 {
 
 /**************** CHARACTERISTIC RTT ****************/
 
-func (f *field) rtt() float64 {
+func (f *Field) Rtt() float64 {
 
-	x := float64(f.n-1) * f.dx
+	x := float64(f.n-1) * f.Dx
 	t := 0.0
 
 	for x > 0 {
 
-		i := int(x / f.dx)
+		i := int(x / f.Dx)
 		if i < 0 {
 			i = 0
 		}
@@ -230,73 +230,73 @@ func (f *field) rtt() float64 {
 			v = 1e-6
 		}
 
-		dt := f.dx / v
+		dt := f.Dx / v
 
 		t += dt
-		x -= f.dx
+		x -= f.Dx
 	}
 
 	return t
 }
 
-type user struct {
-	dt   float64
-	w    float64
-	n    float64
-	send float64
-	ack  float64
-	a    float64
-	b    float64
+type User struct {
+	Dt   float64
+	W    float64
+	N    float64
+	Send float64
+	Ack  float64
+	A    float64
+	B    float64
 }
 
-func (u *user) step(def float64) {
+func (u *User) Step(def float64) {
 
 	if def > 0 {
-		u.w *= u.b
+		u.W *= u.B
 	} else {
-		u.w += u.a * u.dt
+		u.W += u.A * u.Dt
 	}
 
-	if u.n < u.w {
-		u.send = (u.w - u.n) / u.dt
+	if u.N < u.W {
+		u.Send = (u.W - u.N) / u.Dt
 	} else {
-		u.send = 0
+		u.Send = 0
 	}
 
-	u.n += (u.send - u.ack) * u.dt
-	if u.n < 0 {
-		u.n = 0
+	u.N += (u.Send - u.Ack) * u.Dt
+	if u.N < 0 {
+		u.N = 0
 	}
 }
 
-type circuit struct {
-	field *field
-	user  *user
-	hist  *history
+type Circuit struct {
+	Field *Field
+	User  *User
+	Hist  *History
 }
 
-type history struct {
+type History struct {
 	t   []float64
 	r   []float64
 	n   int
 	pos int
 }
 
-func newHistory(n int) *history {
-	return &history{
+func NewHistory(n int) *History {
+	return &History{
 		t: make([]float64, n),
 		r: make([]float64, n),
 		n: n,
 	}
 }
 
-func (h *history) push(t, r float64) {
+func (h *History) Push(t, r float64) {
 	h.t[h.pos] = t
 	h.r[h.pos] = r
 	h.pos = (h.pos + 1) % h.n
 }
 
-func (h *history) integral(now, delay float64) float64 {
+func (h *History) Integral(now, delay float64) float64 {
 
 	s := 0.0
 
@@ -312,28 +312,74 @@ func (h *history) integral(now, delay float64) float64 {
 }
 
 type Engine struct {
-	dt       float64
-	circuits []*circuit
-	time     float64
+	Dt       float64
+	Circuits []*Circuit
+	Time     float64
 }
 
-func (e *Engine) step() {
+func (e *Engine) Step(macroDt float64) {
+	rem := macroDt
+	for rem > 0 {
+		stepDt := e.Dt
+		if rem < e.Dt {
+			stepDt = rem
+		}
 
-	for _, c := range e.circuits {
+		for _, c := range e.Circuits {
+			c.Field.Dt = stepDt // allow field to enforce CFL
+			c.Field.enforceCFL()
+			if c.Field.Dt < stepDt {
+				stepDt = c.Field.Dt
+			}
+		}
 
-		out := c.field.step(c.user.send)
+		if stepDt < 1e-6 {
+			stepDt = 1e-6
+		}
 
-		delay := c.field.rtt()
+		for _, c := range e.Circuits {
+			// Actually enforceCFL was called, stepDt is now safe
+			c.Field.Dt = stepDt
+			out := c.Field.Step(c.User.Send)
 
-		ack := c.hist.integral(e.time, delay)
+			delay := c.Field.Rtt()
 
-		def := c.user.send - out
+			ack := c.Hist.Integral(e.Time, delay)
 
-		c.user.ack = ack
-		c.user.step(def)
+			def := c.User.Send - out
 
-		c.hist.push(e.time, c.user.send)
+			c.User.Ack = ack
+			c.User.Dt = stepDt
+			c.User.Step(def)
+
+			c.Hist.Push(e.Time, c.User.Send)
+		}
+
+		e.Time += stepDt
+		rem -= stepDt
 	}
+}
 
-	e.time += e.dt
+func NewEngine(dt float64) *Engine {
+	return &Engine{
+		Dt:       dt,
+		Circuits: make([]*Circuit, 0),
+		Time:     0,
+	}
+}
+
+func NewCircuit(f *Field, u *User, h *History) *Circuit {
+	return &Circuit{
+		Field: f,
+		User:  u,
+		Hist:  h,
+	}
+}
+
+func NewUser(dt float64) *User {
+	return &User{
+		Dt: dt,
+		A:  0.1,
+		B:  0.9,
+	}
 }

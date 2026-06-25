@@ -879,7 +879,6 @@ func TestQ4_Authority_ReplicaBoundsFromAdvisory(t *testing.T) {
 
 // TEST 4-A  PID converges to setpoint within finite ticks
 
-
 func TestQ5_MPC_TrajectoryCostHigherAtHighRho(t *testing.T) {
 	// From mpc.go step cost: wLat×waitCost + wRisk×riskCost
 	const wLat, wRisk = 0.55, 0.45

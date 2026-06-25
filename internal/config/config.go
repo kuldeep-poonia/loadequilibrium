@@ -103,14 +103,14 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		ListenAddr:  envStr("LISTEN_ADDR", ":8080"),
-		TLSEnabled:  envBool("TLS_ENABLED", false),
-		TickInterval: envDuration("TICK_INTERVAL", 2*time.Second),
-		TickDeadline: envDuration("TICK_DEADLINE", 1800*time.Millisecond),
-		MinTickInterval: envDuration("MIN_TICK_INTERVAL", 1*time.Second),
-		MaxTickInterval: envDuration("MAX_TICK_INTERVAL", 10*time.Second),
-		TickAdaptStep:   envFloat("TICK_ADAPT_STEP", 1.25),
-		WorkerPoolSize:  envInt("WORKER_POOL_SIZE", defaultWorkers()),
+		ListenAddr:          envStr("LISTEN_ADDR", ":8080"),
+		TLSEnabled:          envBool("TLS_ENABLED", false),
+		TickInterval:        envDuration("TICK_INTERVAL", 2*time.Second),
+		TickDeadline:        envDuration("TICK_DEADLINE", 1800*time.Millisecond),
+		MinTickInterval:     envDuration("MIN_TICK_INTERVAL", 1*time.Second),
+		MaxTickInterval:     envDuration("MAX_TICK_INTERVAL", 10*time.Second),
+		TickAdaptStep:       envFloat("TICK_ADAPT_STEP", 1.25),
+		WorkerPoolSize:      envInt("WORKER_POOL_SIZE", defaultWorkers()),
 		SafetyModeThreshold: envInt("SAFETY_MODE_THRESHOLD", 3),
 
 		RingBufferDepth: envInt("RING_BUFFER_DEPTH", 150),

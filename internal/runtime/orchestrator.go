@@ -480,7 +480,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	// IF WE HAVE WINDOWS, WE MUST HAVE BUNDLES. NO EXCEPTIONS.
 	// THIS RUNS BEFORE DEADLINE CHECKS, BEFORE PRESSURE CHECKS, BEFORE WARMUP GUARDS.
 	if o.tickCount == 1 && len(windows) > 0 {
-			medianMode := o.cfg.ArrivalEstimatorMode == "median"
+		medianMode := o.cfg.ArrivalEstimatorMode == "median"
 
 		if o.nf != nil {
 			modelling.PopulateNetworkField(o.nf, topology.GraphSnapshot{})
@@ -736,7 +736,7 @@ func (o *Orchestrator) tick(now time.Time) {
 	// Stochastic model is bypassed when staleness gate fires — queue + stability
 	// still run because they drive the control decisions.
 	s4 := time.Now()
-		medianMode := o.cfg.ArrivalEstimatorMode == "median"
+	medianMode := o.cfg.ArrivalEstimatorMode == "median"
 
 	if o.nf != nil {
 		modelling.PopulateNetworkField(o.nf, topoSnap)

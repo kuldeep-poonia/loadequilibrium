@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/dynamics"
+	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
@@ -543,7 +543,7 @@ func (r *Runner) handleTick(e Event, st *ServiceSimState, sched interface{ Sched
 				RetryAmplification: 0.0,
 			}
 			instability := st.SignalLearner.Update(v)
-			
+
 			// Replace static HazardPower=2.0 with dynamic regime-based power (RLS derived)
 			// Base power is 1.0, scales up to 3.5 under severe instability modes.
 			st.Plant.P.HazardPower = 1.0 + instability.Score*2.5

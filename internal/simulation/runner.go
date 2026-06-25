@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/loadequilibrium/loadequilibrium/internal/intelligence"
+	"github.com/loadequilibrium/loadequilibrium/internal/dynamics"
 	"github.com/loadequilibrium/loadequilibrium/internal/modelling"
 	"github.com/loadequilibrium/loadequilibrium/internal/physics"
 	"github.com/loadequilibrium/loadequilibrium/internal/topology"
@@ -616,6 +617,21 @@ func (r *Runner) run(
 	states := make(map[string]*ServiceSimState, len(snaps))
 	cascadeEdges, edgeWeights := buildCascadeEdges(topo)
 
+	// Set up Phase 3 PDE transport engine
+	pdeEngine := dynamics.NewEngine(50.0 / 1000.0) // 50ms ticks
+	edgeCircuits := make(map[[2]string]*dynamics.Circuit)
+
+	for src, tgts := range cascadeEdges {
+		for _, tgt := range tgts {
+			f := dynamics.NewField(20, 0.05, dynamics.Params{RhoMax: 100, VFree: 1.0, Tau: 0.5, C: 0.2})
+			u := dynamics.NewUser(0.05)
+			h := dynamics.NewHistory(100)
+			c := dynamics.NewCircuit(f, u, h)
+			edgeCircuits[[2]string{src, tgt}] = c
+			pdeEngine.Circuits = append(pdeEngine.Circuits, c)
+		}
+	}
+
 	for i, s := range snaps {
 		seed := rng.Int63() + int64(i)
 		plant := physics.NewFluidPlant(seed)
@@ -665,6 +681,12 @@ func (r *Runner) run(
 			sched.Schedule(Event{Time: horizonMs * 0.35, Kind: EventShock, ServiceID: shockTarget})
 		}
 	}
+
+	sched.Schedule(Event{
+		Time:      0,
+		Kind:      EventPDE,
+		ServiceID: "global",
+	})
 
 	collapseDetected := false
 	cascadeTriggered := false
@@ -722,9 +744,52 @@ func (r *Runner) run(
 					)
 				}
 			}
+		case EventPDE:
+			// 1. Node -> Edge (Boundary Condition Injection)
+			for src, tgts := range cascadeEdges {
+				srcState := states[src]
+				if srcState == nil {
+					continue
+				}
+				flow := srcState.Plant.A
+				if flow > srcState.Plant.S {
+					flow = srcState.Plant.S
+				}
+				for _, tgt := range tgts {
+					if c := edgeCircuits[[2]string{src, tgt}]; c != nil {
+						c.User.Send = flow * edgeWeights[[2]string{src, tgt}]
+					}
+				}
+			}
+
+			// 2. PDE Engine Step (Independent Numerical Stability)
+			pdeEngine.Step(50.0 / 1000.0)
+
+			// 3. Edge -> Node (Bidirectional Coupling)
+			for src, tgts := range cascadeEdges {
+				for _, tgt := range tgts {
+					tgtState := states[tgt]
+					c := edgeCircuits[[2]string{src, tgt}]
+					if tgtState != nil && c != nil {
+						rtt := c.Field.Rtt()
+						if rtt > 2.0 {
+							tgtState.Plant.Z += (rtt - 2.0) * 0.01
+						}
+						if tgtState.Plant.A < c.User.Ack {
+							tgtState.Plant.A = c.User.Ack
+						}
+					}
+				}
+			}
+
+			sched.Schedule(Event{
+				Time:      e.Time + 50.0,
+				Kind:      EventPDE,
+				ServiceID: "global",
+			})
 		}
 
-		if st.QueueLen >= maxQueueDepth {
+		if st != nil && st.QueueLen >= maxQueueDepth {
 			collapseDetected = true
 		}
 	}

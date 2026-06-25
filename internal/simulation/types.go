@@ -15,6 +15,7 @@ const (
 	EventShock
 	EventRecovery
 	EventTick
+	EventPDE
 )
 
 // Event is a single discrete-event simulation event.

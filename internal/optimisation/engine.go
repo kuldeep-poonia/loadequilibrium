@@ -15,7 +15,6 @@ import (
 // Engine runs the optimisation and control loop across all services.
 type Engine struct {
 	cfg           *config.Config
-	pids          map[string]*PIDController
 	lastScale     map[string]float64
 	stictionCount map[string]int
 	mpc           *MPCHorizonEval
@@ -46,7 +45,6 @@ func NewEngine(cfg *config.Config) *Engine {
 	}
 	return &Engine{
 		cfg:           cfg,
-		pids:          make(map[string]*PIDController),
 		lastScale:     make(map[string]float64),
 		stictionCount: make(map[string]int),
 		mpc:           NewMPCHorizonEval(horizonTicks, cfg.TickInterval.Seconds(), cfg.UtilisationSetpoint),
@@ -151,55 +149,15 @@ func (e *Engine) RunControl(
 	}
 
 	for id, b := range bundles {
-		pid, ok := e.pids[id]
-		if !ok {
-			pid = NewPIDController(
-				e.cfg.PIDKp, e.cfg.PIDKi, e.cfg.PIDKd,
-				e.cfg.UtilisationSetpoint,
-				e.cfg.PIDDeadband,
-				e.cfg.PIDIntegralMax,
-			)
-			e.pids[id] = pid
-		}
-
 		rho := b.Queue.Utilisation
-
-		// Dynamic hysteresis tuning: widen deadband when service is healthy;
-		// narrow it when approaching collapse. Additionally, runtime pressure
-		// overrides zone-based tuning — high pressure always tightens the deadband
-		// so the controller acts more aggressively when the system is under load.
-		switch {
-		case e.pressureLevel >= 2:
-			// High/critical runtime pressure: tightest deadband — react to small deviations.
-			pid.Deadband = math.Max(e.cfg.PIDDeadband*0.4, 0.005)
-		case b.Stability.CollapseZone == "collapse" || e.pressureLevel == 1:
-			pid.Deadband = math.Max(e.cfg.PIDDeadband*0.5, 0.005)
-		case b.Stability.CollapseZone == "warning":
-			pid.Deadband = e.cfg.PIDDeadband
-		default:
-			// Safe zone, nominal pressure: wider deadband suppresses micro-corrections.
-			pid.Deadband = math.Min(e.cfg.PIDDeadband*1.5, 0.06)
-		}
 
 		// Predictive target: project N ticks ahead using utilisation trend.
 		// If rho is trending up, we issue control against the predicted future state.
 		predictiveTarget := rho + b.Queue.UtilisationTrend*float64(horizonTicks)*2.0
 		predictiveTarget = math.Max(0, math.Min(predictiveTarget, 1.5))
 
-		output := pid.Update(rho, now)
-
-		// CRITICAL FIX: Gate PID output based on collapse zone, not rho
-		// During collapse zone (zone=collapse): ONLY allow dampening, NEVER amplify
-		// This prevents amplification even when delayed telemetry makes rho appear high
-		if b.Stability.CollapseZone == "collapse" && output > 0 {
-			// Collapse zone: suppress any amplification from PID
-			// During recovery from actual overload, even with stale telemetry,
-			// we must prevent amplification until queue physically drains
-			output = -0.2 // Small negative to gently reduce scale toward 1.0
-		}
-
-		// D. Soft Constraint Dynamics: replacing hard 0.5 saturation with a smooth exponential barrier
-		bareScale := 1.0 + output
+		// Without PID, bareScale defaults to 1.0 (no instantaneous static correction)
+		bareScale := 1.0
 		var scaleFactor float64
 		if bareScale < 0.6 {
 			// Asymptote towards 0.45 smoothly instead of a hard panic clamp at 0.5
@@ -262,7 +220,7 @@ func (e *Engine) RunControl(
 		prevScaleForStiction := scaleFactor
 
 		// MPC short-horizon evaluation: adjust scale factor to avoid overshoot/undershoot.
-		mpcRes := e.mpc.Evaluate(b, output, scaleFactor)
+		mpcRes := e.mpc.Evaluate(b, 0.0, scaleFactor)
 		scaleFactor = mpcRes.AdjustedScaleFactor
 		e.lastScale[id] = scaleFactor
 
@@ -330,10 +288,10 @@ func (e *Engine) RunControl(
 			ScaleFactor:               scaleFactor,
 			TargetUtilisation:         e.cfg.UtilisationSetpoint,
 			Error:                     rho - e.cfg.UtilisationSetpoint,
-			PIDOutput:                 output,
-			Active:                    pid.Active,
+			PIDOutput:                 0.0,
+			Active:                    true,
 			StabilityMargin:           b.Stability.StabilityMargin,
-			HysteresisState:           pid.HysteresisState,
+			HysteresisState:           "",
 			ActuationBound:            maxScaleDelta,
 			PredictiveTarget:          predictiveTarget,
 			MPCPredictedRho:           mpcRes.PredictedRhoAtHorizon,
@@ -349,10 +307,9 @@ func (e *Engine) RunControl(
 		}
 	}
 
-	// Remove PID and scale state for services that no longer report.
-	for id := range e.pids {
+	// Remove scale state for services that no longer report.
+	for id := range e.lastScale {
 		if _, ok := bundles[id]; !ok {
-			delete(e.pids, id)
 			delete(e.lastScale, id)
 		}
 	}

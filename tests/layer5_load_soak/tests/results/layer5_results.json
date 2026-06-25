@@ -339,5 +339,297 @@
     },
     "run_at": "2026-06-25T04:15:01Z",
     "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 22763,
+      "error_messages": [
+        "snapshot_no_data: requests=10000 status_mismatch=9682 json_mismatch=0 panics=0",
+        "policy_update: requests=10000 status_mismatch=9991 json_mismatch=0 panics=0",
+        "runtime_step: requests=10000 status_mismatch=9977 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=10000 status_mismatch=9963 json_mismatch=0 panics=0",
+        "sim_control: requests=10000 status_mismatch=9963 json_mismatch=0 panics=0",
+        "intel_rollout: requests=10000 status_mismatch=9967 json_mismatch=0 panics=0",
+        "alerts_ack: requests=10000 status_mismatch=9973 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=10000 status_mismatch=9970 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "snapshot_no_data: requests=10000 status_mismatch=9682 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-06-25T05:27:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-TEL-002",
+    "layer": 5,
+    "name": "Hub.GetLastPayload: 100 readers + 10Hz broadcast for 60s",
+    "aim": "100 concurrent GetLastPayload callers while Broadcast at 10Hz: p99 \u003c 1ms",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "(*Hub).GetLastPayload",
+      "(*Hub).Broadcast"
+    ],
+    "threshold": {
+      "metric": "read_p99_ms",
+      "operator": "\u003c",
+      "value": 1,
+      "unit": "ms",
+      "rationale": "/api/v1/snapshot calls GetLastPayload — must be fast for dashboard first-load"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "p99_ms",
+      "sample_count": 309768314,
+      "percentiles": {
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "p100_ms": 1.132
+      },
+      "duration_ms": 60209,
+      "error_messages": [
+        "reads=309768314 nil=0 panics=0 p50=0.000ms p99=0.000ms p100=1.132ms"
+      ]
+    },
+    "on_exceed": "GetLastPayload blocks → /snapshot HTTP responses pile up → dashboard first-load timeout",
+    "answered_questions": {
+      "what_was_tested": "100 goroutines tight-looping GetLastPayload for 60s while 1 broadcaster at 10Hz",
+      "why_this_threshold": "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
+      "what_happens_if_it_fails": "REST /snapshot endpoint latency \u003e 1ms → dashboard HTTP timeout on initial load",
+      "how_load_was_generated": "100 readers in tight loop + 10Hz broadcaster",
+      "how_metrics_were_measured": "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
+      "worst_case_description": "p99=0.000ms reads=309768314"
+    },
+    "run_at": "2026-06-25T05:28:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-WS-001b",
+    "layer": 5,
+    "name": "Hub max client cap enforced at connection time",
+    "aim": "With maxClients=5, the 6th connection must be rejected (HTTP 503)",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "(*Hub).SetMaxClients",
+      "(*Hub).HandleUpgrade (cap enforcement)"
+    ],
+    "threshold": {
+      "metric": "6th_client_rejected",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "rationale": "Unbounded client acceptance leads to OOM under connection flood"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "rejected",
+      "sample_count": 6,
+      "duration_ms": 177,
+      "error_messages": [
+        "6th rejected=true clients_after=5 max=5"
+      ]
+    },
+    "on_exceed": "Hub accepts unlimited WebSocket connections → attacker or misbehaving dashboard opens thousands of connections → OOM kill",
+    "answered_questions": {
+      "what_was_tested": "Hub.SetMaxClients(5) then attempt 6th connection",
+      "why_this_threshold": "Hard cap prevents resource exhaustion under connection flood",
+      "what_happens_if_it_fails": "Each reconnecting dashboard tab creates a new connection → OOM kill",
+      "how_load_was_generated": "Sequential connection attempts via dialWebSocket helper",
+      "how_metrics_were_measured": "dialWebSocket returns error if server sends 503 instead of 101",
+      "worst_case_description": "correctly rejected"
+    },
+    "run_at": "2026-06-25T05:28:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 11372,
+      "error_messages": [
+        "snapshot_no_data: requests=10000 status_mismatch=9691 json_mismatch=0 panics=0",
+        "policy_update: requests=10000 status_mismatch=9988 json_mismatch=0 panics=0",
+        "runtime_step: requests=10000 status_mismatch=9990 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=10000 status_mismatch=9990 json_mismatch=0 panics=0",
+        "sim_control: requests=10000 status_mismatch=9989 json_mismatch=0 panics=0",
+        "intel_rollout: requests=10000 status_mismatch=9989 json_mismatch=0 panics=0",
+        "alerts_ack: requests=10000 status_mismatch=9978 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=10000 status_mismatch=9982 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "snapshot_no_data: requests=10000 status_mismatch=9691 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-06-25T05:32:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-TEL-002",
+    "layer": 5,
+    "name": "Hub.GetLastPayload: 100 readers + 10Hz broadcast for 60s",
+    "aim": "100 concurrent GetLastPayload callers while Broadcast at 10Hz: p99 \u003c 1ms",
+    "packages_involved": [
+      "internal/streaming"
+    ],
+    "functions_tested": [
+      "(*Hub).GetLastPayload",
+      "(*Hub).Broadcast"
+    ],
+    "threshold": {
+      "metric": "read_p99_ms",
+      "operator": "\u003c",
+      "value": 1,
+      "unit": "ms",
+      "rationale": "/api/v1/snapshot calls GetLastPayload — must be fast for dashboard first-load"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "p99_ms",
+      "sample_count": 430578313,
+      "percentiles": {
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "p100_ms": 0
+      },
+      "duration_ms": 60078,
+      "error_messages": [
+        "reads=430578313 nil=0 panics=0 p50=0.000ms p99=0.000ms p100=0.000ms"
+      ]
+    },
+    "on_exceed": "GetLastPayload blocks → /snapshot HTTP responses pile up → dashboard first-load timeout",
+    "answered_questions": {
+      "what_was_tested": "100 goroutines tight-looping GetLastPayload for 60s while 1 broadcaster at 10Hz",
+      "why_this_threshold": "1ms p99: RLock on a struct field is sub-microsecond; 1ms is extremely generous",
+      "what_happens_if_it_fails": "REST /snapshot endpoint latency \u003e 1ms → dashboard HTTP timeout on initial load",
+      "how_load_was_generated": "100 readers in tight loop + 10Hz broadcaster",
+      "how_metrics_were_measured": "time.Since(t0) per GetLastPayload call; p99 from sorted slice",
+      "worst_case_description": "p99=0.000ms reads=430578313"
+    },
+    "run_at": "2026-06-25T05:33:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-WS-001b",
+    "layer": 5,
+    "name": "Hub max client cap enforced at connection time",
+    "aim": "With maxClients=5, the 6th connection must be rejected (HTTP 503)",
+    "packages_involved": [
+      "internal/streaming",
+      "internal/api"
+    ],
+    "functions_tested": [
+      "(*Hub).SetMaxClients",
+      "(*Hub).HandleUpgrade (cap enforcement)"
+    ],
+    "threshold": {
+      "metric": "6th_client_rejected",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "rationale": "Unbounded client acceptance leads to OOM under connection flood"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "rejected",
+      "sample_count": 6,
+      "duration_ms": 260,
+      "error_messages": [
+        "6th rejected=true clients_after=5 max=5"
+      ]
+    },
+    "on_exceed": "Hub accepts unlimited WebSocket connections → attacker or misbehaving dashboard opens thousands of connections → OOM kill",
+    "answered_questions": {
+      "what_was_tested": "Hub.SetMaxClients(5) then attempt 6th connection",
+      "why_this_threshold": "Hard cap prevents resource exhaustion under connection flood",
+      "what_happens_if_it_fails": "Each reconnecting dashboard tab creates a new connection → OOM kill",
+      "how_load_was_generated": "Sequential connection attempts via dialWebSocket helper",
+      "how_metrics_were_measured": "dialWebSocket returns error if server sends 503 instead of 101",
+      "worst_case_description": "correctly rejected"
+    },
+    "run_at": "2026-06-25T05:33:35Z",
+    "go_version": "go1.26.0"
   }
 ]

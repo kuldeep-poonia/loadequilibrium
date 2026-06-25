@@ -508,6 +508,13 @@ func (r *RuntimeOrchestrator) Tick(
 	next.PhysicalBacklog = newPhysicalBacklog
 
 	// ---------- identification ----------
+	// Extract PDE density and stability margin for dynamic gains
+	pdeDensity := 0.0
+	if s.Plant.ServiceRate > 0 {
+		pdeDensity = measuredArrival / s.Plant.ServiceRate
+	}
+	stabilityMargin := s.Plant.ArrivalMean // fallback approximation if stability isn't directly passed here
+
 	idState, sig :=
 		r.ID.Step(
 			s.ID,
@@ -525,6 +532,8 @@ func (r *RuntimeOrchestrator) Tick(
 			newRollout.CapacityActive-s.Rollout.CapacityActive,
 			infraLoad,
 			newPlant.Backlog,
+			pdeDensity,
+			stabilityMargin,
 		)
 
 	// ---------- meta damping influence ----------

@@ -425,24 +425,46 @@ func (e *IdentificationEngine) Step(
 	scaleDelta float64,
 	infraLoad float64,
 	totalLoad float64,
+
+	pdeDensity float64,
+	stabilityMargin float64,
 ) (IdentificationState, IdentificationSignals) {
+
+	// Dynamically adjust inverse time constants (Gains) based on PDE/SDE physics.
+	// When PDE shockwaves approach (density > 0.8) or stability margin collapses (<0.2),
+	// the time constant must shorten (gain increases) to rapidly track changing conditions.
+	// In calm state, gains revert to baseline to filter noise.
+	shockwaveMultiplier := 1.0
+	if pdeDensity > 0.8 {
+		shockwaveMultiplier += (pdeDensity - 0.8) * 2.0 // Boost up to +40% if density approaches 1.0
+	}
+	if stabilityMargin > 0 && stabilityMargin < 0.2 {
+		shockwaveMultiplier += (0.2 - stabilityMargin) * 5.0 // Boost up to +100% on collapse
+	}
+	shockwaveMultiplier = math.Min(shockwaveMultiplier, 3.0)
+
+	dynEngine := *e
+	dynEngine.FastGain = math.Min(e.FastGain*shockwaveMultiplier, 1.0)
+	dynEngine.SlowGain = math.Min(e.SlowGain*shockwaveMultiplier, 1.0)
+	dynEngine.VarGain = math.Min(e.VarGain*shockwaveMultiplier, 1.0)
+
 
 	next := s
 
 	next =
-		e.updateArrival(next, measuredArrival)
+		dynEngine.updateArrival(next, measuredArrival)
 
 	next =
-		e.updateBurst(next, measuredArrival)
+		dynEngine.updateBurst(next, measuredArrival)
 
 	next =
-		e.updateDisturbance(next, residual)
+		dynEngine.updateDisturbance(next, residual)
 
 	next =
-		e.updateErrors(next, queueErr, latErr)
+		dynEngine.updateErrors(next, queueErr, latErr)
 
 	next =
-		e.updateConfidence(
+		dynEngine.updateConfidence(
 			next,
 			mpcQuality,
 			safetyRate,
@@ -452,7 +474,7 @@ func (e *IdentificationEngine) Step(
 		)
 
 	next =
-		e.updateReliability(
+		dynEngine.updateReliability(
 			next,
 			rolloutSuccess,
 			scaleDelta,
@@ -460,18 +482,18 @@ func (e *IdentificationEngine) Step(
 		)
 
 	next =
-		e.updateEnvelope(next)
+		dynEngine.updateEnvelope(next)
 
 	next =
-		e.updateSeasonal(next, totalLoad)
+		dynEngine.updateSeasonal(next, totalLoad)
 
 	next =
-		e.updateDamping(next)
+		dynEngine.updateDamping(next)
 
 	next = sanitizeIdentificationState(next)
 
 	sig :=
-		e.signals(next)
+		dynEngine.signals(next)
 
 	return next, sig
 }

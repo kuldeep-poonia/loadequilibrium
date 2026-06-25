@@ -292,7 +292,7 @@ func computeSteadyStateP0(eqRho float64, w *telemetry.ServiceWindow) float64 {
 // computeSteadyStateMeanQueue returns E[Lq] at equilibrium ρ under M/M/c.
 func computeSteadyStateMeanQueue(eqRho float64, w *telemetry.ServiceWindow) float64 {
 	if eqRho >= 1.0 {
-		return math.Inf(1)
+		return -1.0
 	}
 	if eqRho <= 0 {
 		return 0

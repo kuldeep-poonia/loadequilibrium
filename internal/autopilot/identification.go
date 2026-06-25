@@ -10,6 +10,8 @@ type IdentificationState struct {
 	ArrivalBlendCoef float64
 	ArrivalEstimate  float64
 	ArrivalVar       float64
+	ArrivalWelfordM  float64
+	ArrivalWelfordV  float64
 
 	// bounded burst regime
 	BurstEnergy float64
@@ -46,6 +48,74 @@ type IdentificationSignals struct {
 	DampingFactor     float64
 }
 
+// ArrivalEstimator encapsulates the logic for computing and updating arrival rates.
+type ArrivalEstimator interface {
+	Update(s IdentificationState, measured float64, e *IdentificationEngine) IdentificationState
+}
+
+// LegacyArrivalEstimator uses the historical 1.5x / 10 RPS heuristic threshold.
+type LegacyArrivalEstimator struct{}
+
+func (l *LegacyArrivalEstimator) Update(s IdentificationState, measured float64, e *IdentificationEngine) IdentificationState {
+	fErr := measured - s.ArrivalFast
+	s.ArrivalFast += e.FastGain * fErr
+
+	sErr := measured - s.ArrivalSlow
+	s.ArrivalSlow += e.SlowGain * sErr
+
+	if measured > s.ArrivalSlow*1.5 && measured > 10 {
+		s.ArrivalFast = measured
+		s.ArrivalSlow = measured
+	}
+
+	blendError := math.Abs(s.ArrivalFast - s.ArrivalSlow)
+	s.ArrivalBlendCoef += e.BlendGain * (blendError - s.ArrivalBlendCoef)
+	alpha := s.ArrivalBlendCoef / (1 + s.ArrivalBlendCoef)
+	s.ArrivalEstimate = alpha*s.ArrivalFast + (1-alpha)*s.ArrivalSlow
+	s.ArrivalVar = (1-e.VarGain)*s.ArrivalVar + e.VarGain*fErr*fErr
+	return s
+}
+
+// StatisticalArrivalEstimator uses Welford EWMA and Chebyshev bounds for burst detection.
+type StatisticalArrivalEstimator struct {
+	SigmaMultiplier float64
+	NoiseFloorRatio float64
+}
+
+func (st *StatisticalArrivalEstimator) Update(s IdentificationState, measured float64, e *IdentificationEngine) IdentificationState {
+	// Welford-style EWMA Variance tracking
+	if s.ArrivalWelfordM == 0 {
+		s.ArrivalWelfordM = measured
+	}
+	diff := measured - s.ArrivalWelfordM
+	s.ArrivalWelfordM += e.VarGain * diff
+	s.ArrivalWelfordV = (1-e.VarGain)*s.ArrivalWelfordV + e.VarGain*diff*diff
+
+	fErr := measured - s.ArrivalFast
+	s.ArrivalFast += e.FastGain * fErr
+	sErr := measured - s.ArrivalSlow
+	s.ArrivalSlow += e.SlowGain * sErr
+
+	noiseFloor := math.Max(s.ArrivalEstimate*st.NoiseFloorRatio, 1.0)
+	sigma := math.Sqrt(math.Max(s.ArrivalWelfordV, noiseFloor))
+	jumpThreshold := s.ArrivalSlow + st.SigmaMultiplier*sigma
+
+	if measured > jumpThreshold {
+		s.ArrivalFast = measured
+		s.ArrivalSlow = measured
+	}
+
+	blendError := math.Abs(s.ArrivalFast - s.ArrivalSlow)
+	s.ArrivalBlendCoef += e.BlendGain * (blendError - s.ArrivalBlendCoef)
+	alpha := s.ArrivalBlendCoef / (1 + s.ArrivalBlendCoef)
+	s.ArrivalEstimate = alpha*s.ArrivalFast + (1-alpha)*s.ArrivalSlow
+	
+	// Preserve old ArrivalVar for backwards compatibility with other systems if any
+	s.ArrivalVar = (1-e.VarGain)*s.ArrivalVar + e.VarGain*fErr*fErr
+
+	return s
+}
+
 type IdentificationEngine struct {
 	Dt float64
 
@@ -75,6 +145,9 @@ type IdentificationEngine struct {
 	SeasonalGain float64
 
 	DampingGain float64
+
+	// Strategy configuration
+	ArrivalStrategy ArrivalEstimator
 }
 
 /*
@@ -84,40 +157,10 @@ func (e *IdentificationEngine) updateArrival(
 	s IdentificationState,
 	measured float64,
 ) IdentificationState {
-
-	fErr := measured - s.ArrivalFast
-	s.ArrivalFast += e.FastGain * fErr
-
-	sErr := measured - s.ArrivalSlow
-	s.ArrivalSlow += e.SlowGain * sErr
-
-	// Asymmetric tracking: if arrival spikes massively (>50%), jump immediately
-	// to prevent dangerous under-provisioning during the EWMA lag period.
-	if measured > s.ArrivalSlow*1.5 && measured > 10 {
-		s.ArrivalFast = measured
-		s.ArrivalSlow = measured
+	if e.ArrivalStrategy == nil {
+		e.ArrivalStrategy = &LegacyArrivalEstimator{}
 	}
-
-	blendError :=
-		math.Abs(s.ArrivalFast - s.ArrivalSlow)
-
-	s.ArrivalBlendCoef +=
-		e.BlendGain *
-			(blendError - s.ArrivalBlendCoef)
-
-	alpha :=
-		s.ArrivalBlendCoef /
-			(1 + s.ArrivalBlendCoef)
-
-	s.ArrivalEstimate =
-		alpha*s.ArrivalFast +
-			(1-alpha)*s.ArrivalSlow
-
-	s.ArrivalVar =
-		(1-e.VarGain)*s.ArrivalVar +
-			e.VarGain*fErr*fErr
-
-	return s
+	return e.ArrivalStrategy.Update(s, measured, e)
 }
 
 /*

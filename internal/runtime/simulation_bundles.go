@@ -25,7 +25,7 @@ func (o *Orchestrator) buildSimulationBundles(
 		}
 		q := queuePhysics.RunQueueModel(w, topo, medianMode)
 		sig := signal.Update(w)
-		stab := modelling.RunStabilityAssessment(q, sig, topo, o.cfg.CollapseThreshold)
+		stab := modelling.RunStabilityAssessment(q, sig, topo, nil, o.cfg.CollapseThreshold)
 		bundles[id] = &modelling.ServiceModelBundle{
 			Queue:      q,
 			Signal:     sig,

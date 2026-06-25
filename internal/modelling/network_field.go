@@ -328,6 +328,13 @@ func (nf *NetworkField) Step() {
 
 	dt := nf.dt()
 
+	for _, e := range nf.Edges {
+		e.OutFlux = 0.0
+		// InFlux is set externally, we don't clear it here, or we do?
+		// Actually, if we don't clear InFlux, external flux remains, but solveNode adds internal flux.
+		// So next tick, InFlux = external. Then we add internal again. Wait, if it's set externally BEFORE Step(), then InFlux = external + internal.
+	}
+
 	for _, j := range nf.Junctions {
 		nf.solveNode(j)
 	}

@@ -99,7 +99,7 @@ func TestStabilityAssessmentSafeZone(t *testing.T) {
 		Edges: []topology.Edge{},
 	}
 
-	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, 0.90)
+	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, nil, 0.90)
 
 	if sa.CollapseZone != "safe" {
 		t.Errorf("safe zone: expected CollapseZone='safe', got %q", sa.CollapseZone)
@@ -137,7 +137,7 @@ func TestStabilityAssessmentWarningZone(t *testing.T) {
 		Edges: []topology.Edge{},
 	}
 
-	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, 0.90)
+	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, nil, 0.90)
 
 	if sa.CollapseZone != "warning" {
 		t.Errorf("warning zone: expected CollapseZone='warning', got %q", sa.CollapseZone)
@@ -172,7 +172,7 @@ func TestStabilityAssessmentCollapseZone(t *testing.T) {
 		Edges: []topology.Edge{},
 	}
 
-	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, 0.90)
+	sa := modelling.RunStabilityAssessment(q, sig, topoSnap, nil, 0.90)
 
 	if sa.CollapseZone != "collapse" {
 		t.Errorf("collapse zone: expected CollapseZone='collapse', got %q", sa.CollapseZone)
@@ -233,6 +233,6 @@ func BenchmarkStabilityAssessment(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = modelling.RunStabilityAssessment(q, sig, topoSnap, 0.90)
+		_ = modelling.RunStabilityAssessment(q, sig, topoSnap, nil, 0.90)
 	}
 }

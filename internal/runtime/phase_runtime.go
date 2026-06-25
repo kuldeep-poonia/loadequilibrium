@@ -335,6 +335,10 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		EVTFactor:           2.0,
 		SeasonalGain:        0.05,
 		DampingGain:         0.10,
+		ArrivalStrategy: &autopilot.StatisticalArrivalEstimator{
+			SigmaMultiplier: 5.0,
+			NoiseFloorRatio: 0.10,
+		},
 	}
 
 	autoRuntime := &autopilot.RuntimeOrchestrator{

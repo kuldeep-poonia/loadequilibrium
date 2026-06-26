@@ -1162,5 +1162,1121 @@
     },
     "run_at": "2026-06-25T05:27:21Z",
     "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-003",
+    "layer": 7,
+    "name": "Actuator backend killed mid-tick: orchestrator continues ticking",
+    "aim": "Kill HTTP backend; orchestrator must tick \u003e=3 more times; recovery dispatch succeeds",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "threshold": {
+      "metric": "ticks_after_kill",
+      "operator": "\u003e=",
+      "value": 3,
+      "unit": "ticks",
+      "rationale": "Backend failure must not halt the control loop"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 3,
+      "actual_unit": "ticks_after_kill",
+      "chaos_injected": "httptest.Server.Close() for actuator backend mid-operation",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 8,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2025,
+      "error_messages": [
+        "seq_before=5 seq_after=8 ticks_after=3 failed_fb=2 recovery_ok=true"
+      ]
+    },
+    "on_exceed": "Backend failure halts orchestrator control loop → system runs open-loop → no scaling decisions made",
+    "answered_questions": {
+      "what_chaos_was_injected": "httptest.Server closed for the HTTP actuator backend mid-operation",
+      "why_this_threshold": "\u003e=3 ticks: control loop must be completely independent of actuator health",
+      "what_happens_if_it_fails": "Backend failure causes goroutine panic → control loop stops → no scaling decisions",
+      "how_chaos_was_injected": "backendSrv.Close() after warmup; orchestrator continues dispatching to dead server",
+      "how_recovery_was_verified": "New backend server + router.AddRoute() + manual Dispatch(9999) succeeds",
+      "production_equivalent": "Kubernetes pod killed for actuator sidecar / external scaling API goes down"
+    },
+    "run_at": "2026-06-25T07:50:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-004",
+    "layer": 7,
+    "name": "10 concurrent goroutines (Broadcast/Ingest/Prune/Dispatch/HTTP) + context cancel",
+    "aim": "Concurrent cancel while all operations active: zero panics",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/streaming",
+      "internal/telemetry",
+      "internal/actuator",
+      "internal/api"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "No concurrent access pattern during shutdown must cause panic"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "10 goroutines concurrent with context cancel after 300ms",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 563,
+      "error_messages": [
+        "panics=0"
+      ]
+    },
+    "on_exceed": "Race condition during shutdown causes panic → process crash → Kubernetes restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "10 goroutines running concurrent operations cancelled after 300ms",
+      "why_this_threshold": "Zero panics: any panic during shutdown is a bug — send-on-closed-channel, nil dereference etc",
+      "what_happens_if_it_fails": "Shutdown races cause panics → OOM or crash during graceful termination",
+      "how_chaos_was_injected": "10 goroutines each doing different ops; cancel after 300ms while all active",
+      "how_recovery_was_verified": "N/A — concurrent safety test",
+      "production_equivalent": "Multiple dashboard clients + active control loop + SIGTERM simultaneously"
+    },
+    "run_at": "2026-06-25T07:50:34Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-005",
+    "layer": 7,
+    "name": "Memory pressure soak: 5000 events/s for 1m0s",
+    "aim": "heap_growth\u003c=2.0x, orch_ticks\u003e=150, panics==0 under 5000 events/s for 60s",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "heap_growth_factor",
+      "operator": "\u003c=",
+      "value": 4,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffers + Go runtime overhead. Measured post-shutdown post-GC."
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.34488957279080873,
+      "actual_unit": "heap_growth_factor",
+      "chaos_injected": "5000 events/s sustained for 1m0s",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 258,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 65185,
+      "error_messages": [
+        "heap_before=1924KB heap_after=663KB growth=0.3449x ticks=258 min_ticks=150 panics=0"
+      ]
+    },
+    "on_exceed": "Memory leak in hot path → heap grows proportional to ingestion → OOM kill → restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "5000 events/s for 1m0s via Store.Ingest while Orchestrator ticks",
+      "why_this_threshold": "2.0x: ring buffers are fixed-size; growth beyond 2x means entries retained beyond capacity",
+      "what_happens_if_it_fails": "Memory grows proportional to ingestion → OOM kill → CrashLoopBackOff in Kubernetes",
+      "how_chaos_was_injected": "1ms ticker × 5 events/tick = 5,000/s across 10 services; orchestrator ticking at 200ms simultaneously",
+      "how_recovery_was_verified": "N/A — steady-state soak test",
+      "production_equivalent": "Production traffic spike with sustained high ingestion rate"
+    },
+    "run_at": "2026-06-25T07:51:39Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-006",
+    "layer": 7,
+    "name": "Clock skew in telemetry timestamps: staleness detection and nil-safety",
+    "aim": "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
+    "packages_involved": [
+      "internal/telemetry",
+      "internal/runtime"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Clock skew is inevitable in distributed systems — must be handled gracefully"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "MetricPoints with +1h (future), -10min (past), zero timestamps",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 316,
+      "error_messages": [
+        "panics=0 past_rejected=true normal_accessible=true all_windows=3"
+      ]
+    },
+    "on_exceed": "Clock skew from NTP resync or distributed system drift causes panic in telemetry pipeline",
+    "answered_questions": {
+      "what_chaos_was_injected": "MetricPoints with timestamps: now+1h (future), now-10min (beyond staleAge=30s), time.Time{} (zero)",
+      "why_this_threshold": "Zero panics: Store.Ingest and Store.Window must handle any timestamp without crashing",
+      "what_happens_if_it_fails": "NTP resync or node clock jump causes MetricPoint with bad timestamp → panic → store crash",
+      "how_chaos_was_injected": "Direct Store.Ingest with crafted MetricPoint.Timestamp values",
+      "how_recovery_was_verified": "Normal service still accessible via AllWindows after skewed entries injected",
+      "production_equivalent": "NTP resync causing clock jump, or replica pod with wrong system time"
+    },
+    "run_at": "2026-06-25T07:51:40Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-001",
+    "layer": 7,
+    "name": "Full system graceful shutdown under active telemetry load",
+    "aim": "SIGTERM: shutdown within 10000ms, goroutine_leak\u003c=5, HTTP stops accepting",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/api",
+      "internal/streaming",
+      "internal/actuator",
+      "internal/telemetry"
+    ],
+    "threshold": {
+      "metric": "shutdown_duration_ms",
+      "operator": "\u003c=",
+      "value": 10000,
+      "unit": "ms",
+      "rationale": "Kubernetes terminationGracePeriodSeconds=30s; must complete well before SIGKILL"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "shutdown_ms",
+      "chaos_injected": "context.Cancel() on full running system (SIGTERM equivalent)",
+      "goroutines_before": 2,
+      "goroutines_peak": 5,
+      "goroutines_after": 2,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2049,
+      "error_messages": [
+        "shutdown_ms=0 leaked=0 http_stopped=true ticks=10"
+      ]
+    },
+    "on_exceed": "Kubernetes SIGKILL after grace period → actuator commands not drained → physical system state diverges from controller model",
+    "answered_questions": {
+      "what_chaos_was_injected": "context.Cancel() while Orchestrator.Run is ticking with active telemetry",
+      "why_this_threshold": "10s shutdown: Kubernetes default terminationGracePeriodSeconds is 30s; must complete with margin",
+      "what_happens_if_it_fails": "Kubernetes force-kills process → actuator.drain() not called → pending directives lost",
+      "how_chaos_was_injected": "ts.Shutdown() calls orchCancel() + httpSrv.Close() + act.Close()",
+      "how_recovery_was_verified": "Goroutine count delta; HTTP connection refused after shutdown",
+      "production_equivalent": "kubectl delete pod / Kubernetes rolling update"
+    },
+    "run_at": "2026-06-25T07:51:42Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-002",
+    "layer": 7,
+    "name": "Orchestrator restart under live telemetry: Store windows survive",
+    "aim": "Kill+restart Orchestrator; Store retains 3 windows; new orch produces Bundles within 5 ticks",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "ticks_to_first_bundle_after_restart",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "ticks",
+      "rationale": "Restarted orchestrator must immediately use existing telemetry — not wait for cold warm-up"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "ticks_to_first_bundle",
+      "chaos_injected": "orchCancel() while system active; new runtime.New() with same Store",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2060,
+      "error_messages": [
+        "windows_before=3 windows_after=3 ticks_to_bundle=1 bundles_found=true"
+      ]
+    },
+    "on_exceed": "Restarted orchestrator starts cold → over-aggressive scale-down for first N ticks → service capacity reduced unnecessarily during restart recovery period",
+    "answered_questions": {
+      "what_chaos_was_injected": "orchestrator context cancelled; new runtime.New() created with same telemetry.Store",
+      "why_this_threshold": "5 ticks: Store.AllWindows() should return existing data immediately on first tick",
+      "what_happens_if_it_fails": "Controller restarts cold → N ticks of degraded decisions → temporary under-provisioning",
+      "how_chaos_was_injected": "orchCancel() stops Run() loop; same store passed to new runtime.New()",
+      "how_recovery_was_verified": "Hub.GetLastPayload().Bundles non-empty within 5 ticks of new orch start",
+      "production_equivalent": "Kubernetes pod OOM restart with persistent volume mount for telemetry"
+    },
+    "run_at": "2026-06-25T07:51:44Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-003",
+    "layer": 7,
+    "name": "Actuator backend killed mid-tick: orchestrator continues ticking",
+    "aim": "Kill HTTP backend; orchestrator must tick \u003e=3 more times; recovery dispatch succeeds",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "threshold": {
+      "metric": "ticks_after_kill",
+      "operator": "\u003e=",
+      "value": 3,
+      "unit": "ticks",
+      "rationale": "Backend failure must not halt the control loop"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 3,
+      "actual_unit": "ticks_after_kill",
+      "chaos_injected": "httptest.Server.Close() for actuator backend mid-operation",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 8,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2019,
+      "error_messages": [
+        "seq_before=5 seq_after=8 ticks_after=3 failed_fb=2 recovery_ok=true"
+      ]
+    },
+    "on_exceed": "Backend failure halts orchestrator control loop → system runs open-loop → no scaling decisions made",
+    "answered_questions": {
+      "what_chaos_was_injected": "httptest.Server closed for the HTTP actuator backend mid-operation",
+      "why_this_threshold": "\u003e=3 ticks: control loop must be completely independent of actuator health",
+      "what_happens_if_it_fails": "Backend failure causes goroutine panic → control loop stops → no scaling decisions",
+      "how_chaos_was_injected": "backendSrv.Close() after warmup; orchestrator continues dispatching to dead server",
+      "how_recovery_was_verified": "New backend server + router.AddRoute() + manual Dispatch(9999) succeeds",
+      "production_equivalent": "Kubernetes pod killed for actuator sidecar / external scaling API goes down"
+    },
+    "run_at": "2026-06-25T09:28:45Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-004",
+    "layer": 7,
+    "name": "10 concurrent goroutines (Broadcast/Ingest/Prune/Dispatch/HTTP) + context cancel",
+    "aim": "Concurrent cancel while all operations active: zero panics",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/streaming",
+      "internal/telemetry",
+      "internal/actuator",
+      "internal/api"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "No concurrent access pattern during shutdown must cause panic"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "10 goroutines concurrent with context cancel after 300ms",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 557,
+      "error_messages": [
+        "panics=0"
+      ]
+    },
+    "on_exceed": "Race condition during shutdown causes panic → process crash → Kubernetes restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "10 goroutines running concurrent operations cancelled after 300ms",
+      "why_this_threshold": "Zero panics: any panic during shutdown is a bug — send-on-closed-channel, nil dereference etc",
+      "what_happens_if_it_fails": "Shutdown races cause panics → OOM or crash during graceful termination",
+      "how_chaos_was_injected": "10 goroutines each doing different ops; cancel after 300ms while all active",
+      "how_recovery_was_verified": "N/A — concurrent safety test",
+      "production_equivalent": "Multiple dashboard clients + active control loop + SIGTERM simultaneously"
+    },
+    "run_at": "2026-06-25T09:28:45Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-005",
+    "layer": 7,
+    "name": "Memory pressure soak: 5000 events/s for 1m0s",
+    "aim": "heap_growth\u003c=2.0x, orch_ticks\u003e=150, panics==0 under 5000 events/s for 60s",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "heap_growth_factor",
+      "operator": "\u003c=",
+      "value": 4,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffers + Go runtime overhead. Measured post-shutdown post-GC."
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.32750436681552525,
+      "actual_unit": "heap_growth_factor",
+      "chaos_injected": "5000 events/s sustained for 1m0s",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 171,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 65364,
+      "error_messages": [
+        "heap_before=1939KB heap_after=635KB growth=0.3275x ticks=171 min_ticks=150 panics=0"
+      ]
+    },
+    "on_exceed": "Memory leak in hot path → heap grows proportional to ingestion → OOM kill → restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "5000 events/s for 1m0s via Store.Ingest while Orchestrator ticks",
+      "why_this_threshold": "2.0x: ring buffers are fixed-size; growth beyond 2x means entries retained beyond capacity",
+      "what_happens_if_it_fails": "Memory grows proportional to ingestion → OOM kill → CrashLoopBackOff in Kubernetes",
+      "how_chaos_was_injected": "1ms ticker × 5 events/tick = 5,000/s across 10 services; orchestrator ticking at 200ms simultaneously",
+      "how_recovery_was_verified": "N/A — steady-state soak test",
+      "production_equivalent": "Production traffic spike with sustained high ingestion rate"
+    },
+    "run_at": "2026-06-25T09:29:50Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-006",
+    "layer": 7,
+    "name": "Clock skew in telemetry timestamps: staleness detection and nil-safety",
+    "aim": "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
+    "packages_involved": [
+      "internal/telemetry",
+      "internal/runtime"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Clock skew is inevitable in distributed systems — must be handled gracefully"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "MetricPoints with +1h (future), -10min (past), zero timestamps",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 315,
+      "error_messages": [
+        "panics=0 past_rejected=true normal_accessible=true all_windows=3"
+      ]
+    },
+    "on_exceed": "Clock skew from NTP resync or distributed system drift causes panic in telemetry pipeline",
+    "answered_questions": {
+      "what_chaos_was_injected": "MetricPoints with timestamps: now+1h (future), now-10min (beyond staleAge=30s), time.Time{} (zero)",
+      "why_this_threshold": "Zero panics: Store.Ingest and Store.Window must handle any timestamp without crashing",
+      "what_happens_if_it_fails": "NTP resync or node clock jump causes MetricPoint with bad timestamp → panic → store crash",
+      "how_chaos_was_injected": "Direct Store.Ingest with crafted MetricPoint.Timestamp values",
+      "how_recovery_was_verified": "Normal service still accessible via AllWindows after skewed entries injected",
+      "production_equivalent": "NTP resync causing clock jump, or replica pod with wrong system time"
+    },
+    "run_at": "2026-06-25T09:29:51Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-001",
+    "layer": 7,
+    "name": "Full system graceful shutdown under active telemetry load",
+    "aim": "SIGTERM: shutdown within 10000ms, goroutine_leak\u003c=5, HTTP stops accepting",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/api",
+      "internal/streaming",
+      "internal/actuator",
+      "internal/telemetry"
+    ],
+    "threshold": {
+      "metric": "shutdown_duration_ms",
+      "operator": "\u003c=",
+      "value": 10000,
+      "unit": "ms",
+      "rationale": "Kubernetes terminationGracePeriodSeconds=30s; must complete well before SIGKILL"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "shutdown_ms",
+      "chaos_injected": "context.Cancel() on full running system (SIGTERM equivalent)",
+      "goroutines_before": 2,
+      "goroutines_peak": 5,
+      "goroutines_after": 2,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2058,
+      "error_messages": [
+        "shutdown_ms=0 leaked=0 http_stopped=true ticks=10"
+      ]
+    },
+    "on_exceed": "Kubernetes SIGKILL after grace period → actuator commands not drained → physical system state diverges from controller model",
+    "answered_questions": {
+      "what_chaos_was_injected": "context.Cancel() while Orchestrator.Run is ticking with active telemetry",
+      "why_this_threshold": "10s shutdown: Kubernetes default terminationGracePeriodSeconds is 30s; must complete with margin",
+      "what_happens_if_it_fails": "Kubernetes force-kills process → actuator.drain() not called → pending directives lost",
+      "how_chaos_was_injected": "ts.Shutdown() calls orchCancel() + httpSrv.Close() + act.Close()",
+      "how_recovery_was_verified": "Goroutine count delta; HTTP connection refused after shutdown",
+      "production_equivalent": "kubectl delete pod / Kubernetes rolling update"
+    },
+    "run_at": "2026-06-25T09:29:53Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-002",
+    "layer": 7,
+    "name": "Orchestrator restart under live telemetry: Store windows survive",
+    "aim": "Kill+restart Orchestrator; Store retains 3 windows; new orch produces Bundles within 5 ticks",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "ticks_to_first_bundle_after_restart",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "ticks",
+      "rationale": "Restarted orchestrator must immediately use existing telemetry — not wait for cold warm-up"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "ticks_to_first_bundle",
+      "chaos_injected": "orchCancel() while system active; new runtime.New() with same Store",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2057,
+      "error_messages": [
+        "windows_before=3 windows_after=3 ticks_to_bundle=1 bundles_found=true"
+      ]
+    },
+    "on_exceed": "Restarted orchestrator starts cold → over-aggressive scale-down for first N ticks → service capacity reduced unnecessarily during restart recovery period",
+    "answered_questions": {
+      "what_chaos_was_injected": "orchestrator context cancelled; new runtime.New() created with same telemetry.Store",
+      "why_this_threshold": "5 ticks: Store.AllWindows() should return existing data immediately on first tick",
+      "what_happens_if_it_fails": "Controller restarts cold → N ticks of degraded decisions → temporary under-provisioning",
+      "how_chaos_was_injected": "orchCancel() stops Run() loop; same store passed to new runtime.New()",
+      "how_recovery_was_verified": "Hub.GetLastPayload().Bundles non-empty within 5 ticks of new orch start",
+      "production_equivalent": "Kubernetes pod OOM restart with persistent volume mount for telemetry"
+    },
+    "run_at": "2026-06-25T09:29:55Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-003",
+    "layer": 7,
+    "name": "Actuator backend killed mid-tick: orchestrator continues ticking",
+    "aim": "Kill HTTP backend; orchestrator must tick \u003e=3 more times; recovery dispatch succeeds",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "threshold": {
+      "metric": "ticks_after_kill",
+      "operator": "\u003e=",
+      "value": 3,
+      "unit": "ticks",
+      "rationale": "Backend failure must not halt the control loop"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 3,
+      "actual_unit": "ticks_after_kill",
+      "chaos_injected": "httptest.Server.Close() for actuator backend mid-operation",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 8,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2223,
+      "error_messages": [
+        "seq_before=5 seq_after=8 ticks_after=3 failed_fb=2 recovery_ok=true"
+      ]
+    },
+    "on_exceed": "Backend failure halts orchestrator control loop → system runs open-loop → no scaling decisions made",
+    "answered_questions": {
+      "what_chaos_was_injected": "httptest.Server closed for the HTTP actuator backend mid-operation",
+      "why_this_threshold": "\u003e=3 ticks: control loop must be completely independent of actuator health",
+      "what_happens_if_it_fails": "Backend failure causes goroutine panic → control loop stops → no scaling decisions",
+      "how_chaos_was_injected": "backendSrv.Close() after warmup; orchestrator continues dispatching to dead server",
+      "how_recovery_was_verified": "New backend server + router.AddRoute() + manual Dispatch(9999) succeeds",
+      "production_equivalent": "Kubernetes pod killed for actuator sidecar / external scaling API goes down"
+    },
+    "run_at": "2026-06-25T09:52:20Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-004",
+    "layer": 7,
+    "name": "10 concurrent goroutines (Broadcast/Ingest/Prune/Dispatch/HTTP) + context cancel",
+    "aim": "Concurrent cancel while all operations active: zero panics",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/streaming",
+      "internal/telemetry",
+      "internal/actuator",
+      "internal/api"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "No concurrent access pattern during shutdown must cause panic"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "10 goroutines concurrent with context cancel after 300ms",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 604,
+      "error_messages": [
+        "panics=0"
+      ]
+    },
+    "on_exceed": "Race condition during shutdown causes panic → process crash → Kubernetes restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "10 goroutines running concurrent operations cancelled after 300ms",
+      "why_this_threshold": "Zero panics: any panic during shutdown is a bug — send-on-closed-channel, nil dereference etc",
+      "what_happens_if_it_fails": "Shutdown races cause panics → OOM or crash during graceful termination",
+      "how_chaos_was_injected": "10 goroutines each doing different ops; cancel after 300ms while all active",
+      "how_recovery_was_verified": "N/A — concurrent safety test",
+      "production_equivalent": "Multiple dashboard clients + active control loop + SIGTERM simultaneously"
+    },
+    "run_at": "2026-06-25T09:52:21Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-005",
+    "layer": 7,
+    "name": "Memory pressure soak: 5000 events/s for 1m0s",
+    "aim": "heap_growth\u003c=2.0x, orch_ticks\u003e=150, panics==0 under 5000 events/s for 60s",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "heap_growth_factor",
+      "operator": "\u003c=",
+      "value": 4,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffers + Go runtime overhead. Measured post-shutdown post-GC."
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.3237527211213784,
+      "actual_unit": "heap_growth_factor",
+      "chaos_injected": "5000 events/s sustained for 1m0s",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 162,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 65551,
+      "error_messages": [
+        "heap_before=1925KB heap_after=623KB growth=0.3238x ticks=162 min_ticks=150 panics=0"
+      ]
+    },
+    "on_exceed": "Memory leak in hot path → heap grows proportional to ingestion → OOM kill → restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "5000 events/s for 1m0s via Store.Ingest while Orchestrator ticks",
+      "why_this_threshold": "2.0x: ring buffers are fixed-size; growth beyond 2x means entries retained beyond capacity",
+      "what_happens_if_it_fails": "Memory grows proportional to ingestion → OOM kill → CrashLoopBackOff in Kubernetes",
+      "how_chaos_was_injected": "1ms ticker × 5 events/tick = 5,000/s across 10 services; orchestrator ticking at 200ms simultaneously",
+      "how_recovery_was_verified": "N/A — steady-state soak test",
+      "production_equivalent": "Production traffic spike with sustained high ingestion rate"
+    },
+    "run_at": "2026-06-25T09:53:26Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-006",
+    "layer": 7,
+    "name": "Clock skew in telemetry timestamps: staleness detection and nil-safety",
+    "aim": "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
+    "packages_involved": [
+      "internal/telemetry",
+      "internal/runtime"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Clock skew is inevitable in distributed systems — must be handled gracefully"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "MetricPoints with +1h (future), -10min (past), zero timestamps",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 555,
+      "error_messages": [
+        "panics=0 past_rejected=true normal_accessible=true all_windows=3"
+      ]
+    },
+    "on_exceed": "Clock skew from NTP resync or distributed system drift causes panic in telemetry pipeline",
+    "answered_questions": {
+      "what_chaos_was_injected": "MetricPoints with timestamps: now+1h (future), now-10min (beyond staleAge=30s), time.Time{} (zero)",
+      "why_this_threshold": "Zero panics: Store.Ingest and Store.Window must handle any timestamp without crashing",
+      "what_happens_if_it_fails": "NTP resync or node clock jump causes MetricPoint with bad timestamp → panic → store crash",
+      "how_chaos_was_injected": "Direct Store.Ingest with crafted MetricPoint.Timestamp values",
+      "how_recovery_was_verified": "Normal service still accessible via AllWindows after skewed entries injected",
+      "production_equivalent": "NTP resync causing clock jump, or replica pod with wrong system time"
+    },
+    "run_at": "2026-06-25T09:53:27Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-001",
+    "layer": 7,
+    "name": "Full system graceful shutdown under active telemetry load",
+    "aim": "SIGTERM: shutdown within 10000ms, goroutine_leak\u003c=5, HTTP stops accepting",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/api",
+      "internal/streaming",
+      "internal/actuator",
+      "internal/telemetry"
+    ],
+    "threshold": {
+      "metric": "shutdown_duration_ms",
+      "operator": "\u003c=",
+      "value": 10000,
+      "unit": "ms",
+      "rationale": "Kubernetes terminationGracePeriodSeconds=30s; must complete well before SIGKILL"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 3,
+      "actual_unit": "shutdown_ms",
+      "chaos_injected": "context.Cancel() on full running system (SIGTERM equivalent)",
+      "goroutines_before": 2,
+      "goroutines_peak": 5,
+      "goroutines_after": 2,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 3,
+      "duration_ms": 2229,
+      "error_messages": [
+        "shutdown_ms=3 leaked=0 http_stopped=true ticks=10"
+      ]
+    },
+    "on_exceed": "Kubernetes SIGKILL after grace period → actuator commands not drained → physical system state diverges from controller model",
+    "answered_questions": {
+      "what_chaos_was_injected": "context.Cancel() while Orchestrator.Run is ticking with active telemetry",
+      "why_this_threshold": "10s shutdown: Kubernetes default terminationGracePeriodSeconds is 30s; must complete with margin",
+      "what_happens_if_it_fails": "Kubernetes force-kills process → actuator.drain() not called → pending directives lost",
+      "how_chaos_was_injected": "ts.Shutdown() calls orchCancel() + httpSrv.Close() + act.Close()",
+      "how_recovery_was_verified": "Goroutine count delta; HTTP connection refused after shutdown",
+      "production_equivalent": "kubectl delete pod / Kubernetes rolling update"
+    },
+    "run_at": "2026-06-25T09:53:29Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-002",
+    "layer": 7,
+    "name": "Orchestrator restart under live telemetry: Store windows survive",
+    "aim": "Kill+restart Orchestrator; Store retains 3 windows; new orch produces Bundles within 5 ticks",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "ticks_to_first_bundle_after_restart",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "ticks",
+      "rationale": "Restarted orchestrator must immediately use existing telemetry — not wait for cold warm-up"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "ticks_to_first_bundle",
+      "chaos_injected": "orchCancel() while system active; new runtime.New() with same Store",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2089,
+      "error_messages": [
+        "windows_before=3 windows_after=3 ticks_to_bundle=1 bundles_found=true"
+      ]
+    },
+    "on_exceed": "Restarted orchestrator starts cold → over-aggressive scale-down for first N ticks → service capacity reduced unnecessarily during restart recovery period",
+    "answered_questions": {
+      "what_chaos_was_injected": "orchestrator context cancelled; new runtime.New() created with same telemetry.Store",
+      "why_this_threshold": "5 ticks: Store.AllWindows() should return existing data immediately on first tick",
+      "what_happens_if_it_fails": "Controller restarts cold → N ticks of degraded decisions → temporary under-provisioning",
+      "how_chaos_was_injected": "orchCancel() stops Run() loop; same store passed to new runtime.New()",
+      "how_recovery_was_verified": "Hub.GetLastPayload().Bundles non-empty within 5 ticks of new orch start",
+      "production_equivalent": "Kubernetes pod OOM restart with persistent volume mount for telemetry"
+    },
+    "run_at": "2026-06-25T09:53:32Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-003",
+    "layer": 7,
+    "name": "Actuator backend killed mid-tick: orchestrator continues ticking",
+    "aim": "Kill HTTP backend; orchestrator must tick \u003e=3 more times; recovery dispatch succeeds",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/actuator",
+      "internal/actuator/backends"
+    ],
+    "threshold": {
+      "metric": "ticks_after_kill",
+      "operator": "\u003e=",
+      "value": 3,
+      "unit": "ticks",
+      "rationale": "Backend failure must not halt the control loop"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 3,
+      "actual_unit": "ticks_after_kill",
+      "chaos_injected": "httptest.Server.Close() for actuator backend mid-operation",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 8,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2083,
+      "error_messages": [
+        "seq_before=5 seq_after=8 ticks_after=3 failed_fb=0 recovery_ok=true"
+      ]
+    },
+    "on_exceed": "Backend failure halts orchestrator control loop → system runs open-loop → no scaling decisions made",
+    "answered_questions": {
+      "what_chaos_was_injected": "httptest.Server closed for the HTTP actuator backend mid-operation",
+      "why_this_threshold": "\u003e=3 ticks: control loop must be completely independent of actuator health",
+      "what_happens_if_it_fails": "Backend failure causes goroutine panic → control loop stops → no scaling decisions",
+      "how_chaos_was_injected": "backendSrv.Close() after warmup; orchestrator continues dispatching to dead server",
+      "how_recovery_was_verified": "New backend server + router.AddRoute() + manual Dispatch(9999) succeeds",
+      "production_equivalent": "Kubernetes pod killed for actuator sidecar / external scaling API goes down"
+    },
+    "run_at": "2026-06-25T10:38:28Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-004",
+    "layer": 7,
+    "name": "10 concurrent goroutines (Broadcast/Ingest/Prune/Dispatch/HTTP) + context cancel",
+    "aim": "Concurrent cancel while all operations active: zero panics",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/streaming",
+      "internal/telemetry",
+      "internal/actuator",
+      "internal/api"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "No concurrent access pattern during shutdown must cause panic"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "10 goroutines concurrent with context cancel after 300ms",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 733,
+      "error_messages": [
+        "panics=0"
+      ]
+    },
+    "on_exceed": "Race condition during shutdown causes panic → process crash → Kubernetes restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "10 goroutines running concurrent operations cancelled after 300ms",
+      "why_this_threshold": "Zero panics: any panic during shutdown is a bug — send-on-closed-channel, nil dereference etc",
+      "what_happens_if_it_fails": "Shutdown races cause panics → OOM or crash during graceful termination",
+      "how_chaos_was_injected": "10 goroutines each doing different ops; cancel after 300ms while all active",
+      "how_recovery_was_verified": "N/A — concurrent safety test",
+      "production_equivalent": "Multiple dashboard clients + active control loop + SIGTERM simultaneously"
+    },
+    "run_at": "2026-06-25T10:38:29Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-005",
+    "layer": 7,
+    "name": "Memory pressure soak: 5000 events/s for 1m0s",
+    "aim": "heap_growth\u003c=2.0x, orch_ticks\u003e=150, panics==0 under 5000 events/s for 60s",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "heap_growth_factor",
+      "operator": "\u003c=",
+      "value": 4,
+      "unit": "ratio",
+      "rationale": "Fixed-size ring buffers + Go runtime overhead. Measured post-shutdown post-GC."
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0.33293955310658657,
+      "actual_unit": "heap_growth_factor",
+      "chaos_injected": "5000 events/s sustained for 1m0s",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 184,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 66321,
+      "error_messages": [
+        "heap_before=1898KB heap_after=632KB growth=0.3329x ticks=184 min_ticks=150 panics=0"
+      ]
+    },
+    "on_exceed": "Memory leak in hot path → heap grows proportional to ingestion → OOM kill → restart loop",
+    "answered_questions": {
+      "what_chaos_was_injected": "5000 events/s for 1m0s via Store.Ingest while Orchestrator ticks",
+      "why_this_threshold": "2.0x: ring buffers are fixed-size; growth beyond 2x means entries retained beyond capacity",
+      "what_happens_if_it_fails": "Memory grows proportional to ingestion → OOM kill → CrashLoopBackOff in Kubernetes",
+      "how_chaos_was_injected": "1ms ticker × 5 events/tick = 5,000/s across 10 services; orchestrator ticking at 200ms simultaneously",
+      "how_recovery_was_verified": "N/A — steady-state soak test",
+      "production_equivalent": "Production traffic spike with sustained high ingestion rate"
+    },
+    "run_at": "2026-06-25T10:39:36Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-006",
+    "layer": 7,
+    "name": "Clock skew in telemetry timestamps: staleness detection and nil-safety",
+    "aim": "Future (+1h), past (-10min), zero timestamps: no panics; stale entries rejected; normal entries accessible",
+    "packages_involved": [
+      "internal/telemetry",
+      "internal/runtime"
+    ],
+    "threshold": {
+      "metric": "panics",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Clock skew is inevitable in distributed systems — must be handled gracefully"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "panics",
+      "chaos_injected": "MetricPoints with +1h (future), -10min (past), zero timestamps",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 0,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 481,
+      "error_messages": [
+        "panics=0 past_rejected=true normal_accessible=true all_windows=3"
+      ]
+    },
+    "on_exceed": "Clock skew from NTP resync or distributed system drift causes panic in telemetry pipeline",
+    "answered_questions": {
+      "what_chaos_was_injected": "MetricPoints with timestamps: now+1h (future), now-10min (beyond staleAge=30s), time.Time{} (zero)",
+      "why_this_threshold": "Zero panics: Store.Ingest and Store.Window must handle any timestamp without crashing",
+      "what_happens_if_it_fails": "NTP resync or node clock jump causes MetricPoint with bad timestamp → panic → store crash",
+      "how_chaos_was_injected": "Direct Store.Ingest with crafted MetricPoint.Timestamp values",
+      "how_recovery_was_verified": "Normal service still accessible via AllWindows after skewed entries injected",
+      "production_equivalent": "NTP resync causing clock jump, or replica pod with wrong system time"
+    },
+    "run_at": "2026-06-25T10:39:36Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-001",
+    "layer": 7,
+    "name": "Full system graceful shutdown under active telemetry load",
+    "aim": "SIGTERM: shutdown within 10000ms, goroutine_leak\u003c=5, HTTP stops accepting",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/api",
+      "internal/streaming",
+      "internal/actuator",
+      "internal/telemetry"
+    ],
+    "threshold": {
+      "metric": "shutdown_duration_ms",
+      "operator": "\u003c=",
+      "value": 10000,
+      "unit": "ms",
+      "rationale": "Kubernetes terminationGracePeriodSeconds=30s; must complete well before SIGKILL"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 0,
+      "actual_unit": "shutdown_ms",
+      "chaos_injected": "context.Cancel() on full running system (SIGTERM equivalent)",
+      "goroutines_before": 2,
+      "goroutines_peak": 5,
+      "goroutines_after": 2,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2210,
+      "error_messages": [
+        "shutdown_ms=0 leaked=0 http_stopped=true ticks=10"
+      ]
+    },
+    "on_exceed": "Kubernetes SIGKILL after grace period → actuator commands not drained → physical system state diverges from controller model",
+    "answered_questions": {
+      "what_chaos_was_injected": "context.Cancel() while Orchestrator.Run is ticking with active telemetry",
+      "why_this_threshold": "10s shutdown: Kubernetes default terminationGracePeriodSeconds is 30s; must complete with margin",
+      "what_happens_if_it_fails": "Kubernetes force-kills process → actuator.drain() not called → pending directives lost",
+      "how_chaos_was_injected": "ts.Shutdown() calls orchCancel() + httpSrv.Close() + act.Close()",
+      "how_recovery_was_verified": "Goroutine count delta; HTTP connection refused after shutdown",
+      "production_equivalent": "kubectl delete pod / Kubernetes rolling update"
+    },
+    "run_at": "2026-06-25T10:39:38Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L7-CHAOS-002",
+    "layer": 7,
+    "name": "Orchestrator restart under live telemetry: Store windows survive",
+    "aim": "Kill+restart Orchestrator; Store retains 3 windows; new orch produces Bundles within 5 ticks",
+    "packages_involved": [
+      "internal/runtime",
+      "internal/telemetry",
+      "internal/streaming"
+    ],
+    "threshold": {
+      "metric": "ticks_to_first_bundle_after_restart",
+      "operator": "\u003c=",
+      "value": 5,
+      "unit": "ticks",
+      "rationale": "Restarted orchestrator must immediately use existing telemetry — not wait for cold warm-up"
+    },
+    "result": {
+      "status": "PASS",
+      "actual_value": 1,
+      "actual_unit": "ticks_to_first_bundle",
+      "chaos_injected": "orchCancel() while system active; new runtime.New() with same Store",
+      "goroutines_before": 0,
+      "goroutines_peak": 0,
+      "goroutines_after": 0,
+      "goroutines_leaked": 0,
+      "ticks_completed": 10,
+      "panics_detected": 0,
+      "shutdown_duration_ms": 0,
+      "duration_ms": 2003,
+      "error_messages": [
+        "windows_before=3 windows_after=3 ticks_to_bundle=1 bundles_found=true"
+      ]
+    },
+    "on_exceed": "Restarted orchestrator starts cold → over-aggressive scale-down for first N ticks → service capacity reduced unnecessarily during restart recovery period",
+    "answered_questions": {
+      "what_chaos_was_injected": "orchestrator context cancelled; new runtime.New() created with same telemetry.Store",
+      "why_this_threshold": "5 ticks: Store.AllWindows() should return existing data immediately on first tick",
+      "what_happens_if_it_fails": "Controller restarts cold → N ticks of degraded decisions → temporary under-provisioning",
+      "how_chaos_was_injected": "orchCancel() stops Run() loop; same store passed to new runtime.New()",
+      "how_recovery_was_verified": "Hub.GetLastPayload().Bundles non-empty within 5 ticks of new orch start",
+      "production_equivalent": "Kubernetes pod OOM restart with persistent volume mount for telemetry"
+    },
+    "run_at": "2026-06-25T10:39:40Z",
+    "go_version": "go1.26.0"
   }
 ]

@@ -147,7 +147,7 @@ func newOrchestrator(dt float64, maxCapacity float64) *ap.RuntimeOrchestrator {
 		IterModifier:  1.0,
 	}
 
-	safety := &ap.SafetyEngine{
+	safety := &ap.LegacySafetyEngine{
 		BaseMaxBacklog:     600.0,
 		BaseMaxLatency:     120.0,
 		Alpha:              1.0,

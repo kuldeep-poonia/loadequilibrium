@@ -17,6 +17,10 @@ type PhysicalQueueState struct {
 	delayBuffer        [3]float64
 	delayIdx           int
 	lastTickTime       time.Time
+
+	// Hybrid estimator state
+	historicalCapacity float64
+	confidenceEwma     float64
 }
 
 // QueuePhysicsEngine encapsulates the stateful Erlang-C fluid approximations.
@@ -34,8 +38,88 @@ type queueShard struct {
 	states map[string]*PhysicalQueueState
 }
 
+// ServiceRateEstimator encapsulates the logic for computing service capacity (mu).
+type ServiceRateEstimator interface {
+	Estimate(w *telemetry.ServiceWindow, st *PhysicalQueueState, c float64) (float64, float64) // Returns (Capacity, Confidence)
+}
+
+// LegacyServiceEstimator preserves the original 700.0 RPS hardcoded baseline blending logic.
+type LegacyServiceEstimator struct{}
+
+func (l *LegacyServiceEstimator) Estimate(w *telemetry.ServiceWindow, st *PhysicalQueueState, c float64) (float64, float64) {
+	effectiveLatency := w.MeanLatencyMs
+	if effectiveLatency <= 0 {
+		effectiveLatency = 50.0
+	}
+	if st.accumulatedBacklog > 10000.0 && effectiveLatency > 500.0 {
+		effectiveLatency = 500.0
+	}
+
+	hazardFactor := math.Exp(-w.Hazard * 0.1)
+	baselineServicePerServer := 700.0
+	latencyServicePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
+
+	hazardWeight := math.Min(w.Hazard, 1.0)
+	if hazardWeight > 0.5 {
+		hazardWeight = 0.5 + (hazardWeight-0.5)*0.2
+	}
+	serviceRatePerServer := hazardWeight*latencyServicePerServer + (1.0-hazardWeight)*baselineServicePerServer
+
+	appliedScale := 1.0
+	if w.AppliedScale > 0 {
+		appliedScale = w.AppliedScale
+	}
+	return serviceRatePerServer * c * appliedScale, 0.5 // Static legacy confidence
+}
+
+// HybridServiceEstimator combines Little's Law, observed departure rate, and historical momentum.
+type HybridServiceEstimator struct {
+	AlphaThroughput float64
+}
+
+func (h *HybridServiceEstimator) Estimate(w *telemetry.ServiceWindow, st *PhysicalQueueState, c float64) (float64, float64) {
+	effectiveLatency := math.Max(w.MeanLatencyMs, 1.0)
+	
+	// 1. Little's Law derived capacity (best during low load/empty queue)
+	latencyMu := (1000.0 / effectiveLatency) * c
+
+	// 2. Observed throughput (best during high load/saturation)
+	// Assuming w.MeanRequestRate is departure rate when saturated.
+	throughputMu := w.MeanRequestRate
+
+	// 3. Weighting based on queue saturation
+	// If Queue > Concurrency, we are highly saturated -> Throughput is a reliable max capacity.
+	// If Queue == 0, Throughput is just arrival rate (meaningless for capacity) -> use Latency.
+	saturationRatio := math.Min(st.accumulatedBacklog / math.Max(c, 1.0), 1.0)
+	
+	estMu := (1.0 - saturationRatio) * latencyMu + saturationRatio * throughputMu
+
+	if st.confidenceEwma == 0 {
+		st.confidenceEwma = 1.0 // Initialize to fully confident
+	}
+
+	// 4. EWMA Momentum to prevent oscillation
+	if st.historicalCapacity == 0 {
+		st.historicalCapacity = estMu
+	} else {
+		st.historicalCapacity = 0.2*estMu + 0.8*st.historicalCapacity
+	}
+
+	appliedScale := 1.0
+	if w.AppliedScale > 0 {
+		appliedScale = w.AppliedScale
+	}
+
+	// Confidence drops if variance is high or hazard is high
+	confidence := 1.0 - math.Min(w.Hazard, 0.9)
+	st.confidenceEwma = 0.1*confidence + 0.9*st.confidenceEwma
+
+	return st.historicalCapacity * appliedScale, st.confidenceEwma
+}
+
 type QueuePhysicsEngine struct {
 	shards [queueShards]queueShard
+	ServiceStrategy ServiceRateEstimator
 }
 
 func queueShardFor(id string) int {
@@ -48,7 +132,9 @@ func queueShardFor(id string) int {
 }
 
 func NewQueuePhysicsEngine() *QueuePhysicsEngine {
-	pe := &QueuePhysicsEngine{}
+	pe := &QueuePhysicsEngine{
+		ServiceStrategy: &HybridServiceEstimator{AlphaThroughput: 1.0},
+	}
 	for i := range pe.shards {
 		pe.shards[i].states = make(map[string]*PhysicalQueueState, 8)
 	}
@@ -128,30 +214,13 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	}
 	m.ArrivalRate = st.arrivalMomentum
 
-	effectiveLatency := w.MeanLatencyMs
-	if effectiveLatency <= 0 {
-		effectiveLatency = 50.0
+	// Execute Strategy Pattern for Service Rate
+	if pe.ServiceStrategy == nil {
+		pe.ServiceStrategy = &LegacyServiceEstimator{}
 	}
-	if st.accumulatedBacklog > 10000.0 && effectiveLatency > 500.0 {
-		effectiveLatency = 500.0
-	}
-
-	hazardFactor := math.Exp(-w.Hazard * 0.1)
-
-	baselineServicePerServer := 700.0
-	latencyServicePerServer := (1000.0 / math.Max(effectiveLatency, 1e-3)) * hazardFactor
-
-	hazardWeight := math.Min(w.Hazard, 1.0)
-	if hazardWeight > 0.5 {
-		hazardWeight = 0.5 + (hazardWeight-0.5)*0.2
-	}
-	serviceRatePerServer := hazardWeight*latencyServicePerServer + (1.0-hazardWeight)*baselineServicePerServer
-
-	appliedScale := 1.0
-	if w.AppliedScale > 0 {
-		appliedScale = w.AppliedScale
-	}
-	m.ServiceRate = serviceRatePerServer * c * appliedScale
+	estMu, estConf := pe.ServiceStrategy.Estimate(w, st, c)
+	m.ServiceRate = estMu
+	m.Confidence = m.Confidence * estConf
 
 	// Removed: log.Printf("[service-rate-coupling] ...") — was 1 alloc+write per service per tick.
 
@@ -166,9 +235,11 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 	if m.Utilisation > 1.0 && m.ServiceRate > 0 {
 		m.MeanWaitMs = (m.MeanQueueLen / m.ServiceRate) * 1000.0
 	} else {
-		a := m.ArrivalRate / serviceRatePerServer
+		// Use effective per-server service rate for Erlang-C
+		perServerMu := m.ServiceRate / c
+		a := m.ArrivalRate / perServerMu
 		erlangC := ComputeErlangC(c, a)
-		denom := c * serviceRatePerServer * (1.0 - m.Utilisation)
+		denom := m.ServiceRate * (1.0 - m.Utilisation)
 		if denom > 0 {
 			m.MeanWaitMs = (erlangC / denom) * 1000.0
 		} else {
@@ -176,7 +247,7 @@ func (pe *QueuePhysicsEngine) RunQueueModel(w *telemetry.ServiceWindow, topoSnap
 		}
 	}
 	m.AdjustedWaitMs = m.MeanWaitMs
-	m.MeanSojournMs = m.MeanWaitMs + effectiveLatency
+	m.MeanSojournMs = m.MeanWaitMs + math.Max(w.MeanLatencyMs, 1.0) // Fix effectiveLatency reference
 	m.BurstFactor = 1.0
 
 	rawTrend := utilTrendRegression(w, m.ServiceRate)

@@ -274,7 +274,7 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		Iters:         40, // minimum for SA to explore meaningfully; effectiveIters() can scale this up
 	}
 
-	safety := &autopilot.SafetyEngine{
+	safety := &autopilot.LegacySafetyEngine{
 		BaseMaxBacklog:     2000,
 		BaseMaxLatency:     2500,
 		Alpha:              0.4,
@@ -292,6 +292,17 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		TerminalEnergyBase: 1e6,
 		ContractionSlack:   0.2,
 		HysteresisBand:     0.05,
+	}
+
+	cbfSafety := &autopilot.CBFSafetyEngine{
+		BaseMaxBacklog: 2000,
+		TimeStep:       tickSec,
+		EffectTau:      1.0,
+	}
+
+	safetyShadow := &autopilot.ShadowSafetyEngine{
+		Legacy: safety,
+		CBF:    cbfSafety,
 	}
 
 	rollout := &autopilot.RolloutController{
@@ -345,9 +356,13 @@ func (p *phaseRuntime) ensureService(id string) *phaseServiceRuntime {
 		Dt:                tickSec,
 		Predictor:         predictor,
 		MPC:               mpc,
-		Safety:            safety,
+		Safety:            safetyShadow,
 		Rollout:           rollout,
 		ID:                ident,
+		Confidence: &autopilot.ShadowConfidenceEstimator{
+			Legacy:   &autopilot.LegacyConfidenceEstimator{},
+			Logistic: autopilot.NewLogisticConfidenceEstimator(),
+		},
 		SLA_Backlog:       100,
 		OverrideWindow:    16,
 		DampingMin:        1.0,

@@ -79,8 +79,8 @@ func hardcorePredictor() *Predictor {
 	}
 }
 
-func hardcoreSafety() *SafetyEngine {
-	return &SafetyEngine{
+func hardcoreSafety() *LegacySafetyEngine {
+	return &LegacySafetyEngine{
 		BaseMaxBacklog: 1500,
 		BaseMaxLatency: 250,
 
@@ -246,7 +246,8 @@ func runScenario(t *testing.T, seed int64, steps int, scenario string) (KPI, []m
 			ControlEffectiveness: eff,
 			Oscillation:          osc,
 		}
-		conf, newConfState := ComputeConfidence(prevConfState, confInput)
+		estimator := &LegacyConfidenceEstimator{}
+		conf, newConfState, _ := estimator.Estimate(confInput, prevConfState)
 		prevConfState = newConfState
 		conf *= (0.5 + 0.5*stab)
 

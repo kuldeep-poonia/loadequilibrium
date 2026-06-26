@@ -185,7 +185,7 @@ func runScenario(name string) RunLog {
 			MaxCapacity:   50,
 			MinCapacity:   1,
 		},
-		Safety: &auto.SafetyEngine{
+		Safety: &auto.LegacySafetyEngine{
 			BaseMaxBacklog: 5000,
 			BaseMaxLatency: 1000,
 		},

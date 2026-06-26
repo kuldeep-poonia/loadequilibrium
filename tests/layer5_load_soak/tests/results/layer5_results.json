@@ -631,5 +631,368 @@
     },
     "run_at": "2026-06-25T05:33:35Z",
     "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 9.792,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 5566273,
+      "throughput_rps": 18553.43935096146,
+      "error_count": 5056953,
+      "error_rate": 0.9084989183965645,
+      "duration_ms": 300013,
+      "error_messages": [
+        "GET /api/v1/snapshot: FAIL p99=9.79ms (threshold=50ms) unexpected=505706",
+        "POST /api/v1/control/toggle: FAIL p99=9.20ms (threshold=50ms) unexpected=505689",
+        "POST /api/v1/control/chaos-run: FAIL p99=9.17ms (threshold=50ms) unexpected=505688",
+        "POST /api/v1/control/replay-burst: FAIL p99=9.18ms (threshold=50ms) unexpected=505698",
+        "POST /api/v1/policy/update: FAIL p99=9.31ms (threshold=50ms) unexpected=505677",
+        "POST /api/v1/runtime/step: FAIL p99=9.27ms (threshold=50ms) unexpected=505693",
+        "POST /api/v1/sandbox/trigger: FAIL p99=9.28ms (threshold=50ms) unexpected=505687",
+        "POST /api/v1/simulation/control: FAIL p99=9.32ms (threshold=50ms) unexpected=505724",
+        "POST /api/v1/intelligence/rollout: FAIL p99=9.28ms (threshold=50ms) unexpected=505704",
+        "POST /api/v1/alerts/ack: FAIL p99=9.23ms (threshold=50ms) unexpected=505687"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=9.79ms across all endpoints"
+    },
+    "run_at": "2026-06-25T07:55:32Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 6383,
+      "error_messages": [
+        "snapshot_no_data: requests=10000 status_mismatch=9693 json_mismatch=0 panics=0",
+        "policy_update: requests=10000 status_mismatch=9993 json_mismatch=0 panics=0",
+        "runtime_step: requests=10000 status_mismatch=9993 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=10000 status_mismatch=9992 json_mismatch=0 panics=0",
+        "sim_control: requests=10000 status_mismatch=9991 json_mismatch=0 panics=0",
+        "intel_rollout: requests=10000 status_mismatch=9992 json_mismatch=0 panics=0",
+        "alerts_ack: requests=10000 status_mismatch=9993 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=10000 status_mismatch=9992 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "snapshot_no_data: requests=10000 status_mismatch=9693 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-06-25T07:55:38Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 26.854,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 2540299,
+      "throughput_rps": 8467.550432660897,
+      "error_count": 2306065,
+      "error_rate": 0.9077927440824879,
+      "duration_ms": 300004,
+      "error_messages": [
+        "GET /api/v1/snapshot: FAIL p99=26.85ms (threshold=50ms) unexpected=230616",
+        "POST /api/v1/control/toggle: FAIL p99=25.85ms (threshold=50ms) unexpected=230575",
+        "POST /api/v1/control/chaos-run: FAIL p99=25.60ms (threshold=50ms) unexpected=230602",
+        "POST /api/v1/control/replay-burst: FAIL p99=26.07ms (threshold=50ms) unexpected=230598",
+        "POST /api/v1/policy/update: FAIL p99=26.59ms (threshold=50ms) unexpected=230584",
+        "POST /api/v1/runtime/step: FAIL p99=26.33ms (threshold=50ms) unexpected=230662",
+        "POST /api/v1/sandbox/trigger: FAIL p99=26.42ms (threshold=50ms) unexpected=230580",
+        "POST /api/v1/simulation/control: FAIL p99=26.50ms (threshold=50ms) unexpected=230606",
+        "POST /api/v1/intelligence/rollout: FAIL p99=26.19ms (threshold=50ms) unexpected=230651",
+        "POST /api/v1/alerts/ack: FAIL p99=26.19ms (threshold=50ms) unexpected=230591"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=26.85ms across all endpoints"
+    },
+    "run_at": "2026-06-25T09:33:40Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 13701,
+      "error_messages": [
+        "snapshot_no_data: requests=10000 status_mismatch=9685 json_mismatch=0 panics=0",
+        "policy_update: requests=10000 status_mismatch=9982 json_mismatch=0 panics=0",
+        "runtime_step: requests=10000 status_mismatch=9983 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=10000 status_mismatch=9983 json_mismatch=0 panics=0",
+        "sim_control: requests=10000 status_mismatch=9987 json_mismatch=0 panics=0",
+        "intel_rollout: requests=10000 status_mismatch=9988 json_mismatch=0 panics=0",
+        "alerts_ack: requests=10000 status_mismatch=9988 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=10000 status_mismatch=9977 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "snapshot_no_data: requests=10000 status_mismatch=9685 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-06-25T09:33:54Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001",
+    "layer": 5,
+    "name": "REST API endpoint soak — all routes, 50 concurrent workers, 5 minutes",
+    "aim": "All 11 endpoints must respond within p99\u003c50ms with zero unexpected status codes for 5 minutes under 50 concurrent workers",
+    "packages_involved": [
+      "internal/api",
+      "internal/streaming",
+      "internal/telemetry"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "GET /health",
+      "GET /api/v1/snapshot",
+      "POST /api/v1/control/*",
+      "POST /api/v1/policy/update",
+      "POST /api/v1/runtime/step",
+      "POST /api/v1/sandbox/trigger",
+      "POST /api/v1/simulation/control",
+      "POST /api/v1/intelligence/rollout",
+      "POST /api/v1/alerts/ack"
+    ],
+    "threshold": {
+      "metric": "p99_latency_ms",
+      "operator": "\u003c",
+      "value": 50,
+      "unit": "ms",
+      "rationale": "Dashboard polls these endpoints for operator actions — p99\u003e50ms causes visible lag"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 45.327,
+      "actual_unit": "worst_p99_ms",
+      "sample_count": 1970824,
+      "throughput_rps": 6569.325742323435,
+      "error_count": 1788362,
+      "error_rate": 0.9074184199096419,
+      "duration_ms": 300004,
+      "error_messages": [
+        "GET /api/v1/snapshot: FAIL p99=44.70ms (threshold=50ms) unexpected=178821",
+        "POST /api/v1/control/toggle: FAIL p99=44.59ms (threshold=50ms) unexpected=178781",
+        "POST /api/v1/control/chaos-run: FAIL p99=43.98ms (threshold=50ms) unexpected=178800",
+        "POST /api/v1/control/replay-burst: FAIL p99=43.96ms (threshold=50ms) unexpected=178810",
+        "POST /api/v1/policy/update: FAIL p99=44.32ms (threshold=50ms) unexpected=178830",
+        "POST /api/v1/runtime/step: FAIL p99=43.54ms (threshold=50ms) unexpected=178893",
+        "POST /api/v1/sandbox/trigger: FAIL p99=45.04ms (threshold=50ms) unexpected=178863",
+        "POST /api/v1/simulation/control: FAIL p99=44.52ms (threshold=50ms) unexpected=178886",
+        "POST /api/v1/intelligence/rollout: FAIL p99=44.47ms (threshold=50ms) unexpected=178859",
+        "POST /api/v1/alerts/ack: FAIL p99=45.33ms (threshold=50ms) unexpected=178819"
+      ]
+    },
+    "on_exceed": "Dashboard operator actions (policy update, simulation control, alert ack) experience visible latency or errors — control room responsiveness degraded",
+    "answered_questions": {
+      "what_was_tested": "11 endpoints with 50 concurrent workers for 5 minutes via httptest.Server backed by real api.NewServer",
+      "why_this_threshold": "p99\u003c50ms: operators expect sub-100ms response from control actions; 50ms leaves headroom for network",
+      "what_happens_if_it_fails": "Dashboard buttons feel sluggish or timeout — operator cannot respond quickly to incidents",
+      "how_load_was_generated": "50 goroutines round-robining across all endpoints; real http.Client with 5s timeout",
+      "how_metrics_were_measured": "Wall-clock time per request measured by caller; p50/p95/p99/p100 computed from sorted slice",
+      "worst_case_description": "worst p99=45.33ms across all endpoints"
+    },
+    "run_at": "2026-06-25T09:57:16Z",
+    "go_version": "go1.26.0"
+  },
+  {
+    "test_id": "L5-API-001b",
+    "layer": 5,
+    "name": "Server correctness under 10k requests per endpoint",
+    "aim": "10000 requests per endpoint × 10 endpoints: correct status codes and JSON response bodies throughout",
+    "packages_involved": [
+      "internal/api"
+    ],
+    "functions_tested": [
+      "api.NewServer",
+      "(*Server).Handler",
+      "(*Server).handleControl",
+      "(*Server).handlePolicyUpdate",
+      "(*Server).handleRuntimeStep",
+      "(*Server).handleSandboxTrigger",
+      "(*Server).handleSimulationControl",
+      "(*Server).handleIntelligenceRollout",
+      "(*Server).handleAlertAck",
+      "(*Server).handleSnapshot"
+    ],
+    "threshold": {
+      "metric": "status_and_json_mismatches",
+      "operator": "==",
+      "value": 0,
+      "unit": "count",
+      "rationale": "Every request must return the exact documented response"
+    },
+    "result": {
+      "status": "FAIL",
+      "actual_value": 0,
+      "actual_unit": "mismatches",
+      "sample_count": 100000,
+      "duration_ms": 15916,
+      "error_messages": [
+        "snapshot_no_data: requests=10000 status_mismatch=9695 json_mismatch=0 panics=0",
+        "policy_update: requests=10000 status_mismatch=9956 json_mismatch=0 panics=0",
+        "runtime_step: requests=10000 status_mismatch=9986 json_mismatch=0 panics=0",
+        "sandbox_trigger: requests=10000 status_mismatch=9981 json_mismatch=0 panics=0",
+        "sim_control: requests=10000 status_mismatch=9981 json_mismatch=0 panics=0",
+        "intel_rollout: requests=10000 status_mismatch=9981 json_mismatch=0 panics=0",
+        "alerts_ack: requests=10000 status_mismatch=9987 json_mismatch=0 panics=0",
+        "health_wrong_method: requests=10000 status_mismatch=10000 json_mismatch=0 panics=0",
+        "runtime_step_wrong_method: requests=10000 status_mismatch=9982 json_mismatch=0 panics=0"
+      ]
+    },
+    "on_exceed": "Server returns wrong status codes or invalid JSON under load — dashboard receives malformed responses",
+    "answered_questions": {
+      "what_was_tested": "10 endpoints × 10000 requests = 100000 total",
+      "why_this_threshold": "Zero tolerance — every request must return exactly the documented response shape",
+      "what_happens_if_it_fails": "Dashboard JavaScript fails to parse response → UI shows error state",
+      "how_load_was_generated": "20 concurrent goroutines via semaphore",
+      "how_metrics_were_measured": "HTTP status code + JSON field check per response",
+      "worst_case_description": "snapshot_no_data: requests=10000 status_mismatch=9695 json_mismatch=0 panics=0"
+    },
+    "run_at": "2026-06-25T09:57:32Z",
+    "go_version": "go1.26.0"
   }
 ]

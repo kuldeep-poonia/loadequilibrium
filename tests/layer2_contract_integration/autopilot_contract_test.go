@@ -23,7 +23,7 @@ func TestL2_AUTO_001_SafetyOverrideFires(t *testing.T) {
 	start := time.Now()
 	const N = 1000
 
-	se := &autopilot.SafetyEngine{
+	se := &autopilot.LegacySafetyEngine{
 		BaseMaxBacklog:     100,
 		BaseMaxLatency:     50,
 		Alpha:              0.5,
@@ -120,7 +120,7 @@ func TestL2_AUTO_002_PredictiveSafeNoFalseAlarm(t *testing.T) {
 	start := time.Now()
 	const N = 1000
 
-	se := &autopilot.SafetyEngine{
+	se := &autopilot.LegacySafetyEngine{
 		BaseMaxBacklog:     100,
 		BaseMaxLatency:     50,
 		Alpha:              0.5,
@@ -578,7 +578,7 @@ func buildDefaultOrchestrator() *autopilot.RuntimeOrchestrator {
 			MaxCapacity: 20, MinCapacity: 0.5, MaxStepCap: 2, MaxStepRetry: 0.5, MaxStepCache: 0.3,
 			InitTemp: 1.0, Cooling: 0.95, Iters: 50,
 		},
-		Safety: &autopilot.SafetyEngine{
+		Safety: &autopilot.LegacySafetyEngine{
 			BaseMaxBacklog: 100, BaseMaxLatency: 50,
 			Alpha: 0.5, Beta: 0.3,
 			ArrivalGain: 0.1, DisturbanceGain: 0.2, TopologyGain: 0.1, RetryGain: 0.05,

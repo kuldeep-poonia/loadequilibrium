@@ -75,9 +75,10 @@ type RuntimeOrchestrator struct {
 
 	Predictor *Predictor
 	MPC       *MPCOptimiser
-	Safety    *SafetyEngine
+	Safety SafetyStrategy
 	Rollout   *RolloutController
 	ID        *IdentificationEngine
+	Confidence ConfidenceEstimator
 
 	SLA_Backlog float64
 
@@ -286,7 +287,12 @@ func (r *RuntimeOrchestrator) Tick(
 		ControlEffectiveness: eff,
 		Oscillation:          oscScore,
 	}
-	confidenceScore, newConfState := ComputeConfidence(next.Engine.confState, confInput)
+	
+	if r.Confidence == nil {
+		r.Confidence = &LegacyConfidenceEstimator{}
+	}
+	
+	confidenceScore, newConfState, _ := r.Confidence.Estimate(confInput, next.Engine.confState)
 	next.Engine.confState = newConfState
 	// REMOVED: confidenceScore *= (0.5 + 0.5*stabScore)
 	// This was permanently halving confidence, causing irreversible fallback mode.
@@ -389,18 +395,19 @@ func (r *RuntimeOrchestrator) Tick(
 		s.Plant.Latency
 
 	// ---------- safety ----------
-	override, severity :=
-		r.Safety.ShouldOverrideProb(
+	overrideFlag := 0.0
+	if r.Safety != nil {
+		overridden, severity, _ := r.Safety.ShouldOverrideProb(
 			r.safetyState(s),
 			seq,
 			s.ID.ArrivalUpper,
 		)
-
-	overrideFlag := 0.0
-	if override {
-		overrideFlag = 1.0
-		// Preserve fallback capacity separately — NOT mixed into rate signal
-		next.LastFallbackCap = severity
+		
+		if overridden {
+			overrideFlag = 1.0
+						// Preserve fallback capacity separately — NOT mixed into rate signal
+			next.LastFallbackCap = severity
+		}
 	}
 	next.OverrideHistory = append(next.OverrideHistory, overrideFlag)
 
@@ -433,14 +440,16 @@ func (r *RuntimeOrchestrator) Tick(
 					overrideRate,
 			)
 
-	r.Safety.SetAdaptiveTightness(
-		next.SafetyTight,
-		s.Plant.Backlog,
-	)
+	if r.Safety != nil {
+		r.Safety.SetAdaptiveTightness(
+			next.SafetyTight,
+			s.Plant.Backlog,
+		)
+	}
 
 	// ---------- rollout ----------
 	effectiveControl := control
-	if override && next.LastFallbackCap > effectiveControl.CapacityTarget {
+	if overrideFlag > 0.0 && next.LastFallbackCap > effectiveControl.CapacityTarget {
 		effectiveControl.CapacityTarget = next.LastFallbackCap
 	}
 
@@ -449,7 +458,7 @@ func (r *RuntimeOrchestrator) Tick(
 			s.Rollout,
 			effectiveControl,
 			s.ID.ModelConfidence,
-			override,
+			overrideFlag > 0.0,
 			s.Plant.Backlog,
 			s.ID.StabilityPressure,
 			infraLoad,

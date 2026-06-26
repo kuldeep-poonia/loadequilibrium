@@ -100,7 +100,7 @@ func buildAdvisoryRuntime() *ap.RuntimeOrchestrator {
 			Cooling:       0.95,
 			Iters:         8,
 		},
-		Safety: &ap.SafetyEngine{
+		Safety: &ap.LegacySafetyEngine{
 			BaseMaxBacklog:     2000,
 			BaseMaxLatency:     2500,
 			Alpha:              0.4,
